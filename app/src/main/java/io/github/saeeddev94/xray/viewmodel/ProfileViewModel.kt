@@ -25,7 +25,9 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     val filtered = MutableSharedFlow<List<ProfileList>>()
 
     fun next(link: Long) = viewModelScope.launch {
-        val list = profiles.value.filter { link == 0L || link == it.link }
+        val all = profiles.value
+        fixIndex(all)
+        val list = all.filter { link == 0L || link == it.link }
         filtered.emit(list)
     }
 
@@ -55,5 +57,12 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
 
     suspend fun moveDown(start: Int, end: Int, exclude: Long) {
         profileRepository.moveDown(start, end, exclude)
+    }
+
+    private fun fixIndex(list: List<ProfileList>) = viewModelScope.launch {
+        list.forEachIndexed { index, profile ->
+            if (profile.index == index) return@forEachIndexed
+            profileRepository.updateIndex(index, profile.id)
+        }
     }
 }
