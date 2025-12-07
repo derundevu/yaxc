@@ -16,7 +16,7 @@ class ProfileTouchHelper(private var adapter: ProfileTouchCallback) : ItemTouchH
         recyclerView: RecyclerView,
         source: RecyclerView.ViewHolder,
         target: RecyclerView.ViewHolder
-    ): Boolean = adapter.onItemMoved(source.adapterPosition, target.adapterPosition)
+    ): Boolean = adapter.onItemMoved(source.absoluteAdapterPosition, target.absoluteAdapterPosition)
 
     override fun onSwiped(
         viewHolder: RecyclerView.ViewHolder,
@@ -29,14 +29,14 @@ class ProfileTouchHelper(private var adapter: ProfileTouchCallback) : ItemTouchH
         actionState: Int
     ) {
         if (actionState != ItemTouchHelper.ACTION_STATE_DRAG) return
-        startPosition = viewHolder!!.adapterPosition
+        startPosition = viewHolder!!.absoluteAdapterPosition
     }
 
     override fun clearView(
         recyclerView: RecyclerView,
         viewHolder: RecyclerView.ViewHolder
     ) {
-        val endPosition = viewHolder.adapterPosition
+        val endPosition = viewHolder.absoluteAdapterPosition
         adapter.onItemMoveCompleted(startPosition, endPosition)
     }
 
