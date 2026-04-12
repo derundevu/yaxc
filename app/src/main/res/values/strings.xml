@@ -1,5 +1,5 @@
 <resources>
-    <string name="appName">Xray</string>
+    <string name="appName">yaxc</string>
     <string name="noValue">-</string>
     <string name="drawerOpen">Open drawer</string>
     <string name="drawerClose">Close drawer</string>
@@ -11,7 +11,7 @@
     <string name="pingNotConnected">Not Connected</string>
     <string name="pingConnected">Connected, tap to check connection</string>
     <string name="pingTesting">Testing…</string>
-    <string name="appFullName">SaeedDev94/Xray</string>
+    <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">XTLS/Xray-core</string>
     <string name="tun2socksLabel">heiher/hev-socks5-tunnel</string>
     <string name="tun2socksVersion">2.14.4</string>

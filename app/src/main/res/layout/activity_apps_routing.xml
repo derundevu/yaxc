@@ -15,7 +15,7 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             android:background="@android:color/black">
-            <io.github.saeeddev94.xray.component.EmptySubmitSearchView
+            <io.github.derundevu.yaxc.component.EmptySubmitSearchView
                 android:id="@+id/search"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

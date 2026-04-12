@@ -13,5 +13,5 @@ dependencyResolutionManagement {
         maven { setUrl("https://jitpack.io")  }
     }
 }
-rootProject.name = "Xray"
+rootProject.name = "yaxc"
 include(":app")

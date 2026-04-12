@@ -19,7 +19,7 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <application
-        android:name=".Xray"
+        android:name=".Yaxc"
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:banner="@mipmap/banner"
@@ -41,6 +41,9 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="yaxc"
+                    android:host="import-profile" />
                 <data
                     android:scheme="xray"
                     android:host="import-profile" />
@@ -91,7 +94,7 @@
             </intent-filter>
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Xray VPN Service" />
+                android:value="yaxc VPN Service" />
         </service>
         <service
             android:name=".service.VpnTileService"
@@ -113,9 +116,9 @@
             android:name=".receiver.VpnActionReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="io.github.saeeddev94.xray.VpnStart" />
-                <action android:name="io.github.saeeddev94.xray.VpnStop" />
-                <action android:name="io.github.saeeddev94.xray.NewConfig" />
+                <action android:name="io.github.derundevu.yaxc.VpnStart" />
+                <action android:name="io.github.derundevu.yaxc.VpnStop" />
+                <action android:name="io.github.derundevu.yaxc.NewConfig" />
             </intent-filter>
         </receiver>
         <receiver

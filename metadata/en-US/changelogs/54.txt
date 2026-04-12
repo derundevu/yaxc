@@ -1,1 +1,1 @@
-- New package name `io.github.saeeddev94.xray`
+- New package name `io.github.derundevu.yaxc`

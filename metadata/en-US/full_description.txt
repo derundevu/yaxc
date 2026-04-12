@@ -1,1 +1,1 @@
-This is a simple GUI client for XTLS/Xray-core
+This is a simple GUI client for XTLS/Xray-core under the yaxc project

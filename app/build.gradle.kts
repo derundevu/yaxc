@@ -14,11 +14,11 @@ fun calcVersionCode(): Int {
 }
 
 android {
-    namespace = "io.github.saeeddev94.xray"
+    namespace = "io.github.derundevu.yaxc"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.saeeddev94.xray"
+        applicationId = "io.github.derundevu.yaxc"
         minSdk = 26
         targetSdk = 36
         versionCode = calcVersionCode()
@@ -59,7 +59,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("/tmp/xray.jks")
+            storeFile = file("/tmp/yaxc.jks")
             storePassword = System.getenv("KS_PASSWORD")
             keyAlias = System.getenv("KEY_ALIAS")
             keyPassword = System.getenv("KEY_PASSWORD")
