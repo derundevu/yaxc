@@ -2,16 +2,18 @@ package io.github.derundevu.yaxc.helper
 
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Config
+import org.json.JSONArray
 import org.json.JSONObject
 
 class ConfigHelper(
-    settings: Settings,
+    private val settings: Settings,
     config: Config,
     base: String,
 ) {
     private val base: JSONObject = JsonHelper.makeObject(base)
 
     init {
+        applyManagedRuntimeConfig()
         process("log", config.log, config.logMode)
         process("dns", config.dns, config.dnsMode)
         process("inbounds", config.inbounds, config.inboundsMode)
@@ -60,5 +62,106 @@ class ConfigHelper(
             }
         }
         base.put(key, inbounds)
+    }
+
+    private fun applyManagedRuntimeConfig() {
+        base.put("log", runtimeLog())
+        base.put("dns", runtimeDns())
+        base.put("inbounds", runtimeInbounds())
+        base.put("routing", runtimeRouting())
+    }
+
+    private fun runtimeLog(): JSONObject {
+        return JSONObject().put("loglevel", "warning")
+    }
+
+    private fun runtimeDns(): JSONObject {
+        return JSONObject().put(
+            "servers",
+            JSONArray().put(settings.primaryDns).put(settings.secondaryDns)
+        )
+    }
+
+    private fun runtimeInbounds(): JSONArray {
+        val inbounds = JSONArray()
+
+        val sniffing = JSONObject().apply {
+            put("enabled", true)
+            put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+        }
+
+        if (settings.transparentProxy) {
+            val tproxySockopt = JSONObject().put("tproxy", "tproxy")
+            val tproxyStreamSettings = JSONObject().put("sockopt", tproxySockopt)
+            val tproxySettings = JSONObject()
+                .put("network", "tcp,udp")
+                .put("followRedirect", true)
+
+            inbounds.put(
+                JSONObject()
+                    .put("listen", settings.tproxyAddress)
+                    .put("port", settings.tproxyPort)
+                    .put("protocol", "dokodemo-door")
+                    .put("settings", tproxySettings)
+                    .put("sniffing", sniffing)
+                    .put("streamSettings", tproxyStreamSettings)
+                    .put("tag", "all-in")
+            )
+            return inbounds
+        }
+
+        val socksSettings = JSONObject().put("udp", true)
+        val socksUsername = settings.socksUsername.trim()
+        val socksPassword = settings.socksPassword.trim()
+
+        if (socksUsername.isNotEmpty() && socksPassword.isNotEmpty()) {
+            val account = JSONObject()
+                .put("user", socksUsername)
+                .put("pass", socksPassword)
+            socksSettings.put("auth", "password")
+            socksSettings.put("accounts", JSONArray().put(account))
+        } else {
+            socksSettings.put("auth", "noauth")
+        }
+
+        inbounds.put(
+            JSONObject()
+                .put("listen", settings.socksAddress)
+                .put("port", settings.socksPort.toInt())
+                .put("protocol", "socks")
+                .put("settings", socksSettings)
+                .put("sniffing", sniffing)
+                .put("tag", "socks")
+        )
+
+        return inbounds
+    }
+
+    private fun runtimeRouting(): JSONObject {
+        val rules = JSONArray()
+
+        if (settings.transparentProxy) {
+            val proxyDns = JSONObject()
+                .put("network", "udp")
+                .put("port", 53)
+                .put("inboundTag", JSONArray().put("all-in"))
+                .put("outboundTag", "dns-out")
+            rules.put(proxyDns)
+        } else {
+            val proxyDns = JSONObject()
+                .put("ip", JSONArray().put(settings.primaryDns).put(settings.secondaryDns))
+                .put("port", 53)
+                .put("outboundTag", "proxy")
+            rules.put(proxyDns)
+        }
+
+        val directPrivate = JSONObject()
+            .put("ip", JSONArray().put("geoip:private"))
+            .put("outboundTag", "direct")
+        rules.put(directPrivate)
+
+        return JSONObject()
+            .put("domainStrategy", "IPIfNonMatch")
+            .put("rules", rules)
     }
 }

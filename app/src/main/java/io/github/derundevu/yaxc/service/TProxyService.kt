@@ -56,6 +56,10 @@ class TProxyService : VpnService() {
         private const val VPN_SERVICE_NOTIFICATION_ID = 1
         private const val OPEN_MAIN_ACTIVITY_ACTION_ID = 2
         private const val STOP_VPN_SERVICE_ACTION_ID = 3
+        @Volatile
+        private var serviceRunning: Boolean = false
+
+        fun isActive(): Boolean = serviceRunning
 
         fun status(context: Context) = startCommand(context, STATUS_VPN_SERVICE_ACTION_NAME)
         fun stop(context: Context) = startCommand(context, STOP_VPN_SERVICE_ACTION_NAME)
@@ -122,6 +126,7 @@ class TProxyService : VpnService() {
         scope.cancel()
         cellularCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
         cellularCallback = null
+        serviceRunning = false
         toast = null
         super.onDestroy()
     }
@@ -235,13 +240,7 @@ class TProxyService : VpnService() {
             }
 
             /** Apps Routing */
-            if (settings.appsRoutingMode) tun.addDisallowedApplication(applicationContext.packageName)
-            settings.appsRouting.split("\n").forEach {
-                val packageName = it.trim()
-                if (packageName.isBlank()) return@forEach
-                if (settings.appsRoutingMode) tun.addDisallowedApplication(packageName)
-                else tun.addAllowedApplication(packageName)
-            }
+            applyAppsRouting(tun)
 
             /** Build tun device */
             tunDevice = tun.establish()
@@ -299,6 +298,7 @@ class TProxyService : VpnService() {
         /** Broadcast start event */
         showToast("Start VPN")
         isRunning = true
+        serviceRunning = true
         broadcastStart(START_VPN_SERVICE_ACTION_NAME, name)
     }
 
@@ -311,11 +311,35 @@ class TProxyService : VpnService() {
             tunDevice = null
             isRunning = false
         }
+        serviceRunning = false
         stopXray()
         stopForeground(STOP_FOREGROUND_REMOVE)
         showToast("Stop VPN")
         broadcastStop()
         stopSelf()
+    }
+
+    private fun applyAppsRouting(tun: Builder) {
+        val selectedPackages = settings.appsRouting
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .filter { it != applicationContext.packageName }
+            .toSet()
+
+        if (settings.appsRoutingMode) {
+            tun.addDisallowedApplication(applicationContext.packageName)
+        }
+
+        selectedPackages.forEach { packageName ->
+            val result = runCatching {
+                if (settings.appsRoutingMode) tun.addDisallowedApplication(packageName)
+                else tun.addAllowedApplication(packageName)
+            }
+            result.exceptionOrNull()?.let { error ->
+                Log.w("TProxyService", "Skip apps routing package: $packageName", error)
+            }
+        }
     }
 
     private fun broadcastStart(action: String, configName: String) {

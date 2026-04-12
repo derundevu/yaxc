@@ -79,8 +79,8 @@ class AppsRoutingActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.appsRoutingSave -> saveAppsRouting()
-            R.id.appsRoutingExcludeMode -> setMode(false)
-            R.id.appsRoutingIncludeMode -> setMode(true)
+            R.id.appsRoutingExcludeMode -> setMode(true)
+            R.id.appsRoutingIncludeMode -> setMode(false)
             else -> finish()
         }
         return true
@@ -98,14 +98,14 @@ class AppsRoutingActivity : AppCompatActivity() {
         val includeItem = menu.findItem(R.id.appsRoutingIncludeMode)
         return when (this.appsRoutingMode) {
             true -> {
-                excludeItem.isVisible = true
-                includeItem.isVisible = false
+                excludeItem.isVisible = false
+                includeItem.isVisible = true
                 getString(R.string.appsRoutingExcludeMode)
             }
 
             false -> {
-                excludeItem.isVisible = false
-                includeItem.isVisible = true
+                excludeItem.isVisible = true
+                includeItem.isVisible = false
                 getString(R.string.appsRoutingIncludeMode)
             }
         }
@@ -137,22 +137,24 @@ class AppsRoutingActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val selected = ArrayList<AppList>()
             val unselected = ArrayList<AppList>()
+            val selectedPackages = selectedPackages()
             packageManager.getInstalledPackages(PackageManager.GET_PERMISSIONS).forEach {
                 val permissions = it.requestedPermissions
                 if (
                     permissions == null || !permissions.contains(Manifest.permission.INTERNET)
                 ) return@forEach
+                if (it.packageName == packageName) return@forEach
                 val appIcon = it.applicationInfo!!.loadIcon(packageManager)
                 val appName = it.applicationInfo!!.loadLabel(packageManager).toString()
                 val packageName = it.packageName
                 val app = AppList(appIcon, appName, packageName)
-                val isSelected = settings.appsRouting.contains(packageName)
+                val isSelected = selectedPackages.contains(packageName)
                 if (isSelected) selected.add(app) else unselected.add(app)
             }
             withContext(Dispatchers.Main) {
                 apps = ArrayList(selected + unselected)
                 filtered = apps.toMutableList()
-                appsRouting = settings.appsRouting.split("\n").toMutableSet()
+                appsRouting = selectedPackages.toMutableSet()
                 appsList = binding.appsList
                 appsRoutingAdapter = AppsRoutingAdapter(
                     this@AppsRoutingActivity, filtered, appsRouting
@@ -165,13 +167,18 @@ class AppsRoutingActivity : AppCompatActivity() {
 
     private fun saveAppsRouting() {
         val appsRoutingMode = this.appsRoutingMode
-        val appsRouting = this.appsRouting.joinToString("\n")
+        val appsRouting = this.appsRouting
+            .asSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .sorted()
+            .joinToString("\n")
 
         lifecycleScope.launch {
             val tproxySettingsChanged = settings.appsRoutingMode != appsRoutingMode ||
                     settings.appsRouting != appsRouting
-            val stopService = tproxySettingsChanged && settings.xrayCorePid().exists()
-            if (tproxySettingsChanged) transparentProxyHelper.kill()
+            val stopService = tproxySettingsChanged && TProxyService.isActive()
+            if (tproxySettingsChanged && settings.transparentProxy) transparentProxyHelper.kill()
             withContext(Dispatchers.Main) {
                 binding.search.clearFocus()
                 settings.appsRoutingMode = appsRoutingMode
@@ -180,6 +187,15 @@ class AppsRoutingActivity : AppCompatActivity() {
                 finish()
             }
         }
+    }
+
+    private fun selectedPackages(): Set<String> {
+        return settings.appsRouting
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .filter { it != packageName }
+            .toSet()
     }
 
 }

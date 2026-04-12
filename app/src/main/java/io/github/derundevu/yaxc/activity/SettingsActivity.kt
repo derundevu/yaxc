@@ -144,6 +144,34 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun saveSettings() {
+        val oldSocksAddress = settings.socksAddress
+        val oldSocksPort = settings.socksPort
+        val oldSocksUsername = settings.socksUsername
+        val oldSocksPassword = settings.socksPassword
+        val oldPrimaryDns = settings.primaryDns
+        val oldSecondaryDns = settings.secondaryDns
+        val oldBypassLan = settings.bypassLan
+        val oldEnableIpV6 = settings.enableIpV6
+        val oldPrimaryDnsV6 = settings.primaryDnsV6
+        val oldSecondaryDnsV6 = settings.secondaryDnsV6
+        val oldSocksUdp = settings.socksUdp
+        val oldTun2socks = settings.tun2socks
+        val oldTunName = settings.tunName
+        val oldTunMtu = settings.tunMtu
+        val oldTunAddress = settings.tunAddress
+        val oldTunPrefix = settings.tunPrefix
+        val oldTunAddressV6 = settings.tunAddressV6
+        val oldTunPrefixV6 = settings.tunPrefixV6
+        val oldHotspotInterface = settings.hotspotInterface
+        val oldTetheringInterface = settings.tetheringInterface
+        val oldTproxyAddress = settings.tproxyAddress
+        val oldTproxyPort = settings.tproxyPort
+        val oldTproxyBypassWiFi = settings.tproxyBypassWiFi
+        val oldTproxyAutoConnect = settings.tproxyAutoConnect
+        val oldTproxyHotspot = settings.tproxyHotspot
+        val oldTproxyTethering = settings.tproxyTethering
+        val oldTransparentProxy = settings.transparentProxy
+
         /** Basic */
         settings.socksAddress = basic.findViewById<EditText>(R.id.socksAddress).text.toString()
         settings.socksPort = basic.findViewById<EditText>(R.id.socksPort).text.toString()
@@ -190,18 +218,35 @@ class SettingsActivity : AppCompatActivity() {
         val transparentProxy = advanced.findViewById<MaterialSwitch>(R.id.transparentProxy).isChecked
 
         lifecycleScope.launch {
-            val tproxySettingsChanged = settings.enableIpV6 != enableIpV6 ||
-                    settings.hotspotInterface != hotspotInterface ||
-                    settings.tetheringInterface != tetheringInterface ||
-                    settings.tproxyAddress != tproxyAddress ||
-                    settings.tproxyPort != tproxyPort ||
-                    settings.tproxyBypassWiFi != tproxyBypassWiFi ||
-                    settings.tproxyAutoConnect != tproxyAutoConnect ||
-                    settings.tproxyHotspot != tproxyHotspot ||
-                    settings.tproxyTethering != tproxyTethering ||
-                    settings.transparentProxy != transparentProxy
-            val stopService = tproxySettingsChanged && settings.xrayCorePid().exists()
-            if (tproxySettingsChanged) transparentProxyHelper.kill()
+            val vpnSettingsChanged = oldSocksAddress != settings.socksAddress ||
+                    oldSocksPort != settings.socksPort ||
+                    oldSocksUsername != settings.socksUsername ||
+                    oldSocksPassword != settings.socksPassword ||
+                    oldPrimaryDns != settings.primaryDns ||
+                    oldSecondaryDns != settings.secondaryDns ||
+                    oldBypassLan != settings.bypassLan ||
+                    oldEnableIpV6 != enableIpV6 ||
+                    oldPrimaryDnsV6 != settings.primaryDnsV6 ||
+                    oldSecondaryDnsV6 != settings.secondaryDnsV6 ||
+                    oldSocksUdp != settings.socksUdp ||
+                    oldTun2socks != settings.tun2socks ||
+                    oldTunName != settings.tunName ||
+                    oldTunMtu != settings.tunMtu ||
+                    oldTunAddress != settings.tunAddress ||
+                    oldTunPrefix != settings.tunPrefix ||
+                    oldTunAddressV6 != settings.tunAddressV6 ||
+                    oldTunPrefixV6 != settings.tunPrefixV6 ||
+                    oldHotspotInterface != hotspotInterface ||
+                    oldTetheringInterface != tetheringInterface ||
+                    oldTproxyAddress != tproxyAddress ||
+                    oldTproxyPort != tproxyPort ||
+                    oldTproxyBypassWiFi != tproxyBypassWiFi ||
+                    oldTproxyAutoConnect != tproxyAutoConnect ||
+                    oldTproxyHotspot != tproxyHotspot ||
+                    oldTproxyTethering != tproxyTethering ||
+                    oldTransparentProxy != transparentProxy
+            val stopService = vpnSettingsChanged && TProxyService.isActive()
+            if (vpnSettingsChanged && settings.transparentProxy) transparentProxyHelper.kill()
             withContext(Dispatchers.Main) {
                 settings.enableIpV6 = enableIpV6
                 settings.hotspotInterface = hotspotInterface

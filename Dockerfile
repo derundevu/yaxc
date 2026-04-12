@@ -3,6 +3,6 @@ FROM debian:trixie
 ENV LANG=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive
 
-COPY build-xray.sh /build-xray.sh
+COPY build-yaxc.sh /build-yaxc.sh
 
-ENTRYPOINT ["/build-xray.sh"]
+ENTRYPOINT ["/build-yaxc.sh"]

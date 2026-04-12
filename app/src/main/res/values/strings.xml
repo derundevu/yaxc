@@ -47,8 +47,8 @@
     <string name="openJson">Open Json</string>
     <string name="appsRoutingSave">Save</string>
     <string name="saveConfigs">Save Configs</string>
-    <string name="appsRoutingExcludeMode">Mode: Exclude</string>
-    <string name="appsRoutingIncludeMode">Mode: Include</string>
+    <string name="appsRoutingExcludeMode">Mode: Exclude selected apps</string>
+    <string name="appsRoutingIncludeMode">Mode: Include only selected apps</string>
     <string name="saveSettings">Save Settings</string>
     <string name="saveProfile">Save Profile</string>
     <string name="invalidProfile">Invalid Profile</string>
