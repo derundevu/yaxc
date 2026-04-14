@@ -1,77 +1,99 @@
 package io.github.derundevu.yaxc.presentation.main
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
+import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.outlined.Subject
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material.icons.outlined.ToggleOff
 import androidx.compose.material.icons.outlined.ToggleOn
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
-import io.github.derundevu.yaxc.presentation.main.MainProfileItem
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
-import kotlinx.coroutines.launch
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidSurface
+
+private enum class MainRootTab {
+    Connect,
+    Routing,
+    Settings,
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,188 +114,111 @@ fun MainScreen(
     onAction: (MainAction) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
-    var actionsExpanded by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val navigationBarBottom = WindowInsets.navigationBars.getBottom(density)
     val gestureNavigation = navigationBarBottom <= with(density) { 32.dp.roundToPx() }
     val reservedBottomInset = if (gestureNavigation) 0.dp else with(density) { navigationBarBottom.toDp() }
+    val connectBottomPadding = 162.dp + reservedBottomInset
+    val tabBottomPadding = 112.dp + reservedBottomInset
+    val connectListState = rememberLazyListState()
+    val backdropBaseColor = MaterialTheme.colorScheme.background
+    val backdrop = rememberLayerBackdrop {
+        drawRect(backdropBaseColor)
+        drawContent()
+    }
+    var rootTab by rememberSaveable { mutableStateOf(MainRootTab.Connect) }
+    val shouldCollapseControls by remember(rootTab, connectListState, density) {
+        derivedStateOf {
+            if (rootTab != MainRootTab.Connect) return@derivedStateOf false
+            val collapseTriggerPx = with(density) { 124.dp.roundToPx() }
+            connectListState.firstVisibleItemIndex > 0 ||
+                connectListState.firstVisibleItemScrollOffset >= collapseTriggerPx
+        }
+    }
+    val collapseProgress by animateFloatAsState(
+        targetValue = if (shouldCollapseControls) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 520f),
+        label = "main_control_bar_collapse",
+    )
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet(
-                modifier = Modifier.padding(end = spacing.md),
-                drawerContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = spacing.md, vertical = spacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(spacing.md),
-                ) {
-                    Text(
-                        text = textResource(R.string.appName),
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = textResource(R.string.mainDrawerLead),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YaxcTheme.extendedColors.textMuted,
-                    )
-
-                    MainDrawerItem(Icons.Outlined.FolderOpen, textResource(R.string.assets)) {
-                        scope.launch { drawerState.close() }
-                        onAction(MainAction.OpenAssetsClicked)
-                    }
-                    MainDrawerItem(Icons.Outlined.Link, textResource(R.string.links)) {
-                        scope.launch { drawerState.close() }
-                        onAction(MainAction.OpenLinksClicked)
-                    }
-                    MainDrawerItem(Icons.Outlined.Terminal, textResource(R.string.logs)) {
-                        scope.launch { drawerState.close() }
-                        onAction(MainAction.OpenLogsClicked)
-                    }
-                    MainDrawerItem(Icons.AutoMirrored.Outlined.AltRoute, textResource(R.string.appsRouting)) {
-                        scope.launch { drawerState.close() }
-                        onAction(MainAction.OpenAppsRoutingClicked)
-                    }
-                    MainDrawerItem(Icons.AutoMirrored.Outlined.Subject, textResource(R.string.configs)) {
-                        scope.launch { drawerState.close() }
-                        onAction(MainAction.OpenConfigsClicked)
-                    }
-                    MainDrawerItem(Icons.Outlined.Settings, textResource(R.string.settings)) {
-                        scope.launch { drawerState.close() }
-                        onAction(MainAction.OpenSettingsClicked)
-                    }
-
-                    Box(modifier = Modifier.weight(1f))
-
-                    YaxcCard {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            VersionRow(textResource(R.string.appFullName), appVersion)
-                            VersionRow(textResource(R.string.xrayLabel), xrayVersion)
-                            VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion)
-                        }
-                    }
-                }
-            }
-        },
+    Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+        ),
+        containerColor = Color.Transparent,
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(YaxcTheme.backgroundBrush),
         ) {
-        Scaffold(
-            contentWindowInsets = WindowInsets.safeDrawing.only(
-                WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-            ),
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            topBar = {
-                TopAppBar(
-                    title = { Text(text = textResource(R.string.appName)) },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Menu,
-                                contentDescription = textResource(R.string.drawerOpen),
-                            )
-                        }
-                    },
-                    actions = {
-                        Box {
-                            IconButton(onClick = { actionsExpanded = true }) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Add,
-                                    contentDescription = textResource(R.string.newProfile),
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = actionsExpanded,
-                                onDismissRequest = { actionsExpanded = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(text = textResource(R.string.newProfile)) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onAction(MainAction.NewProfileClicked)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(text = textResource(R.string.scanQrCode)) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onAction(MainAction.ScanQrCodeClicked)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(text = textResource(R.string.fromClipboard)) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onAction(MainAction.ImportFromClipboardClicked)
-                                    },
-                                )
-                            }
-                        }
-                    },
-                )
-            },
-        ) { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
-                LazyColumn(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(YaxcTheme.backgroundBrush),
-                    contentPadding = PaddingValues(
-                        start = spacing.md,
-                        end = spacing.md,
-                        top = spacing.md,
-                        bottom = 220.dp + reservedBottomInset,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(spacing.md),
+                        .background(YaxcTheme.backgroundBrush)
+                        .layerBackdrop(backdrop = backdrop),
                 ) {
-                    items(
-                        items = tabs,
-                        key = { it.id },
-                    ) { source ->
-                        SourceGroupCard(
-                            source = source,
-                            isExpanded = source.id == selectedTabId,
-                            profiles = if (source.id == selectedTabId) profiles else emptyList(),
+                    when (rootTab) {
+                        MainRootTab.Connect -> {
+                            ConnectContent(
+                                tabs = tabs,
+                                selectedTabId = selectedTabId,
+                                isRunning = isRunning,
+                                selectedSourceName = selectedSourceName,
+                                selectedProfileName = selectedProfileName,
+                                selectedServerLabel = selectedServerLabel,
+                                pingState = pingState,
+                            profiles = profiles,
                             selectedProfileId = selectedProfileId,
-                            onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
-                            onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
-                            onPingAll = { onAction(MainAction.PingSourceClicked(source.id)) },
-                            onSelectProfile = { onAction(MainAction.SelectProfile(it.profile.id)) },
-                            onEditProfile = { onAction(MainAction.EditProfile(it.profile)) },
-                            onDeleteProfile = { onAction(MainAction.RequestDeleteProfile(it.profile)) },
+                            profilesCount = profilesCount,
+                            listState = connectListState,
+                            collapseProgress = collapseProgress,
+                            onAction = onAction,
+                            topPadding = 86.dp,
+                            bottomPadding = connectBottomPadding,
                         )
                     }
 
-                    if (tabs.isEmpty()) {
-                        item {
-                            EmptySourcesCard()
+                        MainRootTab.Routing -> {
+                            RoutingContent(
+                                topPadding = 86.dp,
+                                bottomPadding = tabBottomPadding,
+                                onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
+                            )
                         }
-                    }
 
-                    item {
-                        Text(
-                            text = textResource(R.string.mainProfilesCount, profilesCount),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YaxcTheme.extendedColors.textMuted,
-                        )
+                        MainRootTab.Settings -> {
+                            SettingsContent(
+                                appVersion = appVersion,
+                                xrayVersion = xrayVersion,
+                                tun2socksVersion = tun2socksVersion,
+                                topPadding = 86.dp,
+                                bottomPadding = tabBottomPadding,
+                                onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
+                                onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
+                                onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
+                                onOpenConfigs = { onAction(MainAction.OpenConfigsClicked) },
+                                onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
+                            )
+                        }
                     }
                 }
 
-                BottomControlBar(
-                    isRunning = isRunning,
+                MainTopChrome(
+                    backdrop = backdrop,
+                    onNewProfile = { onAction(MainAction.NewProfileClicked) },
+                    onScanQr = { onAction(MainAction.ScanQrCodeClicked) },
+                    onImportClipboard = { onAction(MainAction.ImportFromClipboardClicked) },
+                    isConnectTab = rootTab == MainRootTab.Connect,
+                    collapseProgress = collapseProgress,
                     selectedSourceName = selectedSourceName,
                     selectedProfileName = selectedProfileName,
-                    selectedServerLabel = selectedServerLabel,
                     pingState = pingState,
-                    onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
                     onPingCurrent = { onAction(MainAction.PingClicked) },
                     onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
                     onRefreshSource = {
@@ -281,10 +226,807 @@ fun MainScreen(
                         else onAction(MainAction.RefreshLinksClicked)
                     },
                     modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(3f)
+                        .padding(horizontal = spacing.md, vertical = spacing.md),
+                )
+
+                if (rootTab == MainRootTab.Connect) {
+                    FloatingConnectButton(
+                        backdrop = backdrop,
+                        isRunning = isRunning,
+                        onClick = { onAction(MainAction.ToggleVpnClicked) },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .zIndex(3f)
+                            .padding(
+                                end = spacing.lg + 12.dp,
+                                bottom = spacing.lg + reservedBottomInset + 94.dp,
+                            ),
+                    )
+                }
+
+                MainLiquidTabBar(
+                    backdrop = backdrop,
+                    selectedTab = rootTab,
+                    onSelectTab = { rootTab = it },
+                    modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = reservedBottomInset),
+                        .zIndex(2f)
+                        .padding(horizontal = spacing.lg)
+                        .padding(bottom = spacing.lg + reservedBottomInset),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ConnectContent(
+    tabs: List<Link>,
+    selectedTabId: Long,
+    isRunning: Boolean,
+    selectedSourceName: String,
+    selectedProfileName: String,
+    selectedServerLabel: String,
+    pingState: MainPingState,
+    profiles: List<MainProfileItem>,
+    selectedProfileId: Long,
+    profilesCount: Int,
+    listState: LazyListState,
+    collapseProgress: Float,
+    onAction: (MainAction) -> Unit,
+    topPadding: androidx.compose.ui.unit.Dp,
+    bottomPadding: androidx.compose.ui.unit.Dp,
+) {
+    val spacing = YaxcTheme.spacing
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        contentPadding = PaddingValues(
+            start = spacing.md,
+            end = spacing.md,
+            top = topPadding,
+            bottom = bottomPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(spacing.md),
+    ) {
+        item {
+            ConnectionTopCard(
+                isRunning = isRunning,
+                selectedSourceName = selectedSourceName,
+                selectedProfileName = selectedProfileName,
+                selectedServerLabel = selectedServerLabel,
+                pingState = pingState,
+                collapseProgress = collapseProgress,
+                onPingCurrent = { onAction(MainAction.PingClicked) },
+                onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
+                onRefreshSource = {
+                    if (selectedTabId != 0L) onAction(MainAction.RefreshSourceClicked(selectedTabId))
+                    else onAction(MainAction.RefreshLinksClicked)
+                },
+            )
+        }
+
+        items(
+            items = tabs,
+            key = { it.id },
+        ) { source ->
+            SourceGroupCard(
+                source = source,
+                isExpanded = source.id == selectedTabId,
+                profiles = if (source.id == selectedTabId) profiles else emptyList(),
+                selectedProfileId = selectedProfileId,
+                onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
+                onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
+                onPingAll = { onAction(MainAction.PingSourceClicked(source.id)) },
+                onSelectProfile = { onAction(MainAction.SelectProfile(it.profile.id)) },
+                onEditProfile = { onAction(MainAction.EditProfile(it.profile)) },
+                onDeleteProfile = { onAction(MainAction.RequestDeleteProfile(it.profile)) },
+            )
+        }
+
+        if (tabs.isEmpty()) {
+            item { EmptySourcesCard() }
+        }
+
+        item {
+            Text(
+                text = textResource(R.string.mainProfilesCount, profilesCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = YaxcTheme.extendedColors.textMuted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RoutingContent(
+    topPadding: androidx.compose.ui.unit.Dp,
+    bottomPadding: androidx.compose.ui.unit.Dp,
+    onOpenAppsRouting: () -> Unit,
+) {
+    val spacing = YaxcTheme.spacing
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = spacing.md,
+            end = spacing.md,
+            top = topPadding,
+            bottom = bottomPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(spacing.md),
+    ) {
+        item {
+            YaxcGlassPanel {
+                Text(
+                    text = textResource(R.string.appsRouting),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = textResource(R.string.appsRoutingLead),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = textResource(R.string.appsRoutingModeTitle),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    ActionBubble(
+                        icon = Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                        onClick = onOpenAppsRouting,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsContent(
+    appVersion: String,
+    xrayVersion: String,
+    tun2socksVersion: String,
+    topPadding: androidx.compose.ui.unit.Dp,
+    bottomPadding: androidx.compose.ui.unit.Dp,
+    onOpenAssets: () -> Unit,
+    onOpenLinks: () -> Unit,
+    onOpenLogs: () -> Unit,
+    onOpenConfigs: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val spacing = YaxcTheme.spacing
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = spacing.md,
+            end = spacing.md,
+            top = topPadding,
+            bottom = bottomPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(spacing.md),
+    ) {
+        item {
+            SettingsActionCard(
+                icon = Icons.Outlined.FolderOpen,
+                title = textResource(R.string.assets),
+                description = textResource(R.string.assetsScreenLead),
+                onClick = onOpenAssets,
+            )
+        }
+        item {
+            SettingsActionCard(
+                icon = Icons.Outlined.Link,
+                title = textResource(R.string.links),
+                description = textResource(R.string.linksScreenLead),
+                onClick = onOpenLinks,
+            )
+        }
+        item {
+            SettingsActionCard(
+                icon = Icons.Outlined.Terminal,
+                title = textResource(R.string.logs),
+                description = textResource(R.string.logsScreenLead),
+                onClick = onOpenLogs,
+            )
+        }
+        item {
+            SettingsActionCard(
+                icon = Icons.AutoMirrored.Outlined.Subject,
+                title = textResource(R.string.configs),
+                description = textResource(R.string.configsScreenLead),
+                onClick = onOpenConfigs,
+            )
+        }
+        item {
+            SettingsActionCard(
+                icon = Icons.Outlined.Settings,
+                title = textResource(R.string.settings),
+                description = textResource(R.string.settingsScreenLead),
+                onClick = onOpenSettings,
+            )
+        }
+        item {
+            YaxcGlassPanel {
+                Text(
+                    text = textResource(R.string.appFullName),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = appVersion,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
+                VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionTopCard(
+    isRunning: Boolean,
+    selectedSourceName: String,
+    selectedProfileName: String,
+    selectedServerLabel: String,
+    pingState: MainPingState,
+    collapseProgress: Float,
+    onPingCurrent: () -> Unit,
+    onPingAll: () -> Unit,
+    onRefreshSource: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.992f else 1f,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 720f),
+        label = "main_control_bar_scale",
+    )
+
+    YaxcGlassPanel(
+        modifier = modifier.graphicsLayer {
+            alpha = 1f - collapseProgress * 0.38f
+            scaleX = (1f - collapseProgress * 0.04f) * pressScale
+            scaleY = (1f - collapseProgress * 0.04f) * pressScale
+        }.clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = onPingCurrent,
+        ),
+        shape = MaterialTheme.shapes.extraLarge,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+        accentColor = if (isRunning) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+        },
+        borderColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isRunning) 0.24f else 0.16f),
+        shadowElevation = 20.dp,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = selectedServerLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = selectedSourceName,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PingStateBadge(pingState = pingState)
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ActionBubble(
+                    icon = Icons.Outlined.WifiTethering,
+                    onClick = onPingAll,
+                )
+                ActionBubble(
+                    icon = Icons.Outlined.Refresh,
+                    onClick = onRefreshSource,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingConnectButton(
+    backdrop: LayerBackdrop,
+    isRunning: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.76f, stiffness = 640f),
+        label = "floating_connect_scale",
+    )
+    val surfaceTint by animateColorAsState(
+        targetValue = if (isRunning) {
+            YaxcTheme.extendedColors.success.copy(alpha = 0.34f)
+        } else {
+            Color.White.copy(alpha = 0.18f)
+        },
+        animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f),
+        label = "floating_connect_tint",
+    )
+    val iconTint by animateColorAsState(
+        targetValue = if (isRunning) Color(0xFFD9FFF1) else Color.White.copy(alpha = 0.94f),
+        animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f),
+        label = "floating_connect_icon",
+    )
+
+    Box(
+        modifier = modifier
+            .shadow(24.dp, CircleShape, clip = false)
+            .scale(scale),
+    ) {
+        YaxcLiquidSurface(
+            backdrop = backdrop,
+            modifier = Modifier
+                .size(64.dp)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                ),
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            surfaceTint = surfaceTint,
+            blurRadius = 24.dp,
+            lensRadius = 30.dp,
+            lensDistortion = 56.dp,
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.PowerSettingsNew,
+                    contentDescription = if (isRunning) textResource(R.string.vpnStop) else textResource(R.string.vpnStart),
+                    tint = iconTint,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainLiquidTabBar(
+    backdrop: LayerBackdrop,
+    selectedTab: MainRootTab,
+    onSelectTab: (MainRootTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val selectedIndex = when (selectedTab) {
+        MainRootTab.Connect -> 0
+        MainRootTab.Routing -> 1
+        MainRootTab.Settings -> 2
+    }
+    val gap = 8.dp
+
+    YaxcLiquidSurface(
+        backdrop = backdrop,
+        modifier = modifier.fillMaxWidth(0.94f),
+        shape = RoundedCornerShape(36.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        surfaceTint = Color.White.copy(alpha = 0.16f),
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(0.dp),
+        ) {
+            val tabWidth = (maxWidth - gap * 2) / 3
+            val animatedOffset by animateDpAsState(
+                targetValue = (tabWidth + gap) * selectedIndex,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+                label = "main_tab_indicator_offset",
+            )
+
+            Box(
+                modifier = Modifier
+                    .width(tabWidth)
+                    .padding(vertical = 0.dp)
+                    .offset(x = animatedOffset),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
+                    shape = RoundedCornerShape(28.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                ) {}
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                MainBottomTabItem(
+                    icon = Icons.Outlined.ToggleOn,
+                    label = "Connect",
+                    selected = selectedTab == MainRootTab.Connect,
+                    onClick = { onSelectTab(MainRootTab.Connect) },
+                    modifier = Modifier.weight(1f),
+                )
+                MainBottomTabItem(
+                    icon = Icons.AutoMirrored.Outlined.AltRoute,
+                    label = "Routing",
+                    selected = selectedTab == MainRootTab.Routing,
+                    onClick = { onSelectTab(MainRootTab.Routing) },
+                    modifier = Modifier.weight(1f),
+                )
+                MainBottomTabItem(
+                    icon = Icons.Outlined.Settings,
+                    label = "Settings",
+                    selected = selectedTab == MainRootTab.Settings,
+                    onClick = { onSelectTab(MainRootTab.Settings) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainTopChrome(
+    backdrop: LayerBackdrop,
+    onNewProfile: () -> Unit,
+    onScanQr: () -> Unit,
+    onImportClipboard: () -> Unit,
+    isConnectTab: Boolean,
+    collapseProgress: Float,
+    selectedSourceName: String,
+    selectedProfileName: String,
+    pingState: MainPingState,
+    onPingCurrent: () -> Unit,
+    onPingAll: () -> Unit,
+    onRefreshSource: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var actionsExpanded by remember { mutableStateOf(false) }
+    val showMiniBar = isConnectTab && collapseProgress > 0f
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        YaxcLiquidSurface(
+            backdrop = backdrop,
+            shape = MaterialTheme.shapes.extraLarge,
+            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp),
+            surfaceTint = Color.White.copy(alpha = 0.26f),
+        ) {
+            Text(
+                text = textResource(R.string.appName),
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.White.copy(alpha = 0.96f),
+            )
+        }
+
+        if (showMiniBar) {
+            MiniControlBar(
+                backdrop = backdrop,
+                progress = collapseProgress,
+                selectedSourceName = selectedSourceName,
+                selectedProfileName = selectedProfileName,
+                pingState = pingState,
+                onPingCurrent = onPingCurrent,
+                onPingAll = onPingAll,
+                onRefreshSource = onRefreshSource,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        Box {
+            YaxcLiquidSurface(
+                backdrop = backdrop,
+                modifier = Modifier.clickable(onClick = { actionsExpanded = true }),
+                shape = MaterialTheme.shapes.extraLarge,
+                contentPadding = PaddingValues(0.dp),
+                surfaceTint = Color.White.copy(alpha = 0.26f),
+            ) {
+                Box(
+                    modifier = Modifier.size(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = textResource(R.string.newProfile),
+                        tint = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            YaxcLiquidDropdownMenu(
+                expanded = actionsExpanded,
+                onDismissRequest = { actionsExpanded = false },
+            ) {
+                YaxcLiquidDropdownMenuItem(
+                    text = textResource(R.string.newProfile),
+                    onClick = {
+                        actionsExpanded = false
+                        onNewProfile()
+                    },
+                )
+                YaxcLiquidDropdownMenuItem(
+                    text = textResource(R.string.scanQrCode),
+                    onClick = {
+                        actionsExpanded = false
+                        onScanQr()
+                    },
+                )
+                YaxcLiquidDropdownMenuItem(
+                    text = textResource(R.string.fromClipboard),
+                    onClick = {
+                        actionsExpanded = false
+                        onImportClipboard()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniControlBar(
+    backdrop: LayerBackdrop,
+    progress: Float,
+    selectedSourceName: String,
+    selectedProfileName: String,
+    pingState: MainPingState,
+    onPingCurrent: () -> Unit,
+    onPingAll: () -> Unit,
+    onRefreshSource: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.985f else 1f,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 700f),
+        label = "mini_control_bar_scale",
+    )
+    val surfaceTint by animateColorAsState(
+        targetValue = if (pressed) {
+            Color.White.copy(alpha = 0.28f)
+        } else {
+            Color.White.copy(alpha = 0.22f)
+        },
+        animationSpec = spring(dampingRatio = 0.86f, stiffness = 560f),
+        label = "mini_control_bar_tint",
+    )
+
+    YaxcLiquidSurface(
+        backdrop = backdrop,
+        modifier = modifier.graphicsLayer {
+            alpha = progress
+            scaleX = (0.88f + progress * 0.12f) * pressScale
+            scaleY = (0.92f + progress * 0.08f) * pressScale
+            translationY = (1f - progress) * -20f
+        }.clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = onPingCurrent,
+        ),
+        shape = RoundedCornerShape(26.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 7.dp),
+        surfaceTint = surfaceTint,
+        blurRadius = 22.dp,
+        lensRadius = 28.dp,
+        lensDistortion = 50.dp,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    text = selectedSourceName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.92f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PingStateBadge(pingState = pingState)
+                }
+            }
+            ActionBubble(
+                icon = Icons.Outlined.WifiTethering,
+                onClick = onPingAll,
+                containerSize = 32.dp,
+                iconSize = 15.dp,
+            )
+            ActionBubble(
+                icon = Icons.Outlined.Refresh,
+                onClick = onRefreshSource,
+                containerSize = 32.dp,
+                iconSize = 15.dp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MainBottomTabItem(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 700f),
+        label = "main_tab_scale",
+    )
+
+    Surface(
+        modifier = modifier
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        color = Color.Transparent,
+        shape = RoundedCornerShape(28.dp),
+        border = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.White.copy(alpha = 0.68f)
+                },
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.White.copy(alpha = 0.68f)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsActionCard(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    YaxcGlassPanel(
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Surface(
+                color = Color.White.copy(alpha = 0.10f),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                Box(
+                    modifier = Modifier.size(44.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.86f),
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                contentDescription = null,
+                tint = YaxcTheme.extendedColors.textMuted,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
@@ -302,7 +1044,7 @@ private fun SourceGroupCard(
     onEditProfile: (MainProfileItem) -> Unit,
     onDeleteProfile: (MainProfileItem) -> Unit,
 ) {
-    YaxcCard {
+    YaxcGlassPanel {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -331,14 +1073,8 @@ private fun SourceGroupCard(
                 )
             }
 
-            ActionBubble(
-                icon = Icons.Outlined.WifiTethering,
-                onClick = onPingAll,
-            )
-            ActionBubble(
-                icon = Icons.Outlined.Refresh,
-                onClick = onRefresh,
-            )
+            ActionBubble(icon = Icons.Outlined.WifiTethering, onClick = onPingAll)
+            ActionBubble(icon = Icons.Outlined.Refresh, onClick = onRefresh)
         }
 
         if (isExpanded) {
@@ -377,26 +1113,15 @@ private fun ProfileCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect),
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-        } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)
-        },
+    YaxcGlassPanel(
+        modifier = Modifier.clickable(onClick = onSelect),
         shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
     ) {
         var actionsExpanded by remember { mutableStateOf(false) }
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -422,22 +1147,14 @@ private fun ProfileCard(
                 Text(
                     text = profile.profile.name,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = profile.summary,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
-                    } else {
-                        YaxcTheme.extendedColors.textMuted
-                    },
+                    color = YaxcTheme.extendedColors.textMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -448,151 +1165,24 @@ private fun ProfileCard(
                     icon = Icons.Outlined.MoreVert,
                     onClick = { actionsExpanded = true },
                 )
-                DropdownMenu(
+                YaxcLiquidDropdownMenu(
                     expanded = actionsExpanded,
                     onDismissRequest = { actionsExpanded = false },
                 ) {
-                    DropdownMenuItem(
-                        text = { Text(text = textResource(R.string.editProfile)) },
+                    YaxcLiquidDropdownMenuItem(
+                        text = textResource(R.string.editProfile),
                         onClick = {
                             actionsExpanded = false
                             onEdit()
                         },
                     )
-                    DropdownMenuItem(
-                        text = { Text(text = textResource(R.string.deleteProfile)) },
+                    YaxcLiquidDropdownMenuItem(
+                        text = textResource(R.string.deleteProfile),
                         onClick = {
                             actionsExpanded = false
                             onDelete()
                         },
                     )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BottomControlBar(
-    isRunning: Boolean,
-    selectedSourceName: String,
-    selectedProfileName: String,
-    selectedServerLabel: String,
-    pingState: MainPingState,
-    onToggleVpn: () -> Unit,
-    onPingCurrent: () -> Unit,
-    onPingAll: () -> Unit,
-    onRefreshSource: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val spacing = YaxcTheme.spacing
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = spacing.lg)
-            .padding(top = spacing.sm, bottom = spacing.lg),
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
-            shape = MaterialTheme.shapes.extraLarge,
-            border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
-            tonalElevation = 0.dp,
-            shadowElevation = 16.dp,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = textResource(R.string.mainTrafficPlaceholder),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    Surface(
-                        modifier = Modifier.clickable(onClick = onToggleVpn),
-                        color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = MaterialTheme.shapes.extraLarge,
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                imageVector = if (isRunning) Icons.Outlined.ToggleOn else Icons.Outlined.ToggleOff,
-                                contentDescription = null,
-                                tint = if (isRunning) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = if (isRunning) textResource(R.string.vpnStop) else textResource(R.string.vpnStart),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (isRunning) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = selectedServerLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f).padding(start = 12.dp),
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable(onClick = onPingCurrent)
-                            .padding(vertical = 2.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = selectedSourceName,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = YaxcTheme.extendedColors.textMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            PingStateBadge(pingState = pingState)
-                        }
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ActionBubble(Icons.Outlined.WifiTethering, onPingAll)
-                        ActionBubble(Icons.Outlined.Refresh, onRefreshSource)
-                    }
                 }
             }
         }
@@ -631,7 +1221,7 @@ private fun PingStateBadge(
 
 @Composable
 private fun EmptySourcesCard() {
-    YaxcCard {
+    YaxcGlassPanel {
         Text(
             text = textResource(R.string.mainNoSources),
             style = MaterialTheme.typography.bodyLarge,
@@ -650,55 +1240,38 @@ private fun EmptySourcesCard() {
 private fun ActionBubble(
     icon: ImageVector,
     onClick: () -> Unit,
+    containerSize: androidx.compose.ui.unit.Dp = 40.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
 ) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = Color.White.copy(alpha = 0.08f),
         shape = MaterialTheme.shapes.large,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
     ) {
         Box(
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(containerSize),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = Color.White.copy(alpha = 0.76f),
+                modifier = Modifier.size(iconSize),
             )
         }
     }
 }
 
 @Composable
-private fun MainDrawerItem(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    NavigationDrawerItem(
-        label = { Text(text = label) },
-        selected = false,
-        onClick = onClick,
-        icon = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-            )
-        },
-        colors = NavigationDrawerItemDefaults.colors(
-            unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f),
-        ),
-    )
-}
-
-@Composable
 private fun VersionRow(
     label: String,
     value: String,
+    modifier: Modifier = Modifier,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier = modifier) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,

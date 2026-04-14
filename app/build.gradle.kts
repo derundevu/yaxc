@@ -107,6 +107,7 @@ dependencies {
     implementation(libs.blacksquircle.ui.editorkit)
     implementation(libs.blacksquircle.ui.language.json)
     implementation(libs.google.material)
+    implementation(libs.kyant.backdrop)
     implementation(libs.topjohnwu.libsu.core)
     implementation(libs.yuriy.budiyev.code.scanner)
     debugImplementation(libs.androidx.compose.ui.tooling)

@@ -1,16 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-  <background>
+  <background android:drawable="@drawable/ic_launcher_background" />
+  <foreground>
     <inset
-        android:insetBottom="0dp"
-        android:insetLeft="0dp"
-        android:insetRight="0dp"
-        android:insetTop="0dp">
-      <shape android:shape="oval">
-        <solid android:color="#FFFFFF" />
-      </shape>
-    </inset>
-  </background>
-  <foreground android:drawable="@drawable/ic_xray" />
-  <monochrome android:drawable="@drawable/ic_xray" />
+        android:drawable="@drawable/yaxc_logo"
+        android:insetBottom="16dp"
+        android:insetLeft="16dp"
+        android:insetRight="16dp"
+        android:insetTop="16dp" />
+  </foreground>
 </adaptive-icon>
