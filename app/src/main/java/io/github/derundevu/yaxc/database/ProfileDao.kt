@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ProfileDao {
     @Query(
-        "SELECT `profiles`.`id`, `profiles`.`index`, `profiles`.`name`, `profiles`.`link_id` AS `link`" +
+        "SELECT `profiles`.`id`, `profiles`.`index`, `profiles`.`name`, `profiles`.`link_id` AS `link`, `profiles`.`config`" +
         "  FROM `profiles`" +
         "  LEFT JOIN `links` ON `profiles`.`link_id` = `links`.`id`" +
         "  WHERE `links`.`is_active` IS NULL OR `links`.`is_active` = 1" +

@@ -1,149 +1,79 @@
 package io.github.derundevu.yaxc.activity
 
-import android.annotation.SuppressLint
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.widget.EditText
-import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.materialswitch.MaterialSwitch
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
-import io.github.derundevu.yaxc.adapter.SettingAdapter
-import io.github.derundevu.yaxc.databinding.ActivitySettingsBinding
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
+import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
 import io.github.derundevu.yaxc.service.TProxyService
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class SettingsActivity : AppCompatActivity() {
 
     private val settings by lazy { Settings(applicationContext) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
-    private lateinit var binding: ActivitySettingsBinding
-    private lateinit var adapter: SettingAdapter
-    private lateinit var basic: View
-    private lateinit var advanced: View
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = getString(R.string.settings)
-        binding = ActivitySettingsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        val tabs = listOf("Basic", "Advanced")
-        val layouts = listOf(R.layout.tab_basic_settings, R.layout.tab_advanced_settings)
-        adapter = SettingAdapter(this, tabs, layouts, object : SettingAdapter.ViewsReady {
-            override fun rendered(views: List<View>) {
-                basic = views[0]
-                advanced = views[1]
-                setupBasic()
-                setupAdvanced()
+
+        setContent {
+            var formState by rememberSaveable(stateSaver = SettingsFormState.Saver) {
+                mutableStateOf(SettingsFormState.from(settings))
             }
-        })
-        binding.viewPager.adapter = adapter
-        binding.tabLayout.setupWithViewPager(binding.viewPager)
-    }
+            var tunRoutes by rememberSaveable {
+                mutableStateOf(settings.tunRoutes.toList())
+            }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_settings, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.saveSettings -> applySettings()
-            else -> finish()
+            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+                SettingsScreen(
+                    formState = formState,
+                    tunRoutes = tunRoutes,
+                    onFormStateChange = { formState = it },
+                    onTunRoutesSave = { routes ->
+                        tunRoutes = routes.sorted()
+                        settings.tunRoutes = routes.toSet()
+                    },
+                    onBack = ::finish,
+                    onSave = { applySettings(formState) },
+                )
+            }
         }
-        return true
     }
 
-    @SuppressLint("SetTextI18n")
-    private fun setupBasic() {
-        basic.findViewById<EditText>(R.id.socksAddress).setText(settings.socksAddress)
-        basic.findViewById<EditText>(R.id.socksPort).setText(settings.socksPort)
-        basic.findViewById<EditText>(R.id.socksUsername).setText(settings.socksUsername)
-        basic.findViewById<EditText>(R.id.socksPassword).setText(settings.socksPassword)
-        basic.findViewById<EditText>(R.id.geoIpAddress).setText(settings.geoIpAddress)
-        basic.findViewById<EditText>(R.id.geoSiteAddress).setText(settings.geoSiteAddress)
-        basic.findViewById<EditText>(R.id.pingAddress).setText(settings.pingAddress)
-        basic.findViewById<EditText>(R.id.pingTimeout).setText(settings.pingTimeout.toString())
-        basic.findViewById<EditText>(R.id.refreshLinksInterval)
-            .setText(settings.refreshLinksInterval.toString())
-        basic.findViewById<MaterialSwitch>(R.id.bypassLan).isChecked = settings.bypassLan
-        basic.findViewById<MaterialSwitch>(R.id.enableIpV6).isChecked = settings.enableIpV6
-        basic.findViewById<MaterialSwitch>(R.id.socksUdp).isChecked = settings.socksUdp
-        basic.findViewById<MaterialSwitch>(R.id.tun2socks).isChecked = settings.tun2socks
-        basic.findViewById<MaterialSwitch>(R.id.bootAutoStart).isChecked = settings.bootAutoStart
-        basic.findViewById<MaterialSwitch>(R.id.refreshLinksOnOpen).isChecked =
-            settings.refreshLinksOnOpen
-    }
-
-    @SuppressLint("SetTextI18n")
-    private fun setupAdvanced() {
-        advanced.findViewById<EditText>(R.id.primaryDns).setText(settings.primaryDns)
-        advanced.findViewById<EditText>(R.id.secondaryDns).setText(settings.secondaryDns)
-        advanced.findViewById<EditText>(R.id.primaryDnsV6).setText(settings.primaryDnsV6)
-        advanced.findViewById<EditText>(R.id.secondaryDnsV6).setText(settings.secondaryDnsV6)
-        advanced.findViewById<EditText>(R.id.tunName).setText(settings.tunName)
-        advanced.findViewById<EditText>(R.id.tunMtu).setText(settings.tunMtu.toString())
-        advanced.findViewById<EditText>(R.id.tunAddress).setText(settings.tunAddress)
-        advanced.findViewById<EditText>(R.id.tunPrefix).setText(settings.tunPrefix.toString())
-        advanced.findViewById<EditText>(R.id.tunAddressV6).setText(settings.tunAddressV6)
-        advanced.findViewById<EditText>(R.id.tunPrefixV6).setText(settings.tunPrefixV6.toString())
-        advanced.findViewById<EditText>(R.id.hotspotInterface).setText(settings.hotspotInterface)
-        advanced.findViewById<EditText>(R.id.tetheringInterface).setText(settings.tetheringInterface)
-        advanced.findViewById<EditText>(R.id.tproxyAddress).setText(settings.tproxyAddress)
-        advanced.findViewById<EditText>(R.id.tproxyPort).setText(settings.tproxyPort.toString())
-        advanced.findViewById<EditText>(R.id.tproxyBypassWiFi).setText(settings.tproxyBypassWiFi.joinToString(", "))
-        advanced.findViewById<MaterialSwitch>(R.id.tproxyAutoConnect).isChecked =
-            settings.tproxyAutoConnect
-        advanced.findViewById<MaterialSwitch>(R.id.tproxyHotspot).isChecked =
-            settings.tproxyHotspot
-        advanced.findViewById<MaterialSwitch>(R.id.tproxyTethering).isChecked =
-            settings.tproxyTethering
-        advanced.findViewById<MaterialSwitch>(R.id.transparentProxy).isChecked =
-            settings.transparentProxy
-
-        advanced.findViewById<LinearLayout>(R.id.tunRoutes).setOnClickListener { tunRoutes() }
-    }
-
-    private fun tunRoutes() {
-        val tunRoutes = resources.getStringArray(R.array.publicIpAddresses).toSet()
-        val layout = layoutInflater.inflate(R.layout.layout_tun_routes, null)
-        val editText = layout.findViewById<EditText>(R.id.tunRoutesEditText)
-        val getValue = {
-            editText.text.toString().lines().map { it.trim() }.filter { it.isNotBlank() }.toSet()
-        }
-        editText.setText(settings.tunRoutes.joinToString("\n"))
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.tunRoutes)
-            .setView(layout)
-            .setPositiveButton("Save") { _, _ -> settings.tunRoutes = getValue() }
-            .setNeutralButton("Reset") { _, _ -> settings.tunRoutes = tunRoutes }
-            .setNegativeButton("Close", null)
-            .show()
-    }
-
-    private fun applySettings() {
-        val transparentProxy = advanced.findViewById<MaterialSwitch>(R.id.transparentProxy).isChecked
-        if (transparentProxy && !settings.xrayCoreFile().exists()) {
+    private fun applySettings(formState: SettingsFormState) {
+        if (formState.transparentProxy && !settings.xrayCoreFile().exists()) {
             Toast.makeText(
-                applicationContext, "Install the assets", Toast.LENGTH_SHORT
+                applicationContext,
+                getString(R.string.installAssetsFirst),
+                Toast.LENGTH_SHORT,
             ).show()
             return
         }
-        saveSettings()
-    }
 
-    private fun saveSettings() {
+        val pingTimeout = formState.pingTimeout.toIntOrNull()
+            ?: return showInvalidNumber(R.string.pingTimeout)
+        val refreshLinksInterval = formState.refreshLinksInterval.toIntOrNull()
+            ?: return showInvalidNumber(R.string.refreshLinksInterval)
+        val tunMtu = formState.tunMtu.toIntOrNull()
+            ?: return showInvalidNumber(R.string.tunMtu)
+        val tunPrefix = formState.tunPrefix.toIntOrNull()
+            ?: return showInvalidNumber(R.string.tunPrefix)
+        val tunPrefixV6 = formState.tunPrefixV6.toIntOrNull()
+            ?: return showInvalidNumber(R.string.tunPrefixV6)
+        val tproxyPort = formState.tproxyPort.toIntOrNull()
+            ?: return showInvalidNumber(R.string.tproxyPort)
+
         val oldSocksAddress = settings.socksAddress
         val oldSocksPort = settings.socksPort
         val oldSocksUsername = settings.socksUsername
@@ -172,95 +102,112 @@ class SettingsActivity : AppCompatActivity() {
         val oldTproxyTethering = settings.tproxyTethering
         val oldTransparentProxy = settings.transparentProxy
 
-        /** Basic */
-        settings.socksAddress = basic.findViewById<EditText>(R.id.socksAddress).text.toString()
-        settings.socksPort = basic.findViewById<EditText>(R.id.socksPort).text.toString()
-        settings.socksUsername = basic.findViewById<EditText>(R.id.socksUsername).text.toString()
-        settings.socksPassword = basic.findViewById<EditText>(R.id.socksPassword).text.toString()
-        settings.geoIpAddress = basic.findViewById<EditText>(R.id.geoIpAddress).text.toString()
-        settings.geoSiteAddress = basic.findViewById<EditText>(R.id.geoSiteAddress).text.toString()
-        settings.pingAddress = basic.findViewById<EditText>(R.id.pingAddress).text.toString()
-        settings.pingTimeout = basic.findViewById<EditText>(R.id.pingTimeout).text.toString().toInt()
-        settings.refreshLinksInterval =
-            basic.findViewById<EditText>(R.id.refreshLinksInterval).text.toString().toInt()
-        settings.bypassLan = basic.findViewById<MaterialSwitch>(R.id.bypassLan).isChecked
-        val enableIpV6 = basic.findViewById<MaterialSwitch>(R.id.enableIpV6).isChecked
-        settings.socksUdp = basic.findViewById<MaterialSwitch>(R.id.socksUdp).isChecked
-        settings.tun2socks = basic.findViewById<MaterialSwitch>(R.id.tun2socks).isChecked
-        settings.bootAutoStart = basic.findViewById<MaterialSwitch>(R.id.bootAutoStart).isChecked
-        settings.refreshLinksOnOpen =
-            basic.findViewById<MaterialSwitch>(R.id.refreshLinksOnOpen).isChecked
-
-        /** Advanced */
-        settings.primaryDns = advanced.findViewById<EditText>(R.id.primaryDns).text.toString()
-        settings.secondaryDns = advanced.findViewById<EditText>(R.id.secondaryDns).text.toString()
-        settings.primaryDnsV6 = advanced.findViewById<EditText>(R.id.primaryDnsV6).text.toString()
-        settings.secondaryDnsV6 = advanced.findViewById<EditText>(R.id.secondaryDnsV6).text.toString()
-        settings.tunName = advanced.findViewById<EditText>(R.id.tunName).text.toString()
-        settings.tunMtu = advanced.findViewById<EditText>(R.id.tunMtu).text.toString().toInt()
-        settings.tunAddress = advanced.findViewById<EditText>(R.id.tunAddress).text.toString()
-        settings.tunPrefix = advanced.findViewById<EditText>(R.id.tunPrefix).text.toString().toInt()
-        settings.tunAddressV6 = advanced.findViewById<EditText>(R.id.tunAddressV6).text.toString()
-        settings.tunPrefixV6 = advanced.findViewById<EditText>(R.id.tunPrefixV6).text.toString().toInt()
-        val hotspotInterface = advanced.findViewById<EditText>(R.id.hotspotInterface).text.toString()
-        val tetheringInterface = advanced.findViewById<EditText>(R.id.tetheringInterface).text.toString()
-        val tproxyAddress = advanced.findViewById<EditText>(R.id.tproxyAddress).text.toString()
-        val tproxyPort = advanced.findViewById<EditText>(R.id.tproxyPort).text.toString().toInt()
-        val tproxyBypassWiFi = advanced.findViewById<EditText>(R.id.tproxyBypassWiFi).text
-            .toString()
+        val newSocksAddress = formState.socksAddress.trim()
+        val newSocksPort = formState.socksPort.trim()
+        val newSocksUsername = formState.socksUsername.trim()
+        val newSocksPassword = formState.socksPassword
+        val newGeoIpAddress = formState.geoIpAddress.trim()
+        val newGeoSiteAddress = formState.geoSiteAddress.trim()
+        val newPingAddress = formState.pingAddress.trim()
+        val newPrimaryDns = formState.primaryDns.trim()
+        val newSecondaryDns = formState.secondaryDns.trim()
+        val newPrimaryDnsV6 = formState.primaryDnsV6.trim()
+        val newSecondaryDnsV6 = formState.secondaryDnsV6.trim()
+        val newTunName = formState.tunName.trim()
+        val newTunAddress = formState.tunAddress.trim()
+        val newTunAddressV6 = formState.tunAddressV6.trim()
+        val newHotspotInterface = formState.hotspotInterface.trim()
+        val newTetheringInterface = formState.tetheringInterface.trim()
+        val newTproxyAddress = formState.tproxyAddress.trim()
+        val newTproxyBypassWiFi = formState.tproxyBypassWiFi
             .split(",")
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+            .map(String::trim)
+            .filter(String::isNotBlank)
             .toSet()
-        val tproxyAutoConnect = advanced.findViewById<MaterialSwitch>(R.id.tproxyAutoConnect).isChecked
-        val tproxyHotspot = advanced.findViewById<MaterialSwitch>(R.id.tproxyHotspot).isChecked
-        val tproxyTethering = advanced.findViewById<MaterialSwitch>(R.id.tproxyTethering).isChecked
-        val transparentProxy = advanced.findViewById<MaterialSwitch>(R.id.transparentProxy).isChecked
+
+        val vpnSettingsChanged = oldSocksAddress != newSocksAddress ||
+                oldSocksPort != newSocksPort ||
+                oldSocksUsername != newSocksUsername ||
+                oldSocksPassword != newSocksPassword ||
+                oldPrimaryDns != newPrimaryDns ||
+                oldSecondaryDns != newSecondaryDns ||
+                oldBypassLan != formState.bypassLan ||
+                oldEnableIpV6 != formState.enableIpV6 ||
+                oldPrimaryDnsV6 != newPrimaryDnsV6 ||
+                oldSecondaryDnsV6 != newSecondaryDnsV6 ||
+                oldSocksUdp != formState.socksUdp ||
+                oldTun2socks != formState.tun2socks ||
+                oldTunName != newTunName ||
+                oldTunMtu != tunMtu ||
+                oldTunAddress != newTunAddress ||
+                oldTunPrefix != tunPrefix ||
+                oldTunAddressV6 != newTunAddressV6 ||
+                oldTunPrefixV6 != tunPrefixV6 ||
+                oldHotspotInterface != newHotspotInterface ||
+                oldTetheringInterface != newTetheringInterface ||
+                oldTproxyAddress != newTproxyAddress ||
+                oldTproxyPort != tproxyPort ||
+                oldTproxyBypassWiFi != newTproxyBypassWiFi ||
+                oldTproxyAutoConnect != formState.tproxyAutoConnect ||
+                oldTproxyHotspot != formState.tproxyHotspot ||
+                oldTproxyTethering != formState.tproxyTethering ||
+                oldTransparentProxy != formState.transparentProxy
+
+        val stopService = vpnSettingsChanged && TProxyService.isActive()
 
         lifecycleScope.launch {
-            val vpnSettingsChanged = oldSocksAddress != settings.socksAddress ||
-                    oldSocksPort != settings.socksPort ||
-                    oldSocksUsername != settings.socksUsername ||
-                    oldSocksPassword != settings.socksPassword ||
-                    oldPrimaryDns != settings.primaryDns ||
-                    oldSecondaryDns != settings.secondaryDns ||
-                    oldBypassLan != settings.bypassLan ||
-                    oldEnableIpV6 != enableIpV6 ||
-                    oldPrimaryDnsV6 != settings.primaryDnsV6 ||
-                    oldSecondaryDnsV6 != settings.secondaryDnsV6 ||
-                    oldSocksUdp != settings.socksUdp ||
-                    oldTun2socks != settings.tun2socks ||
-                    oldTunName != settings.tunName ||
-                    oldTunMtu != settings.tunMtu ||
-                    oldTunAddress != settings.tunAddress ||
-                    oldTunPrefix != settings.tunPrefix ||
-                    oldTunAddressV6 != settings.tunAddressV6 ||
-                    oldTunPrefixV6 != settings.tunPrefixV6 ||
-                    oldHotspotInterface != hotspotInterface ||
-                    oldTetheringInterface != tetheringInterface ||
-                    oldTproxyAddress != tproxyAddress ||
-                    oldTproxyPort != tproxyPort ||
-                    oldTproxyBypassWiFi != tproxyBypassWiFi ||
-                    oldTproxyAutoConnect != tproxyAutoConnect ||
-                    oldTproxyHotspot != tproxyHotspot ||
-                    oldTproxyTethering != tproxyTethering ||
-                    oldTransparentProxy != transparentProxy
-            val stopService = vpnSettingsChanged && TProxyService.isActive()
-            if (vpnSettingsChanged && settings.transparentProxy) transparentProxyHelper.kill()
-            withContext(Dispatchers.Main) {
-                settings.enableIpV6 = enableIpV6
-                settings.hotspotInterface = hotspotInterface
-                settings.tetheringInterface = tetheringInterface
-                settings.tproxyAddress = tproxyAddress
-                settings.tproxyPort = tproxyPort
-                settings.tproxyBypassWiFi = tproxyBypassWiFi
-                settings.tproxyAutoConnect = tproxyAutoConnect
-                settings.tproxyHotspot = tproxyHotspot
-                settings.tproxyTethering = tproxyTethering
-                settings.transparentProxy = transparentProxy
-                if (stopService) TProxyService.stop(this@SettingsActivity)
-                finish()
+            if (vpnSettingsChanged && oldTransparentProxy) {
+                transparentProxyHelper.kill()
             }
+
+            settings.socksAddress = newSocksAddress
+            settings.socksPort = newSocksPort
+            settings.socksUsername = newSocksUsername
+            settings.socksPassword = newSocksPassword
+            settings.geoIpAddress = newGeoIpAddress
+            settings.geoSiteAddress = newGeoSiteAddress
+            settings.pingAddress = newPingAddress
+            settings.pingTimeout = pingTimeout
+            settings.refreshLinksInterval = refreshLinksInterval
+            settings.bypassLan = formState.bypassLan
+            settings.enableIpV6 = formState.enableIpV6
+            settings.socksUdp = formState.socksUdp
+            settings.tun2socks = formState.tun2socks
+            settings.bootAutoStart = formState.bootAutoStart
+            settings.refreshLinksOnOpen = formState.refreshLinksOnOpen
+            settings.primaryDns = newPrimaryDns
+            settings.secondaryDns = newSecondaryDns
+            settings.primaryDnsV6 = newPrimaryDnsV6
+            settings.secondaryDnsV6 = newSecondaryDnsV6
+            settings.tunName = newTunName
+            settings.tunMtu = tunMtu
+            settings.tunAddress = newTunAddress
+            settings.tunPrefix = tunPrefix
+            settings.tunAddressV6 = newTunAddressV6
+            settings.tunPrefixV6 = tunPrefixV6
+            settings.hotspotInterface = newHotspotInterface
+            settings.tetheringInterface = newTetheringInterface
+            settings.tproxyAddress = newTproxyAddress
+            settings.tproxyPort = tproxyPort
+            settings.tproxyBypassWiFi = newTproxyBypassWiFi
+            settings.tproxyAutoConnect = formState.tproxyAutoConnect
+            settings.tproxyHotspot = formState.tproxyHotspot
+            settings.tproxyTethering = formState.tproxyTethering
+            settings.transparentProxy = formState.transparentProxy
+
+            if (stopService) {
+                TProxyService.stop(this@SettingsActivity)
+            }
+
+            finish()
         }
+    }
+
+    private fun showInvalidNumber(labelRes: Int) {
+        Toast.makeText(
+            applicationContext,
+            getString(R.string.invalidNumberValue, getString(labelRes)),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 }

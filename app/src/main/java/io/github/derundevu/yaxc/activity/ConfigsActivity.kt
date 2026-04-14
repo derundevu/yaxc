@@ -1,14 +1,13 @@
 package io.github.derundevu.yaxc.activity
 
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.blacksquircle.ui.editorkit.plugin.autoindent.autoIndentation
 import com.blacksquircle.ui.editorkit.plugin.base.PluginSupplier
@@ -16,78 +15,76 @@ import com.blacksquircle.ui.editorkit.plugin.delimiters.highlightDelimiters
 import com.blacksquircle.ui.editorkit.plugin.linenumbers.lineNumbers
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import com.blacksquircle.ui.language.json.JsonLanguage
-import com.google.android.material.radiobutton.MaterialRadioButton
 import io.github.derundevu.yaxc.R
-import io.github.derundevu.yaxc.adapter.ConfigAdapter
 import io.github.derundevu.yaxc.database.Config
-import io.github.derundevu.yaxc.databinding.ActivityConfigsBinding
+import io.github.derundevu.yaxc.presentation.configs.ConfigSection
+import io.github.derundevu.yaxc.presentation.configs.ConfigsScreen
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.getValue
-import kotlin.reflect.cast
 
 class ConfigsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityConfigsBinding
-    private lateinit var config: Config
-    private lateinit var adapter: ConfigAdapter
     private val configViewModel: ConfigViewModel by viewModels()
-    private val radioGroup = mutableMapOf<String, RadioGroup>()
-    private val configEditor = mutableMapOf<String, TextProcessor>()
     private val indentSpaces = 4
+
+    private lateinit var config: Config
+    private var isLoading by mutableStateOf(true)
+    private var selectedSection by mutableStateOf(ConfigSection.Log)
+    private var modeBySection by mutableStateOf(
+        ConfigSection.entries.associateWith { Config.Mode.Disable }
+    )
+    private var textBySection by mutableStateOf(
+        ConfigSection.entries.associateWith { if (it.isArray) "[]" else "{}" }
+    )
+    private var editor: TextProcessor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = getString(R.string.configs)
-        binding = ActivityConfigsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        lifecycleScope.launch {
-            config = configViewModel.get()
-            withContext(Dispatchers.Main) {
-                val context = this@ConfigsActivity
-                val tabs = listOf("log", "dns", "inbounds", "outbounds", "routing")
-                adapter = ConfigAdapter(context, tabs) { tab, view -> setup(tab, view) }
-                binding.viewPager.adapter = adapter
-                binding.tabLayout.setupWithViewPager(binding.viewPager)
+
+        setContent {
+            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+                ConfigsScreen(
+                    selectedSection = selectedSection,
+                    currentMode = modeBySection[selectedSection] ?: Config.Mode.Disable,
+                    currentConfigText = textBySection[selectedSection].orEmpty(),
+                    isLoading = isLoading,
+                    onBack = ::finish,
+                    onSave = ::saveConfigs,
+                    onSectionSelected = ::selectSection,
+                    onModeSelected = ::selectMode,
+                    onEditorReady = ::bindEditor,
+                )
             }
         }
-    }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_configs, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.saveConfigs -> saveConfigs()
-            else -> finish()
+        lifecycleScope.launch {
+            config = configViewModel.get()
+            modeBySection = mapOf(
+                ConfigSection.Log to config.logMode,
+                ConfigSection.Dns to config.dnsMode,
+                ConfigSection.Inbounds to config.inboundsMode,
+                ConfigSection.Outbounds to config.outboundsMode,
+                ConfigSection.Routing to config.routingMode,
+            )
+            textBySection = mapOf(
+                ConfigSection.Log to config.log,
+                ConfigSection.Dns to config.dns,
+                ConfigSection.Inbounds to config.inbounds,
+                ConfigSection.Outbounds to config.outbounds,
+                ConfigSection.Routing to config.routing,
+            )
+            isLoading = false
+            editor?.setTextContent(textBySection[selectedSection].orEmpty())
         }
-        return true
     }
 
-    private fun setup(tab: String, view: View) {
-        val mode = getMode(tab)
-        val config = getConfig(tab)
+    private fun bindEditor(textProcessor: TextProcessor) {
+        if (editor === textProcessor) return
 
-        val modeRadioGroup = view.findViewById<RadioGroup>(R.id.modeRadioGroup)
-        modeRadioGroup.removeAllViews()
-        Config.Mode.entries.forEach {
-            val radio = MaterialRadioButton(this)
-            radio.text = it.name
-            radio.tag = it
-            modeRadioGroup.addView(radio)
-            if (it == mode) modeRadioGroup.check(radio.id)
-        }
-        radioGroup.put(tab, modeRadioGroup)
-
-        val editor = view.findViewById<TextProcessor>(R.id.config)
         val pluginSupplier = PluginSupplier.create {
             lineNumbers {
                 lineNumbers = true
@@ -100,83 +97,70 @@ class ConfigsActivity : AppCompatActivity() {
                 autoCloseQuotes = true
             }
         }
-        editor.language = JsonLanguage()
-        editor.setTextContent(config)
-        editor.plugins(pluginSupplier)
-        configEditor.put(tab, editor)
+
+        editor = textProcessor.apply {
+            language = JsonLanguage()
+            plugins(pluginSupplier)
+            val content = textBySection[selectedSection].orEmpty()
+            if (text.toString() != content) setTextContent(content)
+        }
     }
 
-    private fun getConfig(tab: String): String {
-        val editor = configEditor[tab]
-        val default = ""
-        return if (editor == null) {
-            when (tab) {
-                "log" -> config.log
-                "dns" -> config.dns
-                "inbounds" -> config.inbounds
-                "outbounds" -> config.outbounds
-                "routing" -> config.routing
-                else -> default
-            }
-        } else getViewConfig(tab, default)
+    private fun persistCurrentEditor() {
+        val currentText = editor?.text?.toString() ?: return
+        textBySection = textBySection.toMutableMap().also {
+            it[selectedSection] = currentText
+        }
     }
 
-    private fun getMode(tab: String): Config.Mode {
-        val group = configEditor[tab]
-        val default = Config.Mode.Disable
-        return if (group == null) {
-            when (tab) {
-                "log" -> config.logMode
-                "dns" -> config.dnsMode
-                "inbounds" -> config.inboundsMode
-                "outbounds" -> config.outboundsMode
-                "routing" -> config.routingMode
-                else -> default
-            }
-        } else getViewMode(tab, default)
+    private fun selectSection(section: ConfigSection) {
+        if (selectedSection == section) return
+        persistCurrentEditor()
+        selectedSection = section
+        editor?.setTextContent(textBySection[section].orEmpty())
     }
 
-    private fun getViewConfig(tab: String, default: String): String {
-        val editor = configEditor[tab]
-        if (editor == null) return default
-        return editor.text.toString()
+    private fun selectMode(mode: Config.Mode) {
+        modeBySection = modeBySection.toMutableMap().also {
+            it[selectedSection] = mode
+        }
     }
 
-    private fun getViewMode(tab: String, default: Config.Mode): Config.Mode {
-        val group = radioGroup[tab]
-        if (group == null) return default
-        val modeRadioButton = group.findViewById<RadioButton>(
-            group.checkedRadioButtonId
-        )
-        return Config.Mode::class.cast(modeRadioButton.tag)
-    }
-
-    private fun formatConfig(tab: String, default: String): String {
-        val json = getViewConfig(tab, default)
-        if (arrayOf("inbounds", "outbounds").contains(tab)) return JSONArray(json).toString(indentSpaces)
-        return JSONObject(json).toString(indentSpaces)
+    private fun formatConfig(section: ConfigSection, json: String): String {
+        return if (section.isArray) JSONArray(json).toString(indentSpaces)
+        else JSONObject(json).toString(indentSpaces)
     }
 
     private fun saveConfigs() {
+        if (isLoading || !::config.isInitialized) return
+        persistCurrentEditor()
+
         runCatching {
-            config.log = formatConfig("log", config.log)
-            config.dns = formatConfig("dns", config.dns)
-            config.inbounds = formatConfig("inbounds", config.inbounds)
-            config.outbounds = formatConfig("outbounds", config.outbounds)
-            config.routing = formatConfig("routing", config.routing)
-            config.logMode = getViewMode("log", config.logMode)
-            config.dnsMode = getViewMode("dns", config.dnsMode)
-            config.inboundsMode = getViewMode("inbounds", config.inboundsMode)
-            config.outboundsMode = getViewMode("outbounds", config.outboundsMode)
-            config.routingMode = getViewMode("routing", config.routingMode)
+            config.log = formatConfig(ConfigSection.Log, textBySection[ConfigSection.Log].orEmpty())
+            config.dns = formatConfig(ConfigSection.Dns, textBySection[ConfigSection.Dns].orEmpty())
+            config.inbounds = formatConfig(
+                ConfigSection.Inbounds,
+                textBySection[ConfigSection.Inbounds].orEmpty()
+            )
+            config.outbounds = formatConfig(
+                ConfigSection.Outbounds,
+                textBySection[ConfigSection.Outbounds].orEmpty()
+            )
+            config.routing = formatConfig(
+                ConfigSection.Routing,
+                textBySection[ConfigSection.Routing].orEmpty()
+            )
+            config.logMode = modeBySection[ConfigSection.Log] ?: config.logMode
+            config.dnsMode = modeBySection[ConfigSection.Dns] ?: config.dnsMode
+            config.inboundsMode = modeBySection[ConfigSection.Inbounds] ?: config.inboundsMode
+            config.outboundsMode = modeBySection[ConfigSection.Outbounds] ?: config.outboundsMode
+            config.routingMode = modeBySection[ConfigSection.Routing] ?: config.routingMode
             config
         }.onSuccess {
             configViewModel.update(it)
             finish()
         }.onFailure {
-            Toast.makeText(
-                this, "Invalid config", Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(this, getString(R.string.invalidConfig), Toast.LENGTH_SHORT).show()
         }
     }
 }

@@ -1,21 +1,23 @@
 package io.github.derundevu.yaxc.activity
 
-import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
-import android.view.Menu
-import android.view.MenuItem
-import android.view.View
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
-import io.github.derundevu.yaxc.databinding.ActivityLogsBinding
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.logs.LogsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -26,49 +28,41 @@ import java.nio.charset.StandardCharsets
 
 class LogsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityLogsBinding
-    private val settings by lazy { Settings(applicationContext) }
-
     companion object {
         private const val MAX_BUFFERED_LINES = (1 shl 14) - 1
     }
 
+    private val settings by lazy { Settings(applicationContext) }
+    private var logsText by mutableStateOf("")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = getString(R.string.logs)
-        binding = ActivityLogsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        setContent {
+            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+                LogsScreen(
+                    logsText = logsText,
+                    onBack = ::finish,
+                    onDeleteLogs = ::flush,
+                    onCopyLogs = { copyToClipboard(logsText) },
+                )
+            }
+        }
 
         lifecycleScope.launch(Dispatchers.IO) { streamingLog() }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_logs, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.deleteLogs -> flush()
-            R.id.copyLogs -> copyToClipboard(binding.logsTextView.text.toString())
-            else -> finish()
-        }
-        return true
     }
 
     private fun flush() {
         lifecycleScope.launch(Dispatchers.IO) {
             val command = if (settings.transparentProxy) {
-                listOf("echo", "''", ">", settings.xrayCoreLogs().absolutePath)
+                listOf("sh", "-c", ": > ${settings.xrayCoreLogs().absolutePath}")
             } else {
                 listOf("logcat", "-c")
             }
             val process = ProcessBuilder(command).start()
             process.waitFor()
             withContext(Dispatchers.Main) {
-                binding.logsTextView.text = ""
+                logsText = ""
             }
         }
     }
@@ -79,13 +73,12 @@ class LogsActivity : AppCompatActivity() {
             val clipData = ClipData.newPlainText(null, text)
             val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboardManager.setPrimaryClip(clipData)
-            Toast.makeText(applicationContext, "Logs copied", Toast.LENGTH_SHORT).show()
+            Toast.makeText(applicationContext, getString(R.string.logsCopied), Toast.LENGTH_SHORT).show()
         } catch (error: Exception) {
             error.printStackTrace()
         }
     }
 
-    @SuppressLint("SetTextI18n")
     private suspend fun streamingLog() = withContext(Dispatchers.IO) {
         val cmd = if (settings.transparentProxy) {
             listOf("tail", "-f", settings.xrayCoreLogs().absolutePath)
@@ -104,12 +97,11 @@ class LogsActivity : AppCompatActivity() {
             }
 
             val stdout = BufferedReader(
-                InputStreamReader(process!!.inputStream, StandardCharsets.UTF_8)
+                InputStreamReader(process.inputStream, StandardCharsets.UTF_8)
             )
             val bufferedLogLines = arrayListOf<String>()
 
             var timeLastNotify = System.nanoTime()
-            // The timeout is initially small so that the view gets populated immediately.
             var timeout = 1000000000L / 2
 
             while (true) {
@@ -119,29 +111,17 @@ class LogsActivity : AppCompatActivity() {
 
                 if (
                     bufferedLogLines.size < MAX_BUFFERED_LINES &&
-                    (timeNow - timeLastNotify) < timeout && stdout.ready()
+                    (timeNow - timeLastNotify) < timeout &&
+                    stdout.ready()
                 ) continue
 
-                // Increase the timeout after the initial view has something in it.
                 timeout = 1000000000L * 5 / 2
                 timeLastNotify = timeNow
+                val chunk = bufferedLogLines.joinToString(separator = "\n", postfix = "\n")
+                bufferedLogLines.clear()
 
                 withContext(Dispatchers.Main) {
-                    val contentHeight = binding.logsTextView.height
-                    val scrollViewHeight = binding.logsScrollView.height
-                    val isScrolledToBottomAlready =
-                        (binding.logsScrollView.scrollY + scrollViewHeight) >= contentHeight * 0.95
-                    binding.logsTextView.text =
-                        binding.logsTextView.text.toString() + bufferedLogLines.joinToString(
-                            separator = "\n",
-                            postfix = "\n"
-                        )
-                    bufferedLogLines.clear()
-                    if (isScrolledToBottomAlready) {
-                        binding.logsScrollView.post {
-                            binding.logsScrollView.fullScroll(View.FOCUS_DOWN)
-                        }
-                    }
+                    logsText += chunk
                 }
             }
         } finally {

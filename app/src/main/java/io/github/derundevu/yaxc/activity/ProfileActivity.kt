@@ -5,24 +5,29 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
+import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.blacksquircle.ui.editorkit.plugin.autoindent.autoIndentation
 import com.blacksquircle.ui.editorkit.plugin.base.PluginSupplier
 import com.blacksquircle.ui.editorkit.plugin.delimiters.highlightDelimiters
 import com.blacksquircle.ui.editorkit.plugin.linenumbers.lineNumbers
+import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import com.blacksquircle.ui.language.json.JsonLanguage
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.database.Profile
-import io.github.derundevu.yaxc.databinding.ActivityProfileBinding
 import io.github.derundevu.yaxc.helper.ConfigHelper
 import io.github.derundevu.yaxc.helper.FileHelper
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
 import io.github.derundevu.yaxc.viewmodel.ProfileViewModel
 import kotlinx.coroutines.Dispatchers
@@ -53,61 +58,68 @@ class ProfileActivity : AppCompatActivity() {
     private val settings by lazy { Settings(applicationContext) }
     private val configViewModel: ConfigViewModel by viewModels()
     private val profileViewModel: ProfileViewModel by viewModels()
-    private lateinit var binding: ActivityProfileBinding
+
     private lateinit var config: Config
     private lateinit var profile: Profile
     private var id: Long = 0L
+    private var isLoading by mutableStateOf(true)
+    private var profileName by mutableStateOf("")
+    private var profileConfigText by mutableStateOf("")
+    private var editor: TextProcessor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         id = intent.getLongExtra(PROFILE_ID, 0L)
-        title = if (isNew()) getString(R.string.newProfile) else getString(R.string.editProfile)
-        binding = ActivityProfileBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        setContent {
+            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+                ProfileScreen(
+                    title = if (isNew()) getString(R.string.newProfile) else getString(R.string.editProfile),
+                    name = profileName,
+                    configText = profileConfigText,
+                    isLoading = isLoading,
+                    onBack = ::finish,
+                    onSave = ::save,
+                    onNameChange = { profileName = it },
+                    onEditorReady = ::bindEditor,
+                )
+            }
+        }
 
         lifecycleScope.launch {
-            val config = configViewModel.get()
-            withContext(Dispatchers.Main) {
-                this@ProfileActivity.config = config
-            }
+            config = configViewModel.get()
+            resolveInitialProfile()
         }
-
-        val jsonUri = intent.data
-        if (Intent.ACTION_VIEW == intent.action && jsonUri != null) {
-            val profile = Profile()
-            profile.config = readJsonFile(jsonUri)
-            resolved(profile)
-        } else if (isNew()) {
-            val profile = Profile()
-            profile.name = intent.getStringExtra(PROFILE_NAME) ?: ""
-            profile.config = intent.getStringExtra(PROFILE_CONFIG) ?: ""
-            resolved(profile)
-        } else {
-            lifecycleScope.launch {
-                val profile = profileViewModel.find(id)
-                withContext(Dispatchers.Main) {
-                    resolved(profile)
-                }
-            }
-        }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_profile, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.saveProfile -> save()
-            else -> finish()
-        }
-        return true
     }
 
     private fun isNew() = id == 0L
+
+    private suspend fun resolveInitialProfile() {
+        val jsonUri = intent.data
+        val resolvedProfile = when {
+            Intent.ACTION_VIEW == intent.action && jsonUri != null -> {
+                Profile().also { it.config = readJsonFile(jsonUri) }
+            }
+
+            isNew() -> {
+                Profile().also {
+                    it.name = intent.getStringExtra(PROFILE_NAME) ?: ""
+                    it.config = intent.getStringExtra(PROFILE_CONFIG) ?: ""
+                }
+            }
+
+            else -> profileViewModel.find(id)
+        }
+
+        withContext(Dispatchers.Main) {
+            profile = resolvedProfile
+            profileName = profile.name
+            profileConfigText = profile.config
+            editor?.setTextContent(profile.config)
+            isLoading = false
+        }
+    }
 
     private fun readJsonFile(uri: Uri): String {
         val content = StringBuilder()
@@ -115,17 +127,14 @@ class ProfileActivity : AppCompatActivity() {
             contentResolver.openInputStream(uri)?.use { input ->
                 BufferedReader(InputStreamReader(input)).forEachLine { content.append("$it\n") }
             }
-        } catch (error: Exception) {
-            error.printStackTrace()
+        } catch (_: Exception) {
         }
         return content.toString()
     }
 
-    private fun resolved(value: Profile) {
-        profile = value
-        binding.profileName.setText(profile.name)
+    private fun bindEditor(textProcessor: TextProcessor) {
+        if (editor === textProcessor) return
 
-        val editor = binding.profileConfig
         val pluginSupplier = PluginSupplier.create {
             lineNumbers {
                 lineNumbers = true
@@ -138,14 +147,22 @@ class ProfileActivity : AppCompatActivity() {
                 autoCloseQuotes = true
             }
         }
-        editor.language = JsonLanguage()
-        editor.setTextContent(profile.config)
-        editor.plugins(pluginSupplier)
+
+        editor = textProcessor.apply {
+            language = JsonLanguage()
+            plugins(pluginSupplier)
+            if (text.toString() != profileConfigText) {
+                setTextContent(profileConfigText)
+            }
+        }
     }
 
     private fun save(check: Boolean = true) {
-        profile.name = binding.profileName.text.toString()
-        profile.config = binding.profileConfig.text.toString()
+        if (isLoading || !::config.isInitialized) return
+
+        profile.name = profileName
+        profile.config = editor?.text?.toString() ?: profileConfigText
+
         lifecycleScope.launch {
             val configHelper = runCatching { ConfigHelper(settings, config, profile.config) }
             val error = if (configHelper.isSuccess) {
@@ -187,5 +204,4 @@ class ProfileActivity : AppCompatActivity() {
             .setPositiveButton(getString(R.string.ignore)) { _, _ -> save(false) }
             .show()
     }
-
 }

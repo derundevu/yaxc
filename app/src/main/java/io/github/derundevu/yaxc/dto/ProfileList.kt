@@ -5,4 +5,5 @@ data class ProfileList(
     var index: Int,
     var name: String,
     var link: Long?,
+    var config: String = "",
 )

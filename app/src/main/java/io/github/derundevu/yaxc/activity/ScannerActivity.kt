@@ -3,6 +3,7 @@ package io.github.derundevu.yaxc.activity
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import com.budiyev.android.codescanner.AutoFocusMode
 import com.budiyev.android.codescanner.CodeScanner
@@ -11,54 +12,68 @@ import com.budiyev.android.codescanner.DecodeCallback
 import com.budiyev.android.codescanner.ErrorCallback
 import com.budiyev.android.codescanner.ScanMode
 import io.github.derundevu.yaxc.R
-import io.github.derundevu.yaxc.databinding.ActivityScannerBinding
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.scanner.ScannerScreen
 
 class ScannerActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityScannerBinding
-    private lateinit var codeScanner: CodeScanner
+    private var codeScanner: CodeScanner? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityScannerBinding.inflate(layoutInflater)
-        setContentView(binding.root)
 
-        val scannerView = findViewById<CodeScannerView>(R.id.scannerView)
-        codeScanner = CodeScanner(this, scannerView)
-        codeScanner.camera = CodeScanner.CAMERA_BACK
-        codeScanner.formats = CodeScanner.ALL_FORMATS
-        codeScanner.autoFocusMode = AutoFocusMode.SAFE
-        codeScanner.scanMode = ScanMode.SINGLE
-        codeScanner.isAutoFocusEnabled = true
-        codeScanner.isFlashEnabled = false
-
-        codeScanner.decodeCallback = DecodeCallback {
-            runOnUiThread {
-                val intent = Intent().also { intent -> intent.putExtra("link", it.text) }
-                setResult(RESULT_OK, intent)
-                finish()
+        setContent {
+            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+                ScannerScreen(
+                    onBack = ::finish,
+                    onScannerViewReady = ::setupScanner,
+                )
             }
         }
-        codeScanner.errorCallback = ErrorCallback {
-            runOnUiThread {
-                Toast.makeText(
-                    this, "Camera initialization error: ${it.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+    }
+
+    private fun setupScanner(scannerView: CodeScannerView) {
+        if (codeScanner != null) return
+
+        codeScanner = CodeScanner(this, scannerView).apply {
+            camera = CodeScanner.CAMERA_BACK
+            formats = CodeScanner.ALL_FORMATS
+            autoFocusMode = AutoFocusMode.SAFE
+            scanMode = ScanMode.SINGLE
+            isAutoFocusEnabled = true
+            isFlashEnabled = false
+
+            decodeCallback = DecodeCallback {
+                runOnUiThread {
+                    val intent = Intent().also { result ->
+                        result.putExtra("link", it.text)
+                    }
+                    setResult(RESULT_OK, intent)
+                    finish()
+                }
+            }
+            errorCallback = ErrorCallback {
+                runOnUiThread {
+                    Toast.makeText(
+                        this@ScannerActivity,
+                        getString(R.string.scannerCameraError, it.message.orEmpty()),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
 
-        scannerView.setOnClickListener { codeScanner.startPreview() }
+        scannerView.setOnClickListener { codeScanner?.startPreview() }
     }
 
     override fun onPause() {
-        codeScanner.releaseResources()
+        codeScanner?.releaseResources()
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
-        codeScanner.startPreview()
+        codeScanner?.startPreview()
     }
-
 }

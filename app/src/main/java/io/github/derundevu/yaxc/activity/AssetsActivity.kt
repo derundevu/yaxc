@@ -1,21 +1,23 @@
 package io.github.derundevu.yaxc.activity
 
-import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
-import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.isVisible
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.topjohnwu.superuser.Shell
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
-import io.github.derundevu.yaxc.databinding.ActivityAssetsBinding
 import io.github.derundevu.yaxc.helper.DownloadHelper
+import io.github.derundevu.yaxc.presentation.assets.AssetCardState
+import io.github.derundevu.yaxc.presentation.assets.AssetsScreen
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,19 +29,33 @@ import kotlin.text.toRegex
 
 class AssetsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityAssetsBinding
+    private enum class AssetKind {
+        GeoIp,
+        GeoSite,
+        XrayCore,
+    }
+
     private var downloading: Boolean = false
+    private var activeDownload: AssetKind? = null
 
     private val settings by lazy { Settings(applicationContext) }
+
+    private var geoIpState by mutableStateOf(AssetCardState(title = "GeoIP"))
+    private var geoSiteState by mutableStateOf(AssetCardState(title = "GeoSite"))
+    private var xrayCoreState by mutableStateOf(AssetCardState(title = "XTLS/Xray-core"))
+
     private val geoIpLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
-        writeToFile(it, geoIpFile())
+        writeToFile(it, geoIpFile()) { setAssetStatus() }
     }
     private val geoSiteLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
-        writeToFile(it, geoSiteFile())
+        writeToFile(it, geoSiteFile()) { setAssetStatus() }
     }
     private val xrayCoreLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
         val file = settings.xrayCoreFile()
-        writeToFile(it, file) { makeExeFile(file) }
+        writeToFile(it, file) {
+            makeExeFile(file)
+            setAssetStatus()
+        }
     }
 
     private fun geoIpFile(): File = File(applicationContext.filesDir, "geoip.dat")
@@ -47,42 +63,45 @@ class AssetsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val mimeType = "application/octet-stream"
-        title = getString(R.string.assets)
-        binding = ActivityAssetsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        setContent {
+            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+                AssetsScreen(
+                    geoIpState = geoIpState,
+                    geoSiteState = geoSiteState,
+                    xrayCoreState = xrayCoreState,
+                    onBack = ::finish,
+                    onGeoIpDownload = {
+                        download(
+                            AssetKind.GeoIp,
+                            settings.geoIpAddress,
+                            geoIpFile(),
+                        )
+                    },
+                    onGeoIpPick = { geoIpLauncher.launch(MIME_TYPE_OCTET_STREAM) },
+                    onGeoIpDelete = { delete(geoIpFile()) },
+                    onGeoSiteDownload = {
+                        download(
+                            AssetKind.GeoSite,
+                            settings.geoSiteAddress,
+                            geoSiteFile(),
+                        )
+                    },
+                    onGeoSitePick = { geoSiteLauncher.launch(MIME_TYPE_OCTET_STREAM) },
+                    onGeoSiteDelete = { delete(geoSiteFile()) },
+                    onXrayCorePick = { runAsRoot { xrayCoreLauncher.launch(MIME_TYPE_OCTET_STREAM) } },
+                    onXrayCoreDelete = { delete(settings.xrayCoreFile()) },
+                )
+            }
+        }
+
         setAssetStatus()
-
-        // GeoIP
-        binding.geoIpDownload.setOnClickListener {
-            download(settings.geoIpAddress, geoIpFile(), binding.geoIpSetup, binding.geoIpProgress)
-        }
-        binding.geoIpFile.setOnClickListener { geoIpLauncher.launch(mimeType) }
-        binding.geoIpDelete.setOnClickListener { delete(geoIpFile()) }
-
-        // GeoSite
-        binding.geoSiteDownload.setOnClickListener {
-            download(
-                settings.geoSiteAddress,
-                geoSiteFile(),
-                binding.geoSiteSetup,
-                binding.geoSiteProgress
-            )
-        }
-        binding.geoSiteFile.setOnClickListener { geoSiteLauncher.launch(mimeType) }
-        binding.geoSiteDelete.setOnClickListener { delete(geoSiteFile()) }
-
-        // XTLS/Xray-core
-        binding.xrayCoreFile.setOnClickListener { runAsRoot { xrayCoreLauncher.launch(mimeType) } }
-        binding.xrayCoreDelete.setOnClickListener { delete(settings.xrayCoreFile()) }
     }
 
-    @SuppressLint("SimpleDateFormat")
     private fun getFileDate(file: File): String {
         return if (file.exists()) {
             val date = Date(file.lastModified())
+            @Suppress("SimpleDateFormat")
             SimpleDateFormat("yyyy/MM/dd HH:mm:ss").format(date)
         } else {
             getString(R.string.noValue)
@@ -112,54 +131,75 @@ class AssetsActivity : AppCompatActivity() {
     private fun setAssetStatus() {
         val geoIp = geoIpFile()
         val geoIpExists = geoIp.exists()
-        binding.geoIpDate.text = getFileDate(geoIp)
-        binding.geoIpSetup.visibility = if (geoIpExists) View.GONE else View.VISIBLE
-        binding.geoIpInstalled.visibility = if (geoIpExists) View.VISIBLE else View.GONE
-        binding.geoIpProgress.visibility = View.GONE
+        geoIpState = geoIpState.copy(
+            title = getString(R.string.geoIp),
+            value = getFileDate(geoIp),
+            isInstalled = geoIpExists,
+            isLoading = activeDownload == AssetKind.GeoIp,
+            progress = if (activeDownload == AssetKind.GeoIp) geoIpState.progress else 0,
+        )
 
         val geoSite = geoSiteFile()
         val geoSiteExists = geoSite.exists()
-        binding.geoSiteDate.text = getFileDate(geoSite)
-        binding.geoSiteSetup.visibility = if (geoSiteExists) View.GONE else View.VISIBLE
-        binding.geoSiteInstalled.visibility = if (geoSiteExists) View.VISIBLE else View.GONE
-        binding.geoSiteProgress.visibility = View.GONE
+        geoSiteState = geoSiteState.copy(
+            title = getString(R.string.geoSite),
+            value = getFileDate(geoSite),
+            isInstalled = geoSiteExists,
+            isLoading = activeDownload == AssetKind.GeoSite,
+            progress = if (activeDownload == AssetKind.GeoSite) geoSiteState.progress else 0,
+        )
 
         val xrayCore = settings.xrayCoreFile()
         val xrayCoreExists = xrayCore.exists()
-        binding.xrayCoreVersion.text = getXrayCoreVersion(xrayCore)
-        binding.xrayCoreSetup.isVisible = !xrayCoreExists
-        binding.xrayCoreInstalled.isVisible = xrayCoreExists
+        xrayCoreState = xrayCoreState.copy(
+            title = getString(R.string.xrayLabel),
+            value = getXrayCoreVersion(xrayCore),
+            isInstalled = xrayCoreExists,
+            isLoading = false,
+            progress = 0,
+        )
     }
 
-    private fun download(url: String, file: File, setup: LinearLayout, progressBar: ProgressBar) {
+    private fun download(kind: AssetKind, url: String, file: File) {
         if (downloading) {
             Toast.makeText(
-                applicationContext, "Another download is running, please wait", Toast.LENGTH_SHORT
+                applicationContext,
+                getString(R.string.anotherDownloadRunning),
+                Toast.LENGTH_SHORT,
             ).show()
             return
         }
 
-        setup.visibility = View.GONE
-        progressBar.visibility = View.VISIBLE
-        progressBar.progress = 0
-
         downloading = true
+        activeDownload = kind
+        updateProgress(kind, 0)
+
         DownloadHelper(lifecycleScope, url, file, object : DownloadHelper.DownloadListener {
             override fun onProgress(progress: Int) {
-                progressBar.progress = progress
+                updateProgress(kind, progress)
             }
 
             override fun onError(exception: Exception) {
                 downloading = false
+                activeDownload = null
                 Toast.makeText(applicationContext, exception.message, Toast.LENGTH_SHORT).show()
                 setAssetStatus()
             }
 
             override fun onComplete() {
                 downloading = false
+                activeDownload = null
                 setAssetStatus()
             }
         }).start()
+    }
+
+    private fun updateProgress(kind: AssetKind, progress: Int) {
+        when (kind) {
+            AssetKind.GeoIp -> geoIpState = geoIpState.copy(isLoading = true, progress = progress)
+            AssetKind.GeoSite -> geoSiteState = geoSiteState.copy(isLoading = true, progress = progress)
+            AssetKind.XrayCore -> Unit
+        }
     }
 
     private fun writeToFile(uri: Uri?, file: File, cb: (() -> Unit)? = null) {
@@ -170,7 +210,7 @@ class AssetsActivity : AppCompatActivity() {
                     input?.copyTo(output)
                 }
             }
-            if (cb != null) cb()
+            cb?.invoke()
             withContext(Dispatchers.Main) {
                 setAssetStatus()
             }
@@ -197,7 +237,10 @@ class AssetsActivity : AppCompatActivity() {
             cb()
             return
         }
-        Toast.makeText(this, "Root Required", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.rootRequired), Toast.LENGTH_SHORT).show()
     }
 
+    companion object {
+        private const val MIME_TYPE_OCTET_STREAM = "application/octet-stream"
+    }
 }

@@ -33,9 +33,16 @@ class LinksManagerActivity : AppCompatActivity() {
     companion object {
         private const val LINK_REF = "ref"
         private const val DELETE_ACTION = "delete"
+        private const val REFRESH_LINK_ID = "refresh_link_id"
 
         fun refreshLinks(context: Context): Intent {
             return Intent(context, LinksManagerActivity::class.java)
+        }
+
+        fun refreshLink(context: Context, linkId: Long): Intent {
+            return Intent(context, LinksManagerActivity::class.java).apply {
+                putExtra(REFRESH_LINK_ID, linkId)
+            }
         }
 
         fun openLink(context: Context, link: Link = Link()): Intent {
@@ -61,9 +68,10 @@ class LinksManagerActivity : AppCompatActivity() {
 
         val link: Link? = IntentHelper.getParcelable(intent, LINK_REF, Link::class.java)
         val deleteAction = intent.getBooleanExtra(DELETE_ACTION, false)
+        val refreshLinkId = intent.getLongExtra(REFRESH_LINK_ID, 0L)
 
         if (link == null) {
-            refreshLinks()
+            refreshLinks(refreshLinkId.takeIf { it != 0L })
             return
         }
 
@@ -94,11 +102,12 @@ class LinksManagerActivity : AppCompatActivity() {
             .create()
     }
 
-    private fun refreshLinks() {
+    private fun refreshLinks(linkId: Long? = null) {
         val loadingDialog = loadingDialog()
         loadingDialog.show()
         lifecycleScope.launch {
             val links = linkViewModel.activeLinks()
+                .filter { linkId == null || it.id == linkId }
             links.forEach { link ->
                 val profiles = profileViewModel.linkProfiles(link.id)
                 runCatching {
