@@ -10,7 +10,9 @@ import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.widget.Toast
+import android.widget.EditText
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
@@ -37,9 +39,13 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.URI
+import kotlin.coroutines.resume
 
 class MainActivity : AppCompatActivity() {
 
@@ -47,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private val settings by lazy { Settings(applicationContext) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val mainViewModel: MainViewModel by viewModels()
+    private var batchPingJob: Job? = null
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
         if (!it) return@registerForActivityResult
@@ -111,6 +118,7 @@ class MainActivity : AppCompatActivity() {
                     profiles = uiState.filteredProfiles,
                     selectedProfileId = uiState.selectedProfileId,
                     profilesCount = uiState.profilesCount,
+                    activeBatchPingSourceId = uiState.activeBatchPingSourceId,
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),
                     tun2socksVersion = getString(R.string.tun2socksVersion),
@@ -187,7 +195,7 @@ class MainActivity : AppCompatActivity() {
         when (effect) {
             MainEffect.HandleToggleVpn -> handleToggleVpnRequest()
             MainEffect.RunPing -> runPingMeasurement()
-            MainEffect.PingAllProfiles -> Unit
+            is MainEffect.RunBatchPing -> runBatchPing(effect)
             MainEffect.RefreshLinks -> refreshLinks()
             is MainEffect.RefreshSelectedSource -> refreshSource(effect.linkId)
             MainEffect.OpenNewProfile -> {
@@ -220,6 +228,8 @@ class MainActivity : AppCompatActivity() {
                 startActivity(ProfileActivity.getIntent(applicationContext, effect.profileId))
             }
             is MainEffect.ConfirmDeleteProfile -> showDeleteProfileDialog(effect.profile)
+            is MainEffect.ShowRenameSourceDialog -> showRenameSourceDialog(effect.source)
+            is MainEffect.ConfirmDeleteSourceDialog -> showDeleteSourceDialog(effect.source)
             is MainEffect.ShowToast -> {
                 Toast.makeText(this, effect.message, Toast.LENGTH_SHORT).show()
             }
@@ -286,6 +296,38 @@ class MainActivity : AppCompatActivity() {
         startActivity(LinksManagerActivity.refreshLink(applicationContext, linkId))
     }
 
+    private fun showRenameSourceDialog(source: Link) {
+        val input = EditText(this).apply {
+            setText(source.name)
+            setSelection(source.name.length)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.renameSource))
+            .setView(input)
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.save)) { _, _ ->
+                mainViewModel.onAction(
+                    MainAction.ConfirmRenameSource(
+                        sourceId = source.id,
+                        name = input.text?.toString().orEmpty(),
+                    )
+                )
+            }
+            .show()
+    }
+
+    private fun showDeleteSourceDialog(source: Link) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.deleteSource))
+            .setMessage("\"${source.name}\" and all linked profiles will be deleted.")
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.deleteSource)) { _, _ ->
+                mainViewModel.onAction(MainAction.ConfirmDeleteSource(source.id))
+            }
+            .show()
+    }
+
     private fun openLink(uri: URI) {
         val link = Link()
         link.name = LinkHelper.remark(uri, LinkHelper.LINK_DEFAULT)
@@ -297,6 +339,43 @@ class MainActivity : AppCompatActivity() {
     private fun runPingMeasurement() {
         HttpHelper(lifecycleScope, settings).measureDelay(!settings.transparentProxy) {
             mainViewModel.onAction(MainAction.PingResultReceived(it))
+        }
+    }
+
+    private fun runBatchPing(effect: MainEffect.RunBatchPing) {
+        batchPingJob?.cancel()
+        batchPingJob = lifecycleScope.launch {
+            val restoreProfileId = effect.restoreProfileId
+            try {
+                effect.profileIds.forEach { profileId ->
+                    mainViewModel.onAction(MainAction.SetProfilePingState(profileId, io.github.derundevu.yaxc.presentation.main.MainPingState.Loading))
+                    if (settings.selectedProfile != profileId) {
+                        settings.selectedProfile = profileId
+                        TProxyService.newConfig(applicationContext)
+                        delay(650)
+                    }
+                    val result = measureDelaySuspend()
+                    mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
+                }
+            } finally {
+                if (settings.selectedProfile != restoreProfileId) {
+                    settings.selectedProfile = restoreProfileId
+                    if (restoreProfileId != 0L && mainViewModel.uiState.value.isRunning) {
+                        TProxyService.newConfig(applicationContext)
+                    }
+                }
+                mainViewModel.onAction(MainAction.SetBatchPingSource(null))
+            }
+        }
+    }
+
+    private suspend fun measureDelaySuspend(): String {
+        return suspendCancellableCoroutine { continuation ->
+            HttpHelper(lifecycleScope, settings).measureDelay(!settings.transparentProxy) { result ->
+                if (continuation.isActive) {
+                    continuation.resume(result)
+                }
+            }
         }
     }
 

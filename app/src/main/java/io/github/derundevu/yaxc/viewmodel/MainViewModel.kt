@@ -34,7 +34,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private data class RuntimeState(
         val isRunning: Boolean,
-        val pingState: MainPingState,
+        val profilePingStates: Map<Long, MainPingState>,
+        val activeBatchPingSourceId: Long?,
     )
 
     private val settings = Settings(application)
@@ -44,27 +45,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val selectedTabId = MutableStateFlow(settings.selectedLink)
     private val selectedProfileId = MutableStateFlow(settings.selectedProfile)
     private val isRunning = MutableStateFlow(false)
-    private val pingState = MutableStateFlow<MainPingState>(MainPingState.Idle)
+    private val profilePingStates = MutableStateFlow<Map<Long, MainPingState>>(emptyMap())
+    private val activeBatchPingSourceId = MutableStateFlow<Long?>(null)
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
 
     private val tabs = linkRepository.tabs.flowOn(Dispatchers.IO)
-    private val profiles = profileRepository.all.flowOn(Dispatchers.IO)
+    private val allProfiles = profileRepository.all.flowOn(Dispatchers.IO).stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        emptyList(),
+    )
     private val selection = combine(selectedTabId, selectedProfileId) { selectedTabId, selectedProfileId ->
         SelectionState(
             selectedTabId = selectedTabId,
             selectedProfileId = selectedProfileId,
         )
     }
-    private val runtime = combine(isRunning, pingState) { isRunning, pingState ->
+    private val runtime = combine(
+        isRunning,
+        profilePingStates,
+        activeBatchPingSourceId,
+    ) { isRunning, profilePingStates, activeBatchPingSourceId ->
         RuntimeState(
             isRunning = isRunning,
-            pingState = pingState,
+            profilePingStates = profilePingStates,
+            activeBatchPingSourceId = activeBatchPingSourceId,
         )
     }
 
     val uiState = combine(
         tabs,
-        profiles,
+        allProfiles,
         selection,
         runtime,
     ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState, runtime: RuntimeState ->
@@ -79,10 +90,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 MainProfileItem(
                     profile = profile,
                     summary = extractProfileSummary(profile.config),
+                    pingState = runtime.profilePingStates[profile.id] ?: MainPingState.Idle,
                 )
             }
         val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
         val selectedProfileName = selectedProfile?.name.orEmpty()
+        val selectedProfilePingState = runtime.profilePingStates[selection.selectedProfileId]
+            ?: MainPingState.Idle
         val selectedServerLabel = selectedProfile
             ?.config
             ?.let(::extractServerLabel)
@@ -98,7 +112,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedServerLabel = selectedServerLabel,
             profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
-            pingState = runtime.pingState,
+            pingState = selectedProfilePingState,
+            activeBatchPingSourceId = runtime.activeBatchPingSourceId,
         )
     }.stateIn(
         viewModelScope,
@@ -116,8 +131,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            profiles.collect { profiles ->
+            allProfiles.collect { profiles ->
                 fixIndex(profiles)
+                val validProfileIds = profiles.map { it.id }.toSet()
+                profilePingStates.value = profilePingStates.value
+                    .filterKeys { it in validProfileIds }
                 if (selectedProfileId.value != 0L && profiles.none { it.id == selectedProfileId.value }) {
                     clearSelectedProfile()
                 }
@@ -143,40 +161,99 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateVpnRunning(running: Boolean) {
         isRunning.value = running
-        if (!running) pingState.value = MainPingState.Idle
+        if (!running) {
+            activeBatchPingSourceId.value = null
+            profilePingStates.value = profilePingStates.value.mapValues { (_, value) ->
+                if (value == MainPingState.Loading) MainPingState.Idle else value
+            }
+        }
     }
 
-    fun markPingTesting() {
+    fun markPingTesting(profileId: Long) {
         if (!isRunning.value) return
-        pingState.value = MainPingState.Loading
+        setProfilePingState(profileId, MainPingState.Loading)
     }
 
-    fun updatePingResult(result: String) {
+    fun setProfilePingState(profileId: Long, state: MainPingState) {
+        profilePingStates.value = profilePingStates.value.toMutableMap().apply {
+            put(profileId, state)
+        }
+    }
+
+    private fun parsePingState(result: String): MainPingState {
         val pingLabel = "(\\d+)\\s*ms".toRegex()
             .find(result)
             ?.groupValues
             ?.getOrNull(1)
             ?.let { "$it ms" }
-        pingState.value = if (pingLabel == null) MainPingState.Idle else MainPingState.Success(pingLabel)
+        return if (pingLabel == null) {
+            MainPingState.Error(
+                getApplication<Application>().getString(R.string.mainPingFailedShort)
+            )
+        } else {
+            MainPingState.Success(pingLabel)
+        }
+    }
+
+    fun updatePingResult(profileId: Long, result: String) {
+        setProfilePingState(profileId, parsePingState(result))
+    }
+
+    private fun requestBatchPing(sourceId: Long?, profileIds: List<Long>) {
+        if (!uiState.value.isRunning) {
+            _effects.tryEmit(
+                MainEffect.ShowToast(
+                    getApplication<Application>().getString(R.string.pingNotConnected)
+                )
+            )
+            return
+        }
+        if (profileIds.isEmpty()) {
+            _effects.tryEmit(
+                MainEffect.ShowToast(
+                    getApplication<Application>().getString(R.string.mainNoProfilesInSource)
+                )
+            )
+            return
+        }
+        activeBatchPingSourceId.value = sourceId
+        val updatedStates = profilePingStates.value.toMutableMap()
+        profileIds.forEach { profileId ->
+            updatedStates[profileId] = MainPingState.Loading
+        }
+        profilePingStates.value = updatedStates
+        _effects.tryEmit(
+            MainEffect.RunBatchPing(
+                sourceId = sourceId,
+                profileIds = profileIds,
+                restoreProfileId = selectedProfileId.value,
+            )
+        )
     }
 
     fun onAction(action: MainAction) {
         when (action) {
             is MainAction.SelectTab -> selectTab(action.linkId)
             is MainAction.UpdateVpnStatus -> updateVpnRunning(action.isRunning)
-            is MainAction.PingResultReceived -> updatePingResult(action.result)
+            is MainAction.PingResultReceived -> {
+                val profileId = selectedProfileId.value
+                if (profileId != 0L) updatePingResult(profileId, action.result)
+            }
+            is MainAction.ProfilePingUpdated -> updatePingResult(action.profileId, action.result)
+            is MainAction.SetProfilePingState -> setProfilePingState(action.profileId, action.state)
             is MainAction.SelectProfile -> {
                 if (selectedProfileId.value == action.profileId) return
                 selectProfile(action.profileId)
-                if (uiState.value.isRunning) {
+                if (uiState.value.isRunning && action.reloadRuntime) {
                     _effects.tryEmit(MainEffect.ReloadCurrentConfig)
                 }
             }
             is MainAction.PingSourceClicked -> {
-                _effects.tryEmit(
-                    MainEffect.ShowToast(
-                        getApplication<Application>().getString(R.string.mainBatchPingPending)
-                    )
+                requestBatchPing(
+                    sourceId = action.linkId,
+                    profileIds = allProfiles.value
+                        .filter { it.link == action.linkId }
+                        .map { it.id },
                 )
             }
             is MainAction.RefreshSourceClicked -> {
@@ -201,17 +278,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (selectedProfileId.value == profile.id) clearSelectedProfile()
                 }
             }
+            is MainAction.RequestRenameSource -> {
+                val source = uiState.value.tabs.firstOrNull { it.id == action.sourceId } ?: return
+                _effects.tryEmit(MainEffect.ShowRenameSourceDialog(source))
+            }
+            is MainAction.ConfirmRenameSource -> {
+                val source = uiState.value.tabs.firstOrNull { it.id == action.sourceId } ?: return
+                val nextName = action.name.trim()
+                if (nextName.isBlank()) return
+                viewModelScope.launch {
+                    linkRepository.update(source.copy(name = nextName))
+                }
+            }
+            is MainAction.RequestDeleteSource -> {
+                val source = uiState.value.tabs.firstOrNull { it.id == action.sourceId } ?: return
+                _effects.tryEmit(MainEffect.ConfirmDeleteSourceDialog(source))
+            }
+            is MainAction.ConfirmDeleteSource -> {
+                val source = uiState.value.tabs.firstOrNull { it.id == action.sourceId } ?: return
+                viewModelScope.launch {
+                    linkRepository.delete(source)
+                }
+            }
+            is MainAction.MoveSource -> {
+                val currentTabs = uiState.value.tabs
+                if (
+                    action.fromIndex !in currentTabs.indices ||
+                    action.toIndex !in currentTabs.indices ||
+                    action.fromIndex == action.toIndex
+                ) return
+                val reordered = currentTabs.toMutableList().apply {
+                    add(action.toIndex, removeAt(action.fromIndex))
+                }
+                viewModelScope.launch {
+                    linkRepository.reorder(reordered.map { it.id })
+                }
+            }
+            is MainAction.SetBatchPingSource -> {
+                activeBatchPingSourceId.value = action.sourceId
+            }
             MainAction.ToggleVpnClicked -> _effects.tryEmit(MainEffect.HandleToggleVpn)
             MainAction.PingClicked -> {
                 if (!uiState.value.isRunning) return
-                markPingTesting()
+                val profileId = selectedProfileId.value
+                if (profileId == 0L) return
+                markPingTesting(profileId)
                 _effects.tryEmit(MainEffect.RunPing)
             }
             MainAction.PingAllProfilesClicked -> {
-                _effects.tryEmit(
-                    MainEffect.ShowToast(
-                        getApplication<Application>().getString(R.string.mainBatchPingPending)
-                    )
+                requestBatchPing(
+                    sourceId = uiState.value.selectedTabId.takeIf { it != 0L },
+                    profileIds = uiState.value.filteredProfiles.map { it.profile.id },
                 )
             }
             MainAction.RefreshLinksClicked -> _effects.tryEmit(MainEffect.RefreshLinks)

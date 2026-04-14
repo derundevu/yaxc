@@ -13,6 +13,9 @@ class LinkRepository(private val linkDao: LinkDao) {
     }
 
     suspend fun insert(link: Link) {
+        if (link.id == 0L) {
+            link.position = linkDao.nextPosition()
+        }
         linkDao.insert(link)
     }
 
@@ -22,5 +25,11 @@ class LinkRepository(private val linkDao: LinkDao) {
 
     suspend fun delete(link: Link) {
         linkDao.delete(link)
+    }
+
+    suspend fun reorder(ids: List<Long>) {
+        ids.forEachIndexed { index, id ->
+            linkDao.updatePosition(id, index)
+        }
     }
 }

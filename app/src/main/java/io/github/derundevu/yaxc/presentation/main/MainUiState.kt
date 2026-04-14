@@ -7,11 +7,13 @@ sealed interface MainPingState {
     data object Idle : MainPingState
     data object Loading : MainPingState
     data class Success(val label: String) : MainPingState
+    data class Error(val label: String) : MainPingState
 }
 
 data class MainProfileItem(
     val profile: ProfileList,
     val summary: String,
+    val pingState: MainPingState = MainPingState.Idle,
 )
 
 data class MainUiState(
@@ -25,4 +27,5 @@ data class MainUiState(
     val profilesCount: Int = 0,
     val isRunning: Boolean = false,
     val pingState: MainPingState = MainPingState.Idle,
+    val activeBatchPingSourceId: Long? = null,
 )

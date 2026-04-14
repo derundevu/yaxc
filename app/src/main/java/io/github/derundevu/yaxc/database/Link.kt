@@ -13,6 +13,8 @@ data class Link(
     @PrimaryKey(autoGenerate = true)
     @ColumnInfo(name = "id")
     var id: Long = 0L,
+    @ColumnInfo(name = "position")
+    var position: Int = 0,
     @ColumnInfo(name = "name")
     var name: String = "",
     @ColumnInfo(name = "address")

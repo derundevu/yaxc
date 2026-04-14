@@ -9,14 +9,20 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LinkDao {
-    @Query("SELECT * FROM links ORDER BY id ASC")
+    @Query("SELECT * FROM links ORDER BY position ASC, id ASC")
     fun all(): Flow<List<Link>>
 
-    @Query("SELECT * FROM links WHERE is_active = 1 ORDER BY id ASC")
+    @Query("SELECT * FROM links WHERE is_active = 1 ORDER BY position ASC, id ASC")
     fun tabs(): Flow<List<Link>>
 
-    @Query("SELECT * FROM links WHERE is_active = 1 ORDER BY id ASC")
+    @Query("SELECT * FROM links WHERE is_active = 1 ORDER BY position ASC, id ASC")
     suspend fun activeLinks(): List<Link>
+
+    @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM links")
+    suspend fun nextPosition(): Int
+
+    @Query("UPDATE links SET position = :position WHERE id = :id")
+    suspend fun updatePosition(id: Long, position: Int)
 
     @Insert
     suspend fun insert(link: Link): Long

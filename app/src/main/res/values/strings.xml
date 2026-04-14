@@ -58,6 +58,8 @@
     <string name="newProfile">New Profile</string>
     <string name="editProfile">Edit Profile</string>
     <string name="deleteProfile">Delete Profile</string>
+    <string name="renameSource">Rename Source</string>
+    <string name="deleteSource">Delete Source</string>
     <string name="profileName">Name</string>
     <string name="profileConfig">Config</string>
     <string name="profileScreenLead">Name the profile and edit the final JSON that will be stored locally.</string>
@@ -114,6 +116,7 @@
     <string name="mainProfilesSubtitle">%1$d profiles available • active: %2$s</string>
     <string name="mainProfilesCount">%1$d profiles</string>
     <string name="mainBatchPingPending">Batch ping for the whole source is not implemented yet.</string>
+    <string name="mainPingFailedShort">ERR</string>
     <string name="mainTrafficPlaceholder">↓ -   ↑ -</string>
     <string name="mainNoProfilesInSource">No profiles in this source yet.</string>
     <string name="mainNoSources">No active sources</string>

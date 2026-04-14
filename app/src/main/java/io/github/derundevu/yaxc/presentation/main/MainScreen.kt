@@ -7,6 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -57,6 +59,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -65,11 +69,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,6 +95,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPa
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidSurface
+import kotlin.math.abs
 
 private enum class MainRootTab {
     Connect,
@@ -108,6 +116,7 @@ fun MainScreen(
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
     profilesCount: Int,
+    activeBatchPingSourceId: Long?,
     appVersion: String,
     xrayVersion: String,
     tun2socksVersion: String,
@@ -173,16 +182,17 @@ fun MainScreen(
                                 selectedProfileName = selectedProfileName,
                                 selectedServerLabel = selectedServerLabel,
                                 pingState = pingState,
-                            profiles = profiles,
-                            selectedProfileId = selectedProfileId,
-                            profilesCount = profilesCount,
-                            listState = connectListState,
-                            collapseProgress = collapseProgress,
-                            onAction = onAction,
-                            topPadding = 86.dp,
-                            bottomPadding = connectBottomPadding,
-                        )
-                    }
+                                profiles = profiles,
+                                selectedProfileId = selectedProfileId,
+                                profilesCount = profilesCount,
+                                activeBatchPingSourceId = activeBatchPingSourceId,
+                                listState = connectListState,
+                                collapseProgress = collapseProgress,
+                                onAction = onAction,
+                                topPadding = 86.dp,
+                                bottomPadding = connectBottomPadding,
+                            )
+                        }
 
                         MainRootTab.Routing -> {
                             RoutingContent(
@@ -273,6 +283,7 @@ private fun ConnectContent(
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
     profilesCount: Int,
+    activeBatchPingSourceId: Long?,
     listState: LazyListState,
     collapseProgress: Float,
     onAction: (MainAction) -> Unit,
@@ -280,6 +291,9 @@ private fun ConnectContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
 ) {
     val spacing = YaxcTheme.spacing
+    val sourceCenters = remember { mutableStateMapOf<Long, Float>() }
+    var draggingSourceId by remember { mutableStateOf<Long?>(null) }
+    var draggingOffsetY by remember { mutableFloatStateOf(0f) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
@@ -298,6 +312,7 @@ private fun ConnectContent(
                 selectedProfileName = selectedProfileName,
                 selectedServerLabel = selectedServerLabel,
                 pingState = pingState,
+                activeBatchPingSourceId = activeBatchPingSourceId,
                 collapseProgress = collapseProgress,
                 onPingCurrent = { onAction(MainAction.PingClicked) },
                 onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
@@ -308,21 +323,70 @@ private fun ConnectContent(
             )
         }
 
-        items(
+        itemsIndexed(
             items = tabs,
-            key = { it.id },
-        ) { source ->
+            key = { _, item -> item.id },
+        ) { index, source ->
+            val isDragging = draggingSourceId == source.id
             SourceGroupCard(
                 source = source,
                 isExpanded = source.id == selectedTabId,
+                isBatchPingRunning = activeBatchPingSourceId == source.id,
                 profiles = if (source.id == selectedTabId) profiles else emptyList(),
                 selectedProfileId = selectedProfileId,
                 onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
                 onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
                 onPingAll = { onAction(MainAction.PingSourceClicked(source.id)) },
+                onRenameSource = { onAction(MainAction.RequestRenameSource(source.id)) },
+                onDeleteSource = { onAction(MainAction.RequestDeleteSource(source.id)) },
                 onSelectProfile = { onAction(MainAction.SelectProfile(it.profile.id)) },
                 onEditProfile = { onAction(MainAction.EditProfile(it.profile)) },
                 onDeleteProfile = { onAction(MainAction.RequestDeleteProfile(it.profile)) },
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationY = if (isDragging) draggingOffsetY else 0f
+                        scaleX = if (isDragging) 1.01f else 1f
+                        scaleY = if (isDragging) 1.01f else 1f
+                    }
+                    .shadow(
+                        elevation = if (isDragging) 24.dp else 0.dp,
+                        shape = RoundedCornerShape(30.dp),
+                        clip = false,
+                    )
+                    .onGloballyPositioned { coordinates ->
+                        sourceCenters[source.id] = coordinates.positionInParent().y + coordinates.size.height / 2f
+                    }
+                    .pointerInput(source.id, tabs) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                draggingSourceId = source.id
+                                draggingOffsetY = 0f
+                            },
+                            onDragCancel = {
+                                draggingSourceId = null
+                                draggingOffsetY = 0f
+                            },
+                            onDragEnd = {
+                                val sourceCenter = sourceCenters[source.id] ?: 0f
+                                val finalCenter = sourceCenter + draggingOffsetY
+                                val targetId = tabs
+                                    .map { it.id }
+                                    .filter { it != source.id }
+                                    .minByOrNull { sourceId ->
+                                        abs((sourceCenters[sourceId] ?: sourceCenter) - finalCenter)
+                                    }
+                                val toIndex = tabs.indexOfFirst { it.id == targetId }
+                                if (toIndex != -1 && toIndex != index) {
+                                    onAction(MainAction.MoveSource(index, toIndex))
+                                }
+                                draggingSourceId = null
+                                draggingOffsetY = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                draggingOffsetY += dragAmount.y
+                            },
+                        )
+                    },
             )
         }
 
@@ -484,6 +548,7 @@ private fun ConnectionTopCard(
     selectedProfileName: String,
     selectedServerLabel: String,
     pingState: MainPingState,
+    activeBatchPingSourceId: Long?,
     collapseProgress: Float,
     onPingCurrent: () -> Unit,
     onPingAll: () -> Unit,
@@ -567,6 +632,7 @@ private fun ConnectionTopCard(
                 ActionBubble(
                     icon = Icons.Outlined.WifiTethering,
                     onClick = onPingAll,
+                    loading = activeBatchPingSourceId != null,
                 )
                 ActionBubble(
                     icon = Icons.Outlined.Refresh,
@@ -1035,16 +1101,22 @@ private fun SettingsActionCard(
 private fun SourceGroupCard(
     source: Link,
     isExpanded: Boolean,
+    isBatchPingRunning: Boolean,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
     onToggleExpanded: () -> Unit,
     onRefresh: () -> Unit,
     onPingAll: () -> Unit,
+    onRenameSource: () -> Unit,
+    onDeleteSource: () -> Unit,
     onSelectProfile: (MainProfileItem) -> Unit,
     onEditProfile: (MainProfileItem) -> Unit,
     onDeleteProfile: (MainProfileItem) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    YaxcGlassPanel {
+    var actionsExpanded by remember { mutableStateOf(false) }
+
+    YaxcGlassPanel(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1073,8 +1145,37 @@ private fun SourceGroupCard(
                 )
             }
 
-            ActionBubble(icon = Icons.Outlined.WifiTethering, onClick = onPingAll)
+            ActionBubble(
+                icon = Icons.Outlined.WifiTethering,
+                onClick = onPingAll,
+                loading = isBatchPingRunning,
+            )
             ActionBubble(icon = Icons.Outlined.Refresh, onClick = onRefresh)
+            Box {
+                ActionBubble(
+                    icon = Icons.Outlined.MoreVert,
+                    onClick = { actionsExpanded = true },
+                )
+                YaxcLiquidDropdownMenu(
+                    expanded = actionsExpanded,
+                    onDismissRequest = { actionsExpanded = false },
+                ) {
+                    YaxcLiquidDropdownMenuItem(
+                        text = textResource(R.string.renameSource),
+                        onClick = {
+                            actionsExpanded = false
+                            onRenameSource()
+                        },
+                    )
+                    YaxcLiquidDropdownMenuItem(
+                        text = textResource(R.string.deleteSource),
+                        onClick = {
+                            actionsExpanded = false
+                            onDeleteSource()
+                        },
+                    )
+                }
+            }
         }
 
         if (isExpanded) {
@@ -1113,10 +1214,50 @@ private fun ProfileCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.988f else 1f,
+        animationSpec = spring(dampingRatio = 0.84f, stiffness = 760f),
+        label = "profile_card_scale",
+    )
+    val accentColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            YaxcTheme.extendedColors.success
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
+        label = "profile_card_accent",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            YaxcTheme.extendedColors.success.copy(alpha = 0.26f)
+        } else {
+            Color.White.copy(alpha = 0.12f)
+        },
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
+        label = "profile_card_border",
+    )
+    val shadowElevation by animateDpAsState(
+        targetValue = if (isSelected) 18.dp else 12.dp,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
+        label = "profile_card_shadow",
+    )
+
     YaxcGlassPanel(
-        modifier = Modifier.clickable(onClick = onSelect),
+        modifier = Modifier
+            .scale(pressScale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onSelect,
+            ),
         shape = MaterialTheme.shapes.large,
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        accentColor = accentColor,
+        borderColor = borderColor,
+        shadowElevation = shadowElevation,
     ) {
         var actionsExpanded by remember { mutableStateOf(false) }
 
@@ -1125,21 +1266,6 @@ private fun ProfileCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .padding(top = 2.dp),
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = if (isSelected) {
-                        YaxcTheme.extendedColors.success
-                    } else {
-                        YaxcTheme.extendedColors.textMuted
-                    },
-                    shape = MaterialTheme.shapes.small,
-                ) {}
-            }
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1160,10 +1286,17 @@ private fun ProfileCard(
                 )
             }
 
-            Box(modifier = Modifier.padding(start = 4.dp)) {
+            PingStateBadge(
+                pingState = profile.pingState,
+                modifier = Modifier.padding(start = 4.dp, end = 2.dp),
+            )
+
+            Box {
                 ActionBubble(
                     icon = Icons.Outlined.MoreVert,
                     onClick = { actionsExpanded = true },
+                    containerSize = 34.dp,
+                    iconSize = 16.dp,
                 )
                 YaxcLiquidDropdownMenu(
                     expanded = actionsExpanded,
@@ -1192,6 +1325,7 @@ private fun ProfileCard(
 @Composable
 private fun PingStateBadge(
     pingState: MainPingState,
+    modifier: Modifier = Modifier,
 ) {
     when (pingState) {
         MainPingState.Idle -> {
@@ -1199,12 +1333,13 @@ private fun PingStateBadge(
                 text = textResource(R.string.noValue),
                 style = MaterialTheme.typography.bodySmall,
                 color = YaxcTheme.extendedColors.textMuted,
+                modifier = modifier,
             )
         }
 
         MainPingState.Loading -> {
             CircularProgressIndicator(
-                modifier = Modifier.size(14.dp),
+                modifier = modifier.size(14.dp),
                 strokeWidth = 2.dp,
             )
         }
@@ -1214,6 +1349,16 @@ private fun PingStateBadge(
                 text = pingState.label,
                 style = MaterialTheme.typography.bodySmall,
                 color = YaxcTheme.extendedColors.success,
+                modifier = modifier,
+            )
+        }
+
+        is MainPingState.Error -> {
+            Text(
+                text = pingState.label,
+                style = MaterialTheme.typography.bodySmall,
+                color = YaxcTheme.extendedColors.danger,
+                modifier = modifier,
             )
         }
     }
@@ -1242,6 +1387,7 @@ private fun ActionBubble(
     onClick: () -> Unit,
     containerSize: androidx.compose.ui.unit.Dp = 40.dp,
     iconSize: androidx.compose.ui.unit.Dp = 20.dp,
+    loading: Boolean = false,
 ) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
@@ -1255,12 +1401,20 @@ private fun ActionBubble(
             modifier = Modifier.size(containerSize),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.76f),
-                modifier = Modifier.size(iconSize),
-            )
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(iconSize),
+                    strokeWidth = 2.dp,
+                    color = Color.White.copy(alpha = 0.82f),
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.76f),
+                    modifier = Modifier.size(iconSize),
+                )
+            }
         }
     }
 }
