@@ -8,6 +8,7 @@ import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.ProfileList
+import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
@@ -41,6 +42,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settings = Settings(application)
     private val linkRepository by lazy { getApplication<Yaxc>().linkRepository }
     private val profileRepository by lazy { getApplication<Yaxc>().profileRepository }
+    private var hasResolvedTabsSnapshot = false
+    private var hasResolvedProfilesSnapshot = false
 
     private val selectedTabId = MutableStateFlow(settings.selectedLink)
     private val selectedProfileId = MutableStateFlow(settings.selectedProfile)
@@ -79,9 +82,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selection,
         runtime,
     ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState, runtime: RuntimeState ->
+        val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
+        val fallbackTabId = selectedProfile?.link?.takeIf { linkId ->
+            tabs.any { it.id == linkId }
+        } ?: 0L
         val resolvedTabId = selection.selectedTabId.takeIf { selected ->
             selected == 0L || tabs.any { it.id == selected }
-        } ?: 0L
+        } ?: fallbackTabId
         val selectedSourceName = tabs.firstOrNull { it.id == resolvedTabId }?.name
             ?: application.getString(R.string.mainNoSourceSelected)
         val filteredProfiles = profiles
@@ -93,7 +100,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     pingState = runtime.profilePingStates[profile.id] ?: MainPingState.Idle,
                 )
             }
-        val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
         val selectedProfileName = selectedProfile?.name.orEmpty()
         val selectedProfilePingState = runtime.profilePingStates[selection.selectedProfileId]
             ?: MainPingState.Idle
@@ -125,18 +131,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             tabs.collect { tabs ->
-                if (selectedTabId.value != 0L && tabs.none { it.id == selectedTabId.value }) {
+                if (!hasResolvedTabsSnapshot) {
+                    hasResolvedTabsSnapshot = true
+                    if (tabs.isEmpty()) return@collect
+                }
+                if (selectedTabId.value != 0L && tabs.isNotEmpty() && tabs.none { it.id == selectedTabId.value }) {
                     selectTab(0L)
                 }
             }
         }
         viewModelScope.launch {
             allProfiles.collect { profiles ->
+                if (!hasResolvedProfilesSnapshot) {
+                    hasResolvedProfilesSnapshot = true
+                    if (profiles.isEmpty()) return@collect
+                }
                 fixIndex(profiles)
                 val validProfileIds = profiles.map { it.id }.toSet()
                 profilePingStates.value = profilePingStates.value
                     .filterKeys { it in validProfileIds }
-                if (selectedProfileId.value != 0L && profiles.none { it.id == selectedProfileId.value }) {
+                if (selectedProfileId.value != 0L && profiles.isNotEmpty() && profiles.none { it.id == selectedProfileId.value }) {
                     clearSelectedProfile()
                 }
             }
@@ -161,7 +175,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateVpnRunning(running: Boolean) {
         isRunning.value = running
-        if (!running) {
+        if (!running && !XrayBatchPingHelper.supportsIsolatedPing()) {
             activeBatchPingSourceId.value = null
             profilePingStates.value = profilePingStates.value.mapValues { (_, value) ->
                 if (value == MainPingState.Loading) MainPingState.Idle else value
@@ -170,7 +184,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun markPingTesting(profileId: Long) {
-        if (!isRunning.value) return
         setProfilePingState(profileId, MainPingState.Loading)
     }
 
@@ -200,7 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun requestBatchPing(sourceId: Long?, profileIds: List<Long>) {
-        if (!uiState.value.isRunning) {
+        if (!uiState.value.isRunning && !XrayBatchPingHelper.supportsIsolatedPing()) {
             _effects.tryEmit(
                 MainEffect.ShowToast(
                     getApplication<Application>().getString(R.string.pingNotConnected)
@@ -319,9 +332,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             MainAction.ToggleVpnClicked -> _effects.tryEmit(MainEffect.HandleToggleVpn)
             MainAction.PingClicked -> {
-                if (!uiState.value.isRunning) return
                 val profileId = selectedProfileId.value
                 if (profileId == 0L) return
+                if (!uiState.value.isRunning && !XrayBatchPingHelper.supportsIsolatedPing()) {
+                    _effects.tryEmit(
+                        MainEffect.ShowToast(
+                            getApplication<Application>().getString(R.string.pingNotConnected)
+                        )
+                    )
+                    return
+                }
                 markPingTesting(profileId)
                 _effects.tryEmit(MainEffect.RunPing)
             }
@@ -339,6 +359,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MainAction.OpenLinksClicked -> _effects.tryEmit(MainEffect.OpenLinks)
             MainAction.OpenLogsClicked -> _effects.tryEmit(MainEffect.OpenLogs)
             MainAction.OpenAppsRoutingClicked -> _effects.tryEmit(MainEffect.OpenAppsRouting)
+            MainAction.OpenCoreRoutingClicked -> _effects.tryEmit(MainEffect.OpenCoreRouting)
             MainAction.OpenConfigsClicked -> _effects.tryEmit(MainEffect.OpenConfigs)
             MainAction.OpenSettingsClicked -> _effects.tryEmit(MainEffect.OpenSettings)
         }

@@ -1,11 +1,12 @@
 package io.github.derundevu.yaxc.presentation.configs
 
-import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -20,16 +21,18 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import com.blacksquircle.ui.editorkit.widget.TextProcessor
 
 enum class ConfigSection(
     val title: String,
@@ -47,7 +50,6 @@ enum class ConfigSection(
 fun ConfigsScreen(
     selectedSection: ConfigSection,
     currentMode: Config.Mode,
-    currentConfigText: String,
     isLoading: Boolean,
     onBack: () -> Unit,
     onSave: () -> Unit,
@@ -138,54 +140,62 @@ fun ConfigsScreen(
             YaxcCard(
                 modifier = Modifier.weight(1f),
             ) {
-                Text(
-                    text = textResource(R.string.profileConfig),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
-
-                if (isLoading) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                     Text(
-                        text = textResource(R.string.loadingConfig),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YaxcTheme.extendedColors.textMuted,
+                        text = textResource(R.string.profileConfig),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 12.dp),
                     )
-                } else {
-                    JsonEditor(
-                        context = context,
-                        configText = currentConfigText,
-                        onEditorReady = onEditorReady,
-                    )
+
+                    if (isLoading) {
+                        Text(
+                            text = textResource(R.string.loadingConfig),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = YaxcTheme.extendedColors.textMuted,
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.16f),
+                                    shape = RoundedCornerShape(20.dp),
+                                ),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(10.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
+                                        shape = RoundedCornerShape(16.dp),
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = YaxcTheme.extendedColors.cardBorder.copy(alpha = 0.7f),
+                                        shape = RoundedCornerShape(16.dp),
+                                    ),
+                            ) {
+                                YaxcJsonEditor(
+                                    context = context,
+                                    onEditorReady = onEditorReady,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(8.dp),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun JsonEditor(
-    context: Context,
-    configText: String,
-    onEditorReady: (TextProcessor) -> Unit,
-) {
-    AndroidView(
-        factory = {
-            TextProcessor(context).also {
-                it.setTextContent(configText)
-                onEditorReady(it)
-            }
-        },
-        update = {
-            if (it.text.toString() != configText && it.text.isEmpty()) {
-                it.setTextContent(configText)
-            }
-            onEditorReady(it)
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 320.dp),
-    )
 }
 
 @Composable

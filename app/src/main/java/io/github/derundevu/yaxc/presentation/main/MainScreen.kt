@@ -1,5 +1,12 @@
 package io.github.derundevu.yaxc.presentation.main
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -60,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +75,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -135,10 +144,10 @@ fun MainScreen(
         drawRect(backdropBaseColor)
         drawContent()
     }
-    var rootTab by rememberSaveable { mutableStateOf(MainRootTab.Connect) }
-    val shouldCollapseControls by remember(rootTab, connectListState, density) {
+    var rootTabOrdinal by rememberSaveable { mutableIntStateOf(MainRootTab.Connect.ordinal) }
+    val rootTab = MainRootTab.entries[rootTabOrdinal]
+    val shouldCollapseControls by remember(connectListState, density) {
         derivedStateOf {
-            if (rootTab != MainRootTab.Connect) return@derivedStateOf false
             val collapseTriggerPx = with(density) { 124.dp.roundToPx() }
             connectListState.firstVisibleItemIndex > 0 ||
                 connectListState.firstVisibleItemScrollOffset >= collapseTriggerPx
@@ -172,49 +181,73 @@ fun MainScreen(
                         .background(YaxcTheme.backgroundBrush)
                         .layerBackdrop(backdrop = backdrop),
                 ) {
-                    when (rootTab) {
-                        MainRootTab.Connect -> {
-                            ConnectContent(
-                                tabs = tabs,
-                                selectedTabId = selectedTabId,
-                                isRunning = isRunning,
-                                selectedSourceName = selectedSourceName,
-                                selectedProfileName = selectedProfileName,
-                                selectedServerLabel = selectedServerLabel,
-                                pingState = pingState,
-                                profiles = profiles,
-                                selectedProfileId = selectedProfileId,
-                                profilesCount = profilesCount,
-                                activeBatchPingSourceId = activeBatchPingSourceId,
-                                listState = connectListState,
-                                collapseProgress = collapseProgress,
-                                onAction = onAction,
-                                topPadding = 86.dp,
-                                bottomPadding = connectBottomPadding,
+                    AnimatedContent(
+                        targetState = rootTab,
+                        transitionSpec = {
+                            val duration = 320
+                            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                            ContentTransform(
+                                targetContentEnter = slideInHorizontally(
+                                    animationSpec = tween(durationMillis = duration),
+                                    initialOffsetX = { fullWidth -> fullWidth * direction },
+                                ),
+                                initialContentExit = slideOutHorizontally(
+                                    animationSpec = tween(durationMillis = duration),
+                                    targetOffsetX = { fullWidth -> -fullWidth * direction },
+                                ),
+                                sizeTransform = SizeTransform(clip = false),
                             )
-                        }
+                        },
+                        label = "main_root_content",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clipToBounds(),
+                    ) { currentRootTab ->
+                        when (currentRootTab) {
+                            MainRootTab.Connect -> {
+                                ConnectContent(
+                                    tabs = tabs,
+                                    selectedTabId = selectedTabId,
+                                    isRunning = isRunning,
+                                    selectedSourceName = selectedSourceName,
+                                    selectedProfileName = selectedProfileName,
+                                    selectedServerLabel = selectedServerLabel,
+                                    pingState = pingState,
+                                    profiles = profiles,
+                                    selectedProfileId = selectedProfileId,
+                                    profilesCount = profilesCount,
+                                    activeBatchPingSourceId = activeBatchPingSourceId,
+                                    listState = connectListState,
+                                    collapseProgress = collapseProgress,
+                                    onAction = onAction,
+                                    topPadding = 86.dp,
+                                    bottomPadding = connectBottomPadding,
+                                )
+                            }
 
-                        MainRootTab.Routing -> {
-                            RoutingContent(
-                                topPadding = 86.dp,
-                                bottomPadding = tabBottomPadding,
-                                onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
-                            )
-                        }
+                            MainRootTab.Routing -> {
+                                RoutingContent(
+                                    topPadding = 86.dp,
+                                    bottomPadding = tabBottomPadding,
+                                    onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
+                                    onOpenCoreRouting = { onAction(MainAction.OpenCoreRoutingClicked) },
+                                )
+                            }
 
-                        MainRootTab.Settings -> {
-                            SettingsContent(
-                                appVersion = appVersion,
-                                xrayVersion = xrayVersion,
-                                tun2socksVersion = tun2socksVersion,
-                                topPadding = 86.dp,
-                                bottomPadding = tabBottomPadding,
-                                onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
-                                onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
-                                onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
-                                onOpenConfigs = { onAction(MainAction.OpenConfigsClicked) },
-                                onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
-                            )
+                            MainRootTab.Settings -> {
+                                SettingsContent(
+                                    appVersion = appVersion,
+                                    xrayVersion = xrayVersion,
+                                    tun2socksVersion = tun2socksVersion,
+                                    topPadding = 86.dp,
+                                    bottomPadding = tabBottomPadding,
+                                    onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
+                                    onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
+                                    onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
+                                    onOpenConfigs = { onAction(MainAction.OpenConfigsClicked) },
+                                    onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
+                                )
+                            }
                         }
                     }
                 }
@@ -259,7 +292,7 @@ fun MainScreen(
                 MainLiquidTabBar(
                     backdrop = backdrop,
                     selectedTab = rootTab,
-                    onSelectTab = { rootTab = it },
+                    onSelectTab = { rootTabOrdinal = it.ordinal },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .zIndex(2f)
@@ -291,9 +324,15 @@ private fun ConnectContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
 ) {
     val spacing = YaxcTheme.spacing
+    val density = LocalDensity.current
+    val sourceSpacingPx = remember(density, spacing.md) {
+        with(density) { spacing.md.toPx() }
+    }
     val sourceCenters = remember { mutableStateMapOf<Long, Float>() }
+    val sourceHeights = remember { mutableStateMapOf<Long, Float>() }
     var draggingSourceId by remember { mutableStateOf<Long?>(null) }
     var draggingOffsetY by remember { mutableFloatStateOf(0f) }
+    var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
@@ -328,6 +367,65 @@ private fun ConnectContent(
             key = { _, item -> item.id },
         ) { index, source ->
             val isDragging = draggingSourceId == source.id
+            val draggedIndex = draggingSourceId?.let { sourceId ->
+                tabs.indexOfFirst { it.id == sourceId }.takeIf { it >= 0 }
+            }
+            val draggedHeight = draggingSourceId?.let { sourceHeights[it] } ?: 0f
+            val displacedOffsetTarget = when {
+                isDragging -> draggingOffsetY
+                draggedIndex == null || draggingTargetIndex == null -> 0f
+                draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
+                    -(draggedHeight + sourceSpacingPx)
+                draggedIndex > draggingTargetIndex!! && index in draggingTargetIndex!! until draggedIndex ->
+                    draggedHeight + sourceSpacingPx
+                else -> 0f
+            }
+            val displacedOffset by animateFloatAsState(
+                targetValue = displacedOffsetTarget,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
+                label = "source_group_displacement",
+            )
+            val dragModifier = if (source.id == selectedTabId) {
+                Modifier
+            } else {
+                Modifier.pointerInput(source.id, tabs) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = {
+                            draggingSourceId = source.id
+                            draggingOffsetY = 0f
+                            draggingTargetIndex = index
+                        },
+                        onDragCancel = {
+                            draggingSourceId = null
+                            draggingOffsetY = 0f
+                            draggingTargetIndex = null
+                        },
+                        onDragEnd = {
+                            val toIndex = draggingTargetIndex
+                            if (toIndex != null && toIndex != index) {
+                                onAction(MainAction.MoveSource(index, toIndex))
+                            }
+                            draggingSourceId = null
+                            draggingOffsetY = 0f
+                            draggingTargetIndex = null
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            draggingOffsetY += dragAmount.y
+                            val sourceCenter = sourceCenters[source.id] ?: 0f
+                            val finalCenter = sourceCenter + draggingOffsetY
+                            val targetId = tabs
+                                .map { it.id }
+                                .minByOrNull { sourceId ->
+                                    abs((sourceCenters[sourceId] ?: sourceCenter) - finalCenter)
+                                }
+                            draggingTargetIndex = tabs.indexOfFirst { it.id == targetId }
+                                .takeIf { it >= 0 }
+                                ?: index
+                        },
+                    )
+                }
+            }
             SourceGroupCard(
                 source = source,
                 isExpanded = source.id == selectedTabId,
@@ -342,12 +440,14 @@ private fun ConnectContent(
                 onSelectProfile = { onAction(MainAction.SelectProfile(it.profile.id)) },
                 onEditProfile = { onAction(MainAction.EditProfile(it.profile)) },
                 onDeleteProfile = { onAction(MainAction.RequestDeleteProfile(it.profile)) },
+                dragModifier = dragModifier,
                 modifier = Modifier
                     .graphicsLayer {
-                        translationY = if (isDragging) draggingOffsetY else 0f
+                        translationY = displacedOffset
                         scaleX = if (isDragging) 1.01f else 1f
                         scaleY = if (isDragging) 1.01f else 1f
                     }
+                    .zIndex(if (isDragging) 3f else 0f)
                     .shadow(
                         elevation = if (isDragging) 24.dp else 0.dp,
                         shape = RoundedCornerShape(30.dp),
@@ -355,38 +455,8 @@ private fun ConnectContent(
                     )
                     .onGloballyPositioned { coordinates ->
                         sourceCenters[source.id] = coordinates.positionInParent().y + coordinates.size.height / 2f
+                        sourceHeights[source.id] = coordinates.size.height.toFloat()
                     }
-                    .pointerInput(source.id, tabs) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                draggingSourceId = source.id
-                                draggingOffsetY = 0f
-                            },
-                            onDragCancel = {
-                                draggingSourceId = null
-                                draggingOffsetY = 0f
-                            },
-                            onDragEnd = {
-                                val sourceCenter = sourceCenters[source.id] ?: 0f
-                                val finalCenter = sourceCenter + draggingOffsetY
-                                val targetId = tabs
-                                    .map { it.id }
-                                    .filter { it != source.id }
-                                    .minByOrNull { sourceId ->
-                                        abs((sourceCenters[sourceId] ?: sourceCenter) - finalCenter)
-                                    }
-                                val toIndex = tabs.indexOfFirst { it.id == targetId }
-                                if (toIndex != -1 && toIndex != index) {
-                                    onAction(MainAction.MoveSource(index, toIndex))
-                                }
-                                draggingSourceId = null
-                                draggingOffsetY = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                draggingOffsetY += dragAmount.y
-                            },
-                        )
-                    },
             )
         }
 
@@ -409,6 +479,7 @@ private fun RoutingContent(
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenAppsRouting: () -> Unit,
+    onOpenCoreRouting: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     LazyColumn(
@@ -450,6 +521,39 @@ private fun RoutingContent(
                     ActionBubble(
                         icon = Icons.AutoMirrored.Outlined.ArrowForwardIos,
                         onClick = onOpenAppsRouting,
+                    )
+                }
+            }
+        }
+        item {
+            YaxcGlassPanel {
+                Text(
+                    text = textResource(R.string.coreRouting),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = textResource(R.string.coreRoutingLead),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = textResource(R.string.coreRouting),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    ActionBubble(
+                        icon = Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                        onClick = onOpenCoreRouting,
                     )
                 }
             }
@@ -1112,6 +1216,7 @@ private fun SourceGroupCard(
     onSelectProfile: (MainProfileItem) -> Unit,
     onEditProfile: (MainProfileItem) -> Unit,
     onDeleteProfile: (MainProfileItem) -> Unit,
+    dragModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
@@ -1125,6 +1230,7 @@ private fun SourceGroupCard(
             Row(
                 modifier = Modifier
                     .weight(1f)
+                    .then(dragModifier)
                     .clickable(onClick = onToggleExpanded)
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,

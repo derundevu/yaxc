@@ -27,11 +27,13 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.helper.LinkHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
+import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -40,12 +42,20 @@ import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.net.URI
 import kotlin.coroutines.resume
+import kotlin.reflect.cast
 
 class MainActivity : AppCompatActivity() {
 
@@ -53,6 +63,8 @@ class MainActivity : AppCompatActivity() {
     private val settings by lazy { Settings(applicationContext) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val mainViewModel: MainViewModel by viewModels()
+    private val configRepository by lazy { Yaxc::class.cast(application).configRepository }
+    private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
     private var batchPingJob: Job? = null
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
@@ -217,6 +229,9 @@ class MainActivity : AppCompatActivity() {
             MainEffect.OpenAppsRouting -> {
                 startActivity(Intent(applicationContext, AppsRoutingActivity::class.java))
             }
+            MainEffect.OpenCoreRouting -> {
+                startActivity(Intent(applicationContext, CoreRoutingActivity::class.java))
+            }
             MainEffect.OpenConfigs -> {
                 startActivity(Intent(applicationContext, ConfigsActivity::class.java))
             }
@@ -337,6 +352,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runPingMeasurement() {
+        val profileId = mainViewModel.uiState.value.selectedProfileId
+        if (profileId == 0L) return
+
+        if (XrayBatchPingHelper.supportsIsolatedPing()) {
+            lifecycleScope.launch {
+                val result = try {
+                    val profile = profileRepository.find(profileId)
+                    val globalConfig = configRepository.get()
+                    XrayBatchPingHelper.measureProfileDelay(
+                        context = applicationContext,
+                        settings = settings,
+                        globalConfig = globalConfig,
+                        profile = profile,
+                    )
+                } catch (error: Exception) {
+                    error.message ?: "Ping failed"
+                }
+                mainViewModel.onAction(MainAction.PingResultReceived(result))
+            }
+            return
+        }
+
         HttpHelper(lifecycleScope, settings).measureDelay(!settings.transparentProxy) {
             mainViewModel.onAction(MainAction.PingResultReceived(it))
         }
@@ -346,19 +383,15 @@ class MainActivity : AppCompatActivity() {
         batchPingJob?.cancel()
         batchPingJob = lifecycleScope.launch {
             val restoreProfileId = effect.restoreProfileId
+            val supportsIsolatedPing = XrayBatchPingHelper.supportsIsolatedPing()
             try {
-                effect.profileIds.forEach { profileId ->
-                    mainViewModel.onAction(MainAction.SetProfilePingState(profileId, io.github.derundevu.yaxc.presentation.main.MainPingState.Loading))
-                    if (settings.selectedProfile != profileId) {
-                        settings.selectedProfile = profileId
-                        TProxyService.newConfig(applicationContext)
-                        delay(650)
-                    }
-                    val result = measureDelaySuspend()
-                    mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
+                if (supportsIsolatedPing) {
+                    runIsolatedBatchPing(effect.profileIds)
+                } else {
+                    runLegacyBatchPing(effect.profileIds)
                 }
             } finally {
-                if (settings.selectedProfile != restoreProfileId) {
+                if (!supportsIsolatedPing && settings.selectedProfile != restoreProfileId) {
                     settings.selectedProfile = restoreProfileId
                     if (restoreProfileId != 0L && mainViewModel.uiState.value.isRunning) {
                         TProxyService.newConfig(applicationContext)
@@ -366,6 +399,65 @@ class MainActivity : AppCompatActivity() {
                 }
                 mainViewModel.onAction(MainAction.SetBatchPingSource(null))
             }
+        }
+    }
+
+    private suspend fun runIsolatedBatchPing(profileIds: List<Long>) {
+        val globalConfig = configRepository.get()
+        val profiles = buildList {
+            profileIds.forEach { profileId ->
+                val profile = try {
+                    profileRepository.find(profileId)
+                } catch (_: Exception) {
+                    null
+                }
+                if (profile != null) add(profile)
+            }
+        }
+        if (profiles.isEmpty()) return
+
+        val maxWorkers = minOf(20, profiles.size)
+        val semaphore = Semaphore(maxWorkers)
+
+        supervisorScope {
+            profiles.map { profile ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        if (!isActive) return@withPermit
+                        val result = try {
+                            XrayBatchPingHelper.measureProfileDelay(
+                                context = applicationContext,
+                                settings = settings,
+                                globalConfig = globalConfig,
+                                profile = profile,
+                            )
+                        } catch (error: Exception) {
+                            error.message ?: "Ping failed"
+                        }
+                        if (isActive) {
+                            mainViewModel.onAction(MainAction.ProfilePingUpdated(profile.id, result))
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
+    private suspend fun runLegacyBatchPing(profileIds: List<Long>) {
+        profileIds.forEach { profileId ->
+            mainViewModel.onAction(
+                MainAction.SetProfilePingState(
+                    profileId,
+                    io.github.derundevu.yaxc.presentation.main.MainPingState.Loading,
+                )
+            )
+            if (settings.selectedProfile != profileId) {
+                settings.selectedProfile = profileId
+                TProxyService.newConfig(applicationContext)
+                delay(650)
+            }
+            val result = measureDelaySuspend()
+            mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
         }
     }
 

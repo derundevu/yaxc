@@ -39,6 +39,9 @@ class Settings(private val context: Context) {
     var appsRouting: String
         get() = sharedPreferences.getString("excludedApps", "")!!
         set(value) = sharedPreferences.edit { putString("excludedApps", value) }
+    var coreRoutingUiRules: String
+        get() = sharedPreferences.getString("coreRoutingUiRules", "[]")!!
+        set(value) = sharedPreferences.edit { putString("coreRoutingUiRules", value) }
 
     /** Tun Routes */
     var tunRoutes: Set<String>

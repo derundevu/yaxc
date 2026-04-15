@@ -1,6 +1,8 @@
 package io.github.derundevu.yaxc.activity
 
 import android.os.Bundle
+import android.graphics.Color
+import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -50,7 +52,6 @@ class ConfigsActivity : AppCompatActivity() {
                 ConfigsScreen(
                     selectedSection = selectedSection,
                     currentMode = modeBySection[selectedSection] ?: Config.Mode.Disable,
-                    currentConfigText = textBySection[selectedSection].orEmpty(),
                     isLoading = isLoading,
                     onBack = ::finish,
                     onSave = ::saveConfigs,
@@ -99,8 +100,15 @@ class ConfigsActivity : AppCompatActivity() {
         }
 
         editor = textProcessor.apply {
+            val contentPadding = (14 * resources.displayMetrics.density).toInt()
             language = JsonLanguage()
             plugins(pluginSupplier)
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(android.graphics.Color.parseColor("#F2F6FC"))
+            setHintTextColor(android.graphics.Color.parseColor("#738399"))
+            setPadding(contentPadding, contentPadding, contentPadding, contentPadding)
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             val content = textBySection[selectedSection].orEmpty()
             if (text.toString() != content) setTextContent(content)
         }

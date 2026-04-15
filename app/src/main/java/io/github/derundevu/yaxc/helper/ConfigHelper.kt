@@ -75,11 +75,20 @@ class ConfigHelper(
         return JSONObject().put("loglevel", "warning")
     }
 
+    private fun managedDnsServers(): JSONArray {
+        return JSONArray()
+            .put(settings.primaryDns)
+            .put(settings.secondaryDns)
+            .apply {
+                if (settings.enableIpV6) {
+                    put(settings.primaryDnsV6)
+                    put(settings.secondaryDnsV6)
+                }
+            }
+    }
+
     private fun runtimeDns(): JSONObject {
-        return JSONObject().put(
-            "servers",
-            JSONArray().put(settings.primaryDns).put(settings.secondaryDns)
-        )
+        return JSONObject().put("servers", managedDnsServers())
     }
 
     private fun runtimeInbounds(): JSONArray {
@@ -149,7 +158,7 @@ class ConfigHelper(
             rules.put(proxyDns)
         } else {
             val proxyDns = JSONObject()
-                .put("ip", JSONArray().put(settings.primaryDns).put(settings.secondaryDns))
+                .put("ip", managedDnsServers())
                 .put("port", 53)
                 .put("outboundTag", "proxy")
             rules.put(proxyDns)

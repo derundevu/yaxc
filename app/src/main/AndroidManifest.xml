@@ -67,6 +67,12 @@
             android:name=".activity.ScannerActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity
+            android:name=".activity.RoutingActivity"
+            android:parentActivityName=".activity.MainActivity" />
+        <activity
+            android:name=".activity.SettingsHomeActivity"
+            android:parentActivityName=".activity.MainActivity" />
+        <activity
             android:name=".activity.AssetsActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity
@@ -77,6 +83,9 @@
             android:parentActivityName=".activity.MainActivity" />
         <activity
             android:name=".activity.AppsRoutingActivity"
+            android:parentActivityName=".activity.MainActivity" />
+        <activity
+            android:name=".activity.CoreRoutingActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity
             android:name=".activity.ConfigsActivity"

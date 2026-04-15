@@ -18,6 +18,9 @@ import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
 import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.launch
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.net.InetAddress
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -125,6 +128,19 @@ class SettingsActivity : AppCompatActivity() {
             .filter(String::isNotBlank)
             .toSet()
 
+        if (!isValidIpv4Address(newPrimaryDns)) {
+            return showInvalidIpAddress(R.string.primaryDns)
+        }
+        if (!isValidIpv4Address(newSecondaryDns)) {
+            return showInvalidIpAddress(R.string.secondaryDns)
+        }
+        if (!isValidIpv6Address(newPrimaryDnsV6)) {
+            return showInvalidIpAddress(R.string.primaryDnsV6)
+        }
+        if (!isValidIpv6Address(newSecondaryDnsV6)) {
+            return showInvalidIpAddress(R.string.secondaryDnsV6)
+        }
+
         val vpnSettingsChanged = oldSocksAddress != newSocksAddress ||
                 oldSocksPort != newSocksPort ||
                 oldSocksUsername != newSocksUsername ||
@@ -209,5 +225,31 @@ class SettingsActivity : AppCompatActivity() {
             getString(R.string.invalidNumberValue, getString(labelRes)),
             Toast.LENGTH_SHORT,
         ).show()
+    }
+
+    private fun showInvalidIpAddress(labelRes: Int) {
+        Toast.makeText(
+            applicationContext,
+            getString(R.string.invalidIpAddressValue, getString(labelRes)),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    private fun isValidIpv4Address(value: String): Boolean {
+        if (value.isBlank()) return false
+        val parts = value.split('.')
+        if (parts.size != 4) return false
+        if (parts.any { it.isBlank() || (it.length > 1 && it.startsWith('0')) }) return false
+        if (parts.any { part -> part.toIntOrNull()?.let { it in 0..255 } != true }) return false
+        return parseAddress(value) is Inet4Address
+    }
+
+    private fun isValidIpv6Address(value: String): Boolean {
+        if (value.isBlank() || ':' !in value) return false
+        return parseAddress(value) is Inet6Address
+    }
+
+    private fun parseAddress(value: String): InetAddress? {
+        return runCatching { InetAddress.getByName(value) }.getOrNull()
     }
 }

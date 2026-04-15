@@ -1,9 +1,10 @@
 package XrayCore
 
 import (
-	"github.com/xtls/xray-core/infra/conf"
 	"github.com/xtls/libxray/nodep"
 	"github.com/xtls/libxray/share"
+	"github.com/xtls/libxray/xray"
+	"github.com/xtls/xray-core/infra/conf"
 	"XrayCore/lib"
 )
 
@@ -30,4 +31,10 @@ func Json(link string) string {
 	var response nodep.CallResponse[*conf.Config]
 	xrayJson, err := share.ConvertShareLinksToXrayJson(link)
 	return response.EncodeToBase64(xrayJson, err)
+}
+
+func Ping(dir string, config string, timeout int, url string, proxy string) string {
+	var response nodep.CallResponse[int64]
+	delay, err := xray.Ping(dir, config, timeout, url, proxy)
+	return response.EncodeToBase64(delay, err)
 }

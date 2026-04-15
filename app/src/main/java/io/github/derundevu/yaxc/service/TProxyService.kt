@@ -164,6 +164,12 @@ class TProxyService : VpnService() {
             configHelper.exceptionOrNull()?.message ?: getString(R.string.invalidProfile)
         }
         if (error.isNotEmpty()) {
+            Log.e(
+                "TProxyService",
+                "Runtime config validation failed: $error; configPath=${config.absolutePath}; " +
+                    "dns4=${settings.primaryDns},${settings.secondaryDns}; " +
+                    "dns6=${settings.primaryDnsV6},${settings.secondaryDnsV6}; ipv6=${settings.enableIpV6}"
+            )
             showToast(error)
             return null
         }
@@ -207,75 +213,86 @@ class TProxyService : VpnService() {
             transparentProxyHelper.enableProxy()
             transparentProxyHelper.monitorNetwork()
         } else if (settings.tun2socks) {
-            /** Create Tun */
-            val tun = Builder()
-            val tunName = getString(R.string.appName)
+            val result = runCatching {
+                /** Create Tun */
+                val tun = Builder()
+                val tunName = settings.tunName.trim().ifBlank { getString(R.string.appName) }
 
-            /** Basic tun config */
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tun.setMetered(false)
-            tun.setMtu(settings.tunMtu)
-            tun.setSession(tunName)
+                /** Basic tun config */
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tun.setMetered(false)
+                tun.setMtu(settings.tunMtu)
+                tun.setSession(tunName)
 
-            /** IPv4 */
-            tun.addAddress(settings.tunAddress, settings.tunPrefix)
-            tun.addDnsServer(settings.primaryDns)
-            tun.addDnsServer(settings.secondaryDns)
+                /** IPv4 */
+                tun.addAddress(settings.tunAddress, settings.tunPrefix)
+                tun.addDnsServer(settings.primaryDns)
+                tun.addDnsServer(settings.secondaryDns)
 
-            /** IPv6 */
-            if (settings.enableIpV6) {
-                tun.addAddress(settings.tunAddressV6, settings.tunPrefixV6)
-                tun.addDnsServer(settings.primaryDnsV6)
-                tun.addDnsServer(settings.secondaryDnsV6)
-                tun.addRoute("::", 0)
-            }
-
-            /** Bypass LAN (IPv4) */
-            if (settings.bypassLan) {
-                settings.tunRoutes.forEach {
-                    val address = it.split('/')
-                    tun.addRoute(address[0], address[1].toInt())
+                /** IPv6 */
+                if (settings.enableIpV6) {
+                    tun.addAddress(settings.tunAddressV6, settings.tunPrefixV6)
+                    tun.addDnsServer(settings.primaryDnsV6)
+                    tun.addDnsServer(settings.secondaryDnsV6)
+                    tun.addRoute("::", 0)
                 }
-            } else {
-                tun.addRoute("0.0.0.0", 0)
+
+                /** Bypass LAN (IPv4) */
+                if (settings.bypassLan) {
+                    settings.tunRoutes.forEach {
+                        val address = it.split('/')
+                        tun.addRoute(address[0], address[1].toInt())
+                    }
+                } else {
+                    tun.addRoute("0.0.0.0", 0)
+                }
+
+                /** Apps Routing */
+                applyAppsRouting(tun)
+
+                /** Build tun device */
+                tunDevice = tun.establish()
+
+                /** Check tun device */
+                if (tunDevice == null) {
+                    error("tun#establish failed")
+                }
+
+                /** Create, Update tun2socks config */
+                val tun2socksConfig = arrayListOf(
+                    "tunnel:",
+                    "  name: $tunName",
+                    "  mtu: ${settings.tunMtu}",
+                    "socks5:",
+                    "  address: ${settings.socksAddress}",
+                    "  port: ${settings.socksPort}",
+                )
+                if (
+                    settings.socksUsername.trim().isNotEmpty() &&
+                    settings.socksPassword.trim().isNotEmpty()
+                ) {
+                    tun2socksConfig.add("  username: ${settings.socksUsername}")
+                    tun2socksConfig.add("  password: ${settings.socksPassword}")
+                }
+                tun2socksConfig.add(if (settings.socksUdp) "  udp: udp" else "  udp: tcp")
+                tun2socksConfig.add("")
+                FileHelper.createOrUpdate(
+                    settings.tun2socksConfig(),
+                    tun2socksConfig.joinToString("\n")
+                )
+
+                /** Start tun2socks */
+                TProxyStartService(settings.tun2socksConfig().absolutePath, tunDevice!!.fd)
             }
-
-            /** Apps Routing */
-            applyAppsRouting(tun)
-
-            /** Build tun device */
-            tunDevice = tun.establish()
-
-            /** Check tun device */
-            if (tunDevice == null) {
-                Log.e("TProxyService", "tun#establish failed")
+            result.exceptionOrNull()?.let { error ->
+                Log.e(
+                    "TProxyService",
+                    "Failed to start tun2socks VPN; dns4=${settings.primaryDns},${settings.secondaryDns}; " +
+                        "dns6=${settings.primaryDnsV6},${settings.secondaryDnsV6}; ipv6=${settings.enableIpV6}",
+                    error
+                )
+                showToast(error.message ?: "Failed to start VPN")
                 return
             }
-
-            /** Create, Update tun2socks config */
-            val tun2socksConfig = arrayListOf(
-                "tunnel:",
-                "  name: $tunName",
-                "  mtu: ${settings.tunMtu}",
-                "socks5:",
-                "  address: ${settings.socksAddress}",
-                "  port: ${settings.socksPort}",
-            )
-            if (
-                settings.socksUsername.trim().isNotEmpty() &&
-                settings.socksPassword.trim().isNotEmpty()
-            ) {
-                tun2socksConfig.add("  username: ${settings.socksUsername}")
-                tun2socksConfig.add("  password: ${settings.socksPassword}")
-            }
-            tun2socksConfig.add(if (settings.socksUdp) "  udp: udp" else "  udp: tcp")
-            tun2socksConfig.add("")
-            FileHelper.createOrUpdate(
-                settings.tun2socksConfig(),
-                tun2socksConfig.joinToString("\n")
-            )
-
-            /** Start tun2socks */
-            TProxyStartService(settings.tun2socksConfig().absolutePath, tunDevice!!.fd)
         }
 
         /** Service Notification */

@@ -32,6 +32,7 @@ sealed interface MainAction {
     data object OpenLinksClicked : MainAction
     data object OpenLogsClicked : MainAction
     data object OpenAppsRoutingClicked : MainAction
+    data object OpenCoreRoutingClicked : MainAction
     data object OpenConfigsClicked : MainAction
     data object OpenSettingsClicked : MainAction
 }

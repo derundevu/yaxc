@@ -1,10 +1,12 @@
 package io.github.derundevu.yaxc.activity
 
 import XrayCore.XrayCore
+import android.graphics.Color
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -77,7 +79,6 @@ class ProfileActivity : AppCompatActivity() {
                 ProfileScreen(
                     title = if (isNew()) getString(R.string.newProfile) else getString(R.string.editProfile),
                     name = profileName,
-                    configText = profileConfigText,
                     isLoading = isLoading,
                     onBack = ::finish,
                     onSave = ::save,
@@ -149,8 +150,15 @@ class ProfileActivity : AppCompatActivity() {
         }
 
         editor = textProcessor.apply {
+            val contentPadding = (14 * resources.displayMetrics.density).toInt()
             language = JsonLanguage()
             plugins(pluginSupplier)
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(android.graphics.Color.parseColor("#F2F6FC"))
+            setHintTextColor(android.graphics.Color.parseColor("#738399"))
+            setPadding(contentPadding, contentPadding, contentPadding, contentPadding)
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             if (text.toString() != profileConfigText) {
                 setTextContent(profileConfigText)
             }
