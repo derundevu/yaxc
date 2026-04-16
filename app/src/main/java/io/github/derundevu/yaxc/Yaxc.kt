@@ -11,7 +11,7 @@ import io.github.derundevu.yaxc.repository.ProfileRepository
 class Yaxc : Application() {
 
     private val yaxcDatabase by lazy { YaxcDatabase.ref(this) }
-    val configRepository by lazy { ConfigRepository(yaxcDatabase.configDao()) }
+    val configRepository by lazy { ConfigRepository(yaxcDatabase.configDao(), Settings(this)) }
     val linkRepository by lazy { LinkRepository(yaxcDatabase.linkDao()) }
     val profileRepository by lazy { ProfileRepository(yaxcDatabase.profileDao()) }
 

@@ -25,7 +25,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
-import kotlin.text.toRegex
 
 class AssetsActivity : AppCompatActivity() {
 
@@ -43,12 +42,23 @@ class AssetsActivity : AppCompatActivity() {
     private var geoIpState by mutableStateOf(AssetCardState(title = ""))
     private var geoSiteState by mutableStateOf(AssetCardState(title = ""))
     private var xrayCoreState by mutableStateOf(AssetCardState(title = ""))
+    private var selectedGeoProvider by mutableStateOf(Settings.DEFAULT_GEO_PROVIDER)
+    private var customGeoIpUrl by mutableStateOf("")
+    private var customGeoSiteUrl by mutableStateOf("")
 
     private val geoIpLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
-        writeToFile(it, geoIpFile()) { setAssetStatus() }
+        writeToFile(it, geoIpFile()) {
+            settings.installedGeoIpSourceLabel = getString(R.string.assetsSourceLocalFile)
+            settings.installedGeoIpSourceUrl = LOCAL_ASSET_SOURCE_URL
+            setAssetStatus()
+        }
     }
     private val geoSiteLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
-        writeToFile(it, geoSiteFile()) { setAssetStatus() }
+        writeToFile(it, geoSiteFile()) {
+            settings.installedGeoSiteSourceLabel = getString(R.string.assetsSourceLocalFile)
+            settings.installedGeoSiteSourceUrl = LOCAL_ASSET_SOURCE_URL
+            setAssetStatus()
+        }
     }
     private val xrayCoreLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
         val file = settings.xrayCoreFile()
@@ -64,31 +74,73 @@ class AssetsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        selectedGeoProvider = settings.currentGeoResourcesProvider()
+        customGeoIpUrl = settings.customGeoIpAddress
+        customGeoSiteUrl = settings.customGeoSiteAddress
+
         setContent {
             YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
                 AssetsScreen(
                     geoIpState = geoIpState,
                     geoSiteState = geoSiteState,
                     xrayCoreState = xrayCoreState,
+                    selectedGeoProvider = selectedGeoProvider,
+                    customGeoIpUrl = customGeoIpUrl,
+                    customGeoSiteUrl = customGeoSiteUrl,
                     onBack = ::finish,
+                    onGeoProviderSelected = { provider ->
+                        selectedGeoProvider = provider
+                        settings.setGeoResourcesProvider(provider)
+                        customGeoIpUrl = settings.customGeoIpAddress
+                        customGeoSiteUrl = settings.customGeoSiteAddress
+                        setAssetStatus()
+                    },
+                    onCustomGeoIpUrlChange = { customGeoIpUrl = it },
+                    onCustomGeoSiteUrlChange = { customGeoSiteUrl = it },
+                    onApplyCustomGeoUrls = {
+                        val geoIpUrl = customGeoIpUrl.trim()
+                        val geoSiteUrl = customGeoSiteUrl.trim()
+                        if (geoIpUrl.isBlank() || geoSiteUrl.isBlank()) {
+                            Toast.makeText(
+                                applicationContext,
+                                getString(R.string.assetsUrlEmpty),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            settings.updateCustomGeoResources(
+                                geoIpAddress = geoIpUrl,
+                                geoSiteAddress = geoSiteUrl,
+                            )
+                            selectedGeoProvider = settings.currentGeoResourcesProvider()
+                            setAssetStatus()
+                        }
+                    },
                     onGeoIpDownload = {
                         download(
                             AssetKind.GeoIp,
-                            settings.geoIpAddress,
+                            settings.geoIpAddress.trim(),
                             geoIpFile(),
                         )
                     },
                     onGeoIpPick = { geoIpLauncher.launch(MIME_TYPE_OCTET_STREAM) },
-                    onGeoIpDelete = { delete(geoIpFile()) },
+                    onGeoIpDelete = {
+                        settings.installedGeoIpSourceLabel = ""
+                        settings.installedGeoIpSourceUrl = ""
+                        delete(geoIpFile())
+                    },
                     onGeoSiteDownload = {
                         download(
                             AssetKind.GeoSite,
-                            settings.geoSiteAddress,
+                            settings.geoSiteAddress.trim(),
                             geoSiteFile(),
                         )
                     },
                     onGeoSitePick = { geoSiteLauncher.launch(MIME_TYPE_OCTET_STREAM) },
-                    onGeoSiteDelete = { delete(geoSiteFile()) },
+                    onGeoSiteDelete = {
+                        settings.installedGeoSiteSourceLabel = ""
+                        settings.installedGeoSiteSourceUrl = ""
+                        delete(geoSiteFile())
+                    },
                     onXrayCorePick = { runAsRoot { xrayCoreLauncher.launch(MIME_TYPE_OCTET_STREAM) } },
                     onXrayCoreDelete = { delete(settings.xrayCoreFile()) },
                 )
@@ -131,9 +183,20 @@ class AssetsActivity : AppCompatActivity() {
     private fun setAssetStatus() {
         val geoIp = geoIpFile()
         val geoIpExists = geoIp.exists()
+        val selectedGeoIpUrl = settings.geoIpAddress.trim()
+        val installedGeoIpLabel = if (geoIpExists) {
+            settings.installedGeoIpSourceLabel.ifBlank { getString(R.string.noValue) }
+        } else {
+            getString(R.string.noValue)
+        }
+        val geoIpNeedsUpdate = geoIpExists &&
+            settings.installedGeoIpSourceUrl.isNotBlank() &&
+            settings.installedGeoIpSourceUrl.trim() != selectedGeoIpUrl
         geoIpState = geoIpState.copy(
             title = getString(R.string.geoIp),
-            value = getFileDate(geoIp),
+            value = getString(R.string.assetsUpdatedAt, getFileDate(geoIp)),
+            details = getString(R.string.assetsInstalledSource, installedGeoIpLabel),
+            note = if (geoIpNeedsUpdate) getString(R.string.assetsUpdateRequired) else null,
             isInstalled = geoIpExists,
             isLoading = activeDownload == AssetKind.GeoIp,
             progress = if (activeDownload == AssetKind.GeoIp) geoIpState.progress else 0,
@@ -141,9 +204,20 @@ class AssetsActivity : AppCompatActivity() {
 
         val geoSite = geoSiteFile()
         val geoSiteExists = geoSite.exists()
+        val selectedGeoSiteUrl = settings.geoSiteAddress.trim()
+        val installedGeoSiteLabel = if (geoSiteExists) {
+            settings.installedGeoSiteSourceLabel.ifBlank { getString(R.string.noValue) }
+        } else {
+            getString(R.string.noValue)
+        }
+        val geoSiteNeedsUpdate = geoSiteExists &&
+            settings.installedGeoSiteSourceUrl.isNotBlank() &&
+            settings.installedGeoSiteSourceUrl.trim() != selectedGeoSiteUrl
         geoSiteState = geoSiteState.copy(
             title = getString(R.string.geoSite),
-            value = getFileDate(geoSite),
+            value = getString(R.string.assetsUpdatedAt, getFileDate(geoSite)),
+            details = getString(R.string.assetsInstalledSource, installedGeoSiteLabel),
+            note = if (geoSiteNeedsUpdate) getString(R.string.assetsUpdateRequired) else null,
             isInstalled = geoSiteExists,
             isLoading = activeDownload == AssetKind.GeoSite,
             progress = if (activeDownload == AssetKind.GeoSite) geoSiteState.progress else 0,
@@ -170,6 +244,15 @@ class AssetsActivity : AppCompatActivity() {
             return
         }
 
+        if (url.isBlank()) {
+            Toast.makeText(
+                applicationContext,
+                getString(R.string.assetsUrlEmpty),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+
         downloading = true
         activeDownload = kind
         updateProgress(kind, 0)
@@ -189,6 +272,19 @@ class AssetsActivity : AppCompatActivity() {
             override fun onComplete() {
                 downloading = false
                 activeDownload = null
+                when (kind) {
+                    AssetKind.GeoIp -> {
+                        settings.installedGeoIpSourceLabel = currentGeoProviderLabel()
+                        settings.installedGeoIpSourceUrl = url.trim()
+                    }
+
+                    AssetKind.GeoSite -> {
+                        settings.installedGeoSiteSourceLabel = currentGeoProviderLabel()
+                        settings.installedGeoSiteSourceUrl = url.trim()
+                    }
+
+                    AssetKind.XrayCore -> Unit
+                }
                 setAssetStatus()
             }
         }).start()
@@ -240,7 +336,16 @@ class AssetsActivity : AppCompatActivity() {
         Toast.makeText(this, getString(R.string.rootRequired), Toast.LENGTH_SHORT).show()
     }
 
+    private fun currentGeoProviderLabel(): String {
+        return when (settings.currentGeoResourcesProvider()) {
+            Settings.GeoResourcesProvider.RunetFreedom -> getString(R.string.assetsGeoProviderRunetFreedom)
+            Settings.GeoResourcesProvider.LoyalSoldier -> getString(R.string.assetsGeoProviderLoyalSoldier)
+            Settings.GeoResourcesProvider.Custom -> getString(R.string.assetsGeoProviderCustom)
+        }
+    }
+
     companion object {
         private const val MIME_TYPE_OCTET_STREAM = "application/octet-stream"
+        private const val LOCAL_ASSET_SOURCE_URL = "file://local"
     }
 }

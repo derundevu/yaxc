@@ -1,0 +1,28 @@
+diff --git a/share/clash_meta.go b/share/clash_meta.go
+index d39f314..158f3b6 100644
+--- a/share/clash_meta.go
++++ b/share/clash_meta.go
+@@ -400,10 +400,12 @@ func (proxy ClashProxy) streamSettings(outbound conf.OutboundDetourConfig) (*con
+ 		hysteriaSettings.Version = 2
+ 		hysteriaSettings.Auth = proxy.Password
+ 		if len(proxy.Up) > 0 {
+-			hysteriaSettings.Up = conf.Bandwidth(proxy.Up)
++			up := conf.Bandwidth(proxy.Up)
++			hysteriaSettings.Up = &up
+ 		}
+ 		if len(proxy.Down) > 0 {
+-			hysteriaSettings.Down = conf.Bandwidth(proxy.Down)
++			down := conf.Bandwidth(proxy.Down)
++			hysteriaSettings.Down = &down
+ 		}
+ 		if len(proxy.Ports) > 0 {
+ 			udpHop := conf.UdpHop{}
+@@ -419,7 +421,7 @@ func (proxy ClashProxy) streamSettings(outbound conf.OutboundDetourConfig) (*con
+ 
+ 			udpHop.Interval = &interval
+ 
+-			hysteriaSettings.UdpHop = udpHop
++			hysteriaSettings.UdpHop = &udpHop
+ 		}
+ 		streamSettings.HysteriaSettings = hysteriaSettings
+ 		// udpmasks

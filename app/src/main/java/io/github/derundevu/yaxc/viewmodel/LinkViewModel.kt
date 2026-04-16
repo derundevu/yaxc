@@ -18,6 +18,14 @@ class LinkViewModel(application: Application) : AndroidViewModel(application) {
         return linkRepository.activeLinks()
     }
 
+    suspend fun insertAndGetId(link: Link): Long {
+        return linkRepository.insertAndGetId(link)
+    }
+
+    suspend fun updateNow(link: Link) {
+        linkRepository.update(link)
+    }
+
     fun insert(link: Link) = viewModelScope.launch {
         linkRepository.insert(link)
     }

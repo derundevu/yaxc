@@ -6,12 +6,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.InputStream
 import java.net.Authenticator
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.PasswordAuthentication
 import java.net.Proxy
 import java.net.URL
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 class HttpHelper(
     val scope: CoroutineScope,
@@ -19,6 +23,11 @@ class HttpHelper(
 ) {
 
     companion object {
+        data class HttpResponse(
+            val body: String,
+            val headers: Map<String, List<String>>,
+        )
+
         private fun getConnection(
             link: String,
             method: String = "GET",
@@ -40,25 +49,157 @@ class HttpHelper(
             return connection
         }
 
-        suspend fun get(link: String, userAgent: String? = null): String {
+        suspend fun fetch(link: String, userAgent: String? = null): HttpResponse {
             return withContext(Dispatchers.IO) {
-                val defaultUserAgent = "${BuildConfig.APPLICATION_ID}/${BuildConfig.VERSION_NAME}"
+                val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
                 val connection = getConnection(link, userAgent = userAgent ?: defaultUserAgent)
                 var responseCode = 0
                 val responseBody = try {
                     connection.connect()
                     responseCode = connection.responseCode
-                    connection.inputStream.bufferedReader().use { it.readText() }
+                    connection.readResponseText()
                 } catch (_: Exception) {
                     null
-                } finally {
-                    connection.disconnect()
                 }
+                val headers = connection.headerFields
+                    .filterKeys { it != null }
+                    .mapKeys { it.key!! }
+                connection.disconnect()
                 if (responseCode != HttpURLConnection.HTTP_OK || responseBody == null) {
                     throw Exception("HTTP Error: $responseCode")
                 }
-                responseBody
+                HttpResponse(
+                    body = responseBody,
+                    headers = headers,
+                )
             }
+        }
+
+        suspend fun get(link: String, userAgent: String? = null): String {
+            return fetch(link, userAgent).body
+        }
+
+        fun extractSubscriptionTitle(headers: Map<String, List<String>>): String? {
+            val normalizedHeaders = headers.entries.associate { (key, value) ->
+                key.lowercase() to value.filter { it.isNotBlank() }
+            }
+
+            val profileTitle = normalizedHeaders["profile-title"]
+                ?.firstNotNullOfOrNull(::decodeHeaderValue)
+            if (!profileTitle.isNullOrBlank()) {
+                return profileTitle
+            }
+
+            val xProfileTitle = normalizedHeaders["x-profile-title"]
+                ?.firstNotNullOfOrNull(::decodeHeaderValue)
+            if (!xProfileTitle.isNullOrBlank()) {
+                return xProfileTitle
+            }
+
+            val contentDisposition = normalizedHeaders["content-disposition"]
+                ?.firstNotNullOfOrNull(::extractFilenameFromContentDisposition)
+            if (!contentDisposition.isNullOrBlank()) {
+                return contentDisposition
+            }
+
+            return null
+        }
+
+        private fun HttpURLConnection.readResponseText(): String? {
+            val stream = responseStream() ?: return null
+            return stream.bufferedReader().use { it.readText() }
+        }
+
+        private fun HttpURLConnection.responseStream(): InputStream? {
+            return runCatching {
+                if (responseCode in 200..299) inputStream else errorStream
+            }.getOrNull()
+        }
+
+        private fun extractFilenameFromContentDisposition(value: String): String? {
+            val filenameStar = Regex("""filename\*\s*=\s*(?:UTF-8''|utf-8''|)([^;]+)""")
+                .find(value)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.let(::decodeHeaderValue)
+            if (!filenameStar.isNullOrBlank()) {
+                return filenameStar
+            }
+
+            return Regex("""filename\s*=\s*"?([^\";]+)""")
+                .find(value)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.let(::decodeHeaderValue)
+        }
+
+        private fun decodeHeaderValue(value: String): String? {
+            val trimmed = value.trim().trim('"')
+            if (trimmed.isEmpty()) return null
+
+            decodePrefixedBase64(trimmed)?.let { decoded ->
+                return sanitizeHeaderValue(decoded)
+            }
+
+            decodeMimeEncodedWord(trimmed)?.let { decoded ->
+                return sanitizeHeaderValue(decoded)
+            }
+
+            decodePercentEncoded(trimmed)?.let { decoded ->
+                return sanitizeHeaderValue(decoded)
+            }
+
+            decodeBase64Header(trimmed)?.let { decoded ->
+                return sanitizeHeaderValue(decoded)
+            }
+
+            return sanitizeHeaderValue(trimmed)
+        }
+
+        private fun decodePrefixedBase64(value: String): String? {
+            val prefix = "base64:"
+            if (!value.startsWith(prefix, ignoreCase = true)) return null
+            return runCatching {
+                String(
+                    Base64.getDecoder().decode(value.substring(prefix.length)),
+                    StandardCharsets.UTF_8
+                )
+            }.getOrNull()
+        }
+
+        private fun decodeMimeEncodedWord(value: String): String? {
+            val match = Regex("""=\?([^?]+)\?([Bb])\?([^?]+)\?=""").matchEntire(value) ?: return null
+            val charset = match.groupValues[1]
+            val data = match.groupValues[3]
+            return runCatching {
+                String(
+                    Base64.getDecoder().decode(data),
+                    charset(charset)
+                )
+            }.getOrNull()
+        }
+
+        private fun decodePercentEncoded(value: String): String? {
+            if (!value.contains('%') && !value.contains('+')) return null
+            return runCatching {
+                URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+            }.getOrNull()
+        }
+
+        private fun decodeBase64Header(value: String): String? {
+            if (!value.matches(Regex("""[A-Za-z0-9+/=_-]+"""))) return null
+            return runCatching {
+                val normalized = value.replace('-', '+').replace('_', '/')
+                String(Base64.getDecoder().decode(normalized), StandardCharsets.UTF_8)
+            }.getOrNull()
+        }
+
+        private fun sanitizeHeaderValue(value: String): String? {
+            return value
+                .replace('\u0000', ' ')
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+                .takeIf { it.isNotEmpty() }
         }
     }
 
@@ -94,7 +235,7 @@ class HttpHelper(
             val proxy = if (withProxy) Proxy(Proxy.Type.SOCKS, address) else null
             val timeout = settings.pingTimeout * 1000
 
-            getConnection(link, method, proxy, timeout)
+            getConnection(link, method, proxy, timeout, settings.userAgent)
         }
     }
 

@@ -2,14 +2,62 @@ package io.github.derundevu.yaxc
 
 import android.content.Context
 import androidx.core.content.edit
+import io.github.derundevu.yaxc.BuildConfig
 import java.io.File
 
 class Settings(private val context: Context) {
 
+    enum class GeoResourcesProvider(
+        val value: String,
+        val geoIpAddress: String,
+        val geoSiteAddress: String,
+    ) {
+        RunetFreedom(
+            value = "runetfreedom",
+            geoIpAddress = "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+            geoSiteAddress = "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+        ),
+        LoyalSoldier(
+            value = "loyalsoldier",
+            geoIpAddress = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+            geoSiteAddress = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+        ),
+        Custom(
+            value = "custom",
+            geoIpAddress = "",
+            geoSiteAddress = "",
+        );
+
+        companion object {
+            fun fromUrls(
+                geoIpAddress: String,
+                geoSiteAddress: String,
+            ): GeoResourcesProvider? {
+                val normalizedGeoIp = geoIpAddress.trim().removeSuffix("/")
+                val normalizedGeoSite = geoSiteAddress.trim().removeSuffix("/")
+                return entries.firstOrNull { provider ->
+                    provider != Custom &&
+                    provider.geoIpAddress == normalizedGeoIp &&
+                        provider.geoSiteAddress == normalizedGeoSite
+                }
+            }
+        }
+    }
+
     companion object {
-        private const val LEGACY_DEFAULT_PING_ADDRESS = "https://www.google.com"
+        private const val LEGACY_DEFAULT_USER_AGENT = "${BuildConfig.APPLICATION_ID}/${BuildConfig.VERSION_NAME}"
+        private const val DEFAULT_USER_AGENT = "yaxc/${BuildConfig.VERSION_NAME}"
+        private const val PREVIOUS_DEFAULT_PING_ADDRESS = "https://www.google.com"
         private const val DEFAULT_PING_ADDRESS =
             "https://connectivitycheck.gstatic.com/generate_204"
+        private const val PREVIOUS_DEFAULT_GEO_IP_ADDRESS =
+            "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"
+        private const val PREVIOUS_DEFAULT_GEO_SITE_ADDRESS =
+            "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+
+        val DEFAULT_GEO_PROVIDER = GeoResourcesProvider.RunetFreedom
+        val DEFAULT_GEO_IP_ADDRESS = GeoResourcesProvider.RunetFreedom.geoIpAddress
+        val DEFAULT_GEO_SITE_ADDRESS = GeoResourcesProvider.RunetFreedom.geoSiteAddress
     }
 
     private val sharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -48,6 +96,9 @@ class Settings(private val context: Context) {
     var coreRoutingUiRules: String
         get() = sharedPreferences.getString("coreRoutingUiRules", "[]")!!
         set(value) = sharedPreferences.edit { putString("coreRoutingUiRules", value) }
+    var coreRoutingDefaultsVersion: Int
+        get() = sharedPreferences.getInt("coreRoutingDefaultsVersion", 0)
+        set(value) = sharedPreferences.edit { putInt("coreRoutingDefaultsVersion", value) }
 
     /** Tun Routes */
     var tunRoutes: Set<String>
@@ -71,24 +122,48 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getString("socksPassword", "")!!
         set(value) = sharedPreferences.edit { putString("socksPassword", value) }
     var geoIpAddress: String
-        get() = sharedPreferences.getString(
-            "geoIpAddress",
-            "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"
-        )!!
+        get() {
+            val stored = sharedPreferences.getString("geoIpAddress", DEFAULT_GEO_IP_ADDRESS)!!
+            return if (stored.trim().removeSuffix("/") == PREVIOUS_DEFAULT_GEO_IP_ADDRESS) {
+                sharedPreferences.edit { putString("geoIpAddress", DEFAULT_GEO_IP_ADDRESS) }
+                DEFAULT_GEO_IP_ADDRESS
+            } else stored
+        }
         set(value) = sharedPreferences.edit { putString("geoIpAddress", value) }
+    var customGeoIpAddress: String
+        get() = sharedPreferences.getString("customGeoIpAddress", DEFAULT_GEO_IP_ADDRESS)!!
+        set(value) = sharedPreferences.edit { putString("customGeoIpAddress", value) }
     var geoSiteAddress: String
-        get() = sharedPreferences.getString(
-            "geoSiteAddress",
-            "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
-        )!!
+        get() {
+            val stored = sharedPreferences.getString("geoSiteAddress", DEFAULT_GEO_SITE_ADDRESS)!!
+            return if (stored.trim().removeSuffix("/") == PREVIOUS_DEFAULT_GEO_SITE_ADDRESS) {
+                sharedPreferences.edit { putString("geoSiteAddress", DEFAULT_GEO_SITE_ADDRESS) }
+                DEFAULT_GEO_SITE_ADDRESS
+            } else stored
+        }
         set(value) = sharedPreferences.edit { putString("geoSiteAddress", value) }
+    var customGeoSiteAddress: String
+        get() = sharedPreferences.getString("customGeoSiteAddress", DEFAULT_GEO_SITE_ADDRESS)!!
+        set(value) = sharedPreferences.edit { putString("customGeoSiteAddress", value) }
+    var installedGeoIpSourceLabel: String
+        get() = sharedPreferences.getString("installedGeoIpSourceLabel", "")!!
+        set(value) = sharedPreferences.edit { putString("installedGeoIpSourceLabel", value) }
+    var installedGeoIpSourceUrl: String
+        get() = sharedPreferences.getString("installedGeoIpSourceUrl", "")!!
+        set(value) = sharedPreferences.edit { putString("installedGeoIpSourceUrl", value) }
+    var installedGeoSiteSourceLabel: String
+        get() = sharedPreferences.getString("installedGeoSiteSourceLabel", "")!!
+        set(value) = sharedPreferences.edit { putString("installedGeoSiteSourceLabel", value) }
+    var installedGeoSiteSourceUrl: String
+        get() = sharedPreferences.getString("installedGeoSiteSourceUrl", "")!!
+        set(value) = sharedPreferences.edit { putString("installedGeoSiteSourceUrl", value) }
     var pingAddress: String
         get() {
             val storedValue = sharedPreferences.getString("pingAddress", null)?.trim()
             val normalizedValue = storedValue?.removeSuffix("/")
             return when {
                 storedValue.isNullOrEmpty() -> DEFAULT_PING_ADDRESS
-                normalizedValue == LEGACY_DEFAULT_PING_ADDRESS -> {
+                normalizedValue == PREVIOUS_DEFAULT_PING_ADDRESS -> {
                     sharedPreferences.edit { putString("pingAddress", DEFAULT_PING_ADDRESS) }
                     DEFAULT_PING_ADDRESS
                 }
@@ -96,6 +171,20 @@ class Settings(private val context: Context) {
             }
         }
         set(value) = sharedPreferences.edit { putString("pingAddress", value) }
+    var userAgent: String
+        get() {
+            val storedValue = sharedPreferences.getString("userAgent", null)?.trim()
+            return when {
+                storedValue.isNullOrEmpty() -> DEFAULT_USER_AGENT
+                storedValue == LEGACY_DEFAULT_USER_AGENT -> {
+                    sharedPreferences.edit { putString("userAgent", DEFAULT_USER_AGENT) }
+                    DEFAULT_USER_AGENT
+                }
+
+                else -> storedValue
+            }
+        }
+        set(value) = sharedPreferences.edit { putString("userAgent", value) }
     var pingTimeout: Int
         get() = sharedPreferences.getInt("pingTimeout", 5)
         set(value) = sharedPreferences.edit { putInt("pingTimeout", value) }
@@ -195,6 +284,35 @@ class Settings(private val context: Context) {
     fun networkMonitorScript(): File = File(baseDir(), "monitor.sh")
     fun xrayCoreLogs(): File = File(baseDir(), "error.log")
     fun getString(resId: Int, vararg args: Any): String = context.getString(resId, *args)
+
+    fun currentGeoResourcesProvider(): GeoResourcesProvider {
+        return GeoResourcesProvider.fromUrls(geoIpAddress, geoSiteAddress)
+            ?: GeoResourcesProvider.Custom
+    }
+
+    fun setGeoResourcesProvider(provider: GeoResourcesProvider) {
+        when (provider) {
+            GeoResourcesProvider.Custom -> {
+                geoIpAddress = customGeoIpAddress
+                geoSiteAddress = customGeoSiteAddress
+            }
+
+            else -> {
+                geoIpAddress = provider.geoIpAddress
+                geoSiteAddress = provider.geoSiteAddress
+            }
+        }
+    }
+
+    fun updateCustomGeoResources(
+        geoIpAddress: String,
+        geoSiteAddress: String,
+    ) {
+        customGeoIpAddress = geoIpAddress
+        customGeoSiteAddress = geoSiteAddress
+        this.geoIpAddress = geoIpAddress
+        this.geoSiteAddress = geoSiteAddress
+    }
 
     private fun defaultLanguageTag(): String {
         val language = context.resources.configuration.locales

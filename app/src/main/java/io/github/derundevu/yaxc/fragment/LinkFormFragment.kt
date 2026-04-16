@@ -5,18 +5,19 @@ import android.content.DialogInterface
 import android.os.Bundle
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.Toast
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.materialswitch.MaterialSwitch
-import com.google.android.material.radiobutton.MaterialRadioButton
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.helper.HttpHelper
 import java.net.URI
-import kotlin.reflect.cast
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class LinkFormFragment(
     private val link: Link,
@@ -27,8 +28,8 @@ class LinkFormFragment(
         return openLink(requireActivity())
     }
 
-    override fun onDismiss(dialog: DialogInterface) {
-        super.onDismiss(dialog)
+    override fun onCancel(dialog: DialogInterface) {
+        super.onCancel(dialog)
         requireActivity().finish()
     }
 
@@ -39,26 +40,52 @@ class LinkFormFragment(
                 LinearLayout(context)
             )
 
-            val typeRadioGroup = layout.findViewById<RadioGroup>(R.id.typeRadioGroup)
             val nameEditText = layout.findViewById<EditText>(R.id.nameEditText)
             val addressEditText = layout.findViewById<EditText>(R.id.addressEditText)
             val userAgentEditText = layout.findViewById<EditText>(R.id.userAgentEditText)
-            val isActiveSwitch = layout.findViewById<MaterialSwitch>(R.id.isActiveSwitch)
-            Link.Type.entries.forEach {
-                val radio = MaterialRadioButton(context)
-                radio.text = context.getString(it.titleRes)
-                radio.tag = it
-                typeRadioGroup.addView(radio)
-                if (it == link.type) typeRadioGroup.check(radio.id)
-            }
             nameEditText.setText(link.name)
             addressEditText.setText(link.address)
             userAgentEditText.setText(link.userAgent)
-            isActiveSwitch.isChecked = if (link.id == 0L) {
-                true
-            } else {
-                link.isActive
+            val defaultLinkName = context.getString(R.string.newLink)
+            var resolveTitleJob: Job? = null
+
+            fun shouldAutofillName(): Boolean {
+                val currentName = nameEditText.text?.toString()?.trim().orEmpty()
+                return currentName.isEmpty() || currentName == defaultLinkName
             }
+
+            fun scheduleResolveTitle() {
+                resolveTitleJob?.cancel()
+                if (!shouldAutofillName()) return
+
+                val address = addressEditText.text?.toString()?.trim().orEmpty()
+                val uri = runCatching { URI(address) }.getOrNull() ?: return
+                if (uri.scheme != "https") return
+
+                resolveTitleJob = lifecycleScope.launch {
+                    delay(350)
+                    val title = runCatching {
+                        HttpHelper.fetch(
+                            link = address,
+                            userAgent = userAgentEditText.text?.toString()?.ifBlank { null },
+                        ).let { response ->
+                            HttpHelper.extractSubscriptionTitle(response.headers)
+                        }
+                    }.getOrNull()
+
+                    if (!title.isNullOrBlank() && shouldAutofillName()) {
+                        nameEditText.setText(title)
+                    }
+                }
+            }
+
+            addressEditText.doAfterTextChanged { scheduleResolveTitle() }
+            userAgentEditText.doAfterTextChanged {
+                if (shouldAutofillName()) {
+                    scheduleResolveTitle()
+                }
+            }
+            scheduleResolveTitle()
 
             setView(layout)
             setTitle(
@@ -70,9 +97,6 @@ class LinkFormFragment(
                 else context.getString(R.string.updateLink)
             ) { _, _ ->
                 val address = addressEditText.text.toString()
-                val typeRadioButton = typeRadioGroup.findViewById<RadioButton>(
-                    typeRadioGroup.checkedRadioButtonId
-                )
                 val uri = runCatching { URI(address) }.getOrNull()
                 val invalidLink = context.getString(R.string.invalidLink)
                 val onlyHttps = context.getString(R.string.onlyHttps)
@@ -84,13 +108,16 @@ class LinkFormFragment(
                     Toast.makeText(context, onlyHttps, Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                link.type = Link.Type::class.cast(typeRadioButton.tag)
                 link.name = nameEditText.text.toString()
                 link.address = address
                 link.userAgent = userAgentEditText.text.toString().ifBlank { null }
-                link.isActive = isActiveSwitch.isChecked
+                if (link.id == 0L) {
+                    link.isActive = true
+                }
                 onConfirm()
             }
-            setNegativeButton(context.getString(R.string.closeLink)) { _, _ -> }
+            setNegativeButton(context.getString(R.string.closeLink)) { _, _ ->
+                context.finish()
+            }
         }.create()
 }

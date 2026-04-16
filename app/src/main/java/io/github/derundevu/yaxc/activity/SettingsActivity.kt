@@ -112,8 +112,7 @@ class SettingsActivity : AppCompatActivity() {
         val newSocksPort = formState.socksPort.trim()
         val newSocksUsername = formState.socksUsername.trim()
         val newSocksPassword = formState.socksPassword
-        val newGeoIpAddress = formState.geoIpAddress.trim()
-        val newGeoSiteAddress = formState.geoSiteAddress.trim()
+        val newUserAgent = formState.userAgent.trim()
         val newPingAddress = formState.pingAddress.trim()
         val newPrimaryDns = formState.primaryDns.trim()
         val newSecondaryDns = formState.secondaryDns.trim()
@@ -184,8 +183,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.socksPort = newSocksPort
             settings.socksUsername = newSocksUsername
             settings.socksPassword = newSocksPassword
-            settings.geoIpAddress = newGeoIpAddress
-            settings.geoSiteAddress = newGeoSiteAddress
+            settings.userAgent = newUserAgent
             settings.pingAddress = newPingAddress
             settings.pingTimeout = pingTimeout
             settings.refreshLinksInterval = refreshLinksInterval

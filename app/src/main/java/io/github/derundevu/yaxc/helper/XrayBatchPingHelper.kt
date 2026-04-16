@@ -6,6 +6,7 @@ import android.util.Log
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Config
+import io.github.derundevu.yaxc.database.Config.Mode
 import io.github.derundevu.yaxc.database.Profile
 import org.json.JSONArray
 import org.json.JSONObject
@@ -83,7 +84,11 @@ object XrayBatchPingHelper {
         profile: Profile,
         localPort: Int,
     ): String {
-        val runtimeConfig = JSONObject(ConfigHelper(settings, globalConfig, profile.config).toString())
+        val pingConfig = globalConfig.copy(
+            routing = "{}",
+            routingMode = Mode.Disable,
+        )
+        val runtimeConfig = JSONObject(ConfigHelper(settings, pingConfig, profile.config).toString())
         val inbounds = runtimeConfig.optJSONArray("inbounds") ?: JSONArray()
 
         for (index in 0 until inbounds.length()) {

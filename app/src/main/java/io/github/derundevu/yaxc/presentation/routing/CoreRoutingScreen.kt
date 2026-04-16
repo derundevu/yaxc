@@ -47,7 +47,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -71,11 +70,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
-import io.github.derundevu.yaxc.helper.CoreRoutingMatchType
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.CoreRoutingTransport
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -449,6 +448,81 @@ private fun CoreRoutingRuleCard(
                     )
 
                     Text(
+                        text = textResource(R.string.routingRuleDomains),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = YaxcTheme.extendedColors.textMuted,
+                    )
+                    OutlinedTextField(
+                        value = rule.domainsText,
+                        onValueChange = { onRuleChange(rule.copy(domainsText = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(text = textResource(R.string.routingRuleDomains)) },
+                        minLines = 2,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    FieldHint(text = textResource(R.string.routingRuleDomainsHint))
+
+                    Text(
+                        text = textResource(R.string.routingRuleIpValues),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = YaxcTheme.extendedColors.textMuted,
+                    )
+                    OutlinedTextField(
+                        value = rule.ipsText,
+                        onValueChange = { onRuleChange(rule.copy(ipsText = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(text = textResource(R.string.routingRuleIpValues)) },
+                        minLines = 2,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    FieldHint(text = textResource(R.string.routingRuleIpHint))
+
+                    OutlinedTextField(
+                        value = rule.portsText,
+                        onValueChange = { onRuleChange(rule.copy(portsText = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(text = textResource(R.string.routingRulePorts)) },
+                        minLines = 1,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    FieldHint(text = textResource(R.string.routingRulePortsHint))
+
+                    OutlinedTextField(
+                        value = rule.sourcePortsText,
+                        onValueChange = { onRuleChange(rule.copy(sourcePortsText = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(text = textResource(R.string.routingRuleSourcePorts)) },
+                        minLines = 1,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    FieldHint(text = textResource(R.string.routingRuleSourcePortsHint))
+
+                    OutlinedTextField(
+                        value = rule.protocolsText,
+                        onValueChange = { onRuleChange(rule.copy(protocolsText = it)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(text = textResource(R.string.routingRuleProtocols)) },
+                        minLines = 2,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    FieldHint(text = textResource(R.string.routingRuleProtocolsHint))
+
+                    Text(
+                        text = textResource(R.string.routingRuleNetwork),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = YaxcTheme.extendedColors.textMuted,
+                    )
+                    TabRow(selectedTabIndex = CoreRoutingTransport.entries.indexOf(rule.network)) {
+                        CoreRoutingTransport.entries.forEach { transport ->
+                            Tab(
+                                selected = transport == rule.network,
+                                onClick = { onRuleChange(rule.copy(network = transport)) },
+                                text = { Text(text = textResource(transport.titleRes())) },
+                            )
+                        }
+                    }
+
+                    Text(
                         text = textResource(R.string.routingOutboundTag),
                         style = MaterialTheme.typography.labelLarge,
                         color = YaxcTheme.extendedColors.textMuted,
@@ -462,61 +536,21 @@ private fun CoreRoutingRuleCard(
                             )
                         }
                     }
-
-                    Text(
-                        text = textResource(R.string.routingMatchType),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = YaxcTheme.extendedColors.textMuted,
-                    )
-                    SecondaryScrollableTabRow(
-                        selectedTabIndex = CoreRoutingMatchType.entries.indexOf(rule.matchType),
-                        containerColor = Color.Transparent,
-                        edgePadding = 0.dp,
-                    ) {
-                        CoreRoutingMatchType.entries.forEach { matchType ->
-                            Tab(
-                                selected = matchType == rule.matchType,
-                                onClick = { onRuleChange(rule.copy(matchType = matchType)) },
-                                text = { Text(text = textResource(matchType.titleRes())) },
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = textResource(R.string.routingTransport),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = YaxcTheme.extendedColors.textMuted,
-                    )
-                    TabRow(selectedTabIndex = CoreRoutingTransport.entries.indexOf(rule.transport)) {
-                        CoreRoutingTransport.entries.forEach { transport ->
-                            Tab(
-                                selected = transport == rule.transport,
-                                onClick = { onRuleChange(rule.copy(transport = transport)) },
-                                text = {
-                                    Text(
-                                        text = when (transport) {
-                                            CoreRoutingTransport.Any -> textResource(R.string.routingTransportAny)
-                                            CoreRoutingTransport.Tcp -> textResource(R.string.routingTransportTcp)
-                                            CoreRoutingTransport.Udp -> textResource(R.string.routingTransportUdp)
-                                        }
-                                    )
-                                },
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = rule.valuesText,
-                        onValueChange = { onRuleChange(rule.copy(valuesText = it)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(text = textResource(R.string.routingRuleValues)) },
-                        minLines = 4,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun FieldHint(
+    text: String,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = YaxcTheme.extendedColors.textMuted,
+    )
 }
 
 @Composable
@@ -599,15 +633,21 @@ private val outboundTagOptions = listOf("proxy", "direct", "block", "dns-out")
 
 @Composable
 private fun buildRuleSummary(rule: CoreRoutingRule): String {
+    val matchers = buildList {
+        if (rule.domainsText.isNotBlank()) add(textResource(R.string.routingMatchTypeDomain))
+        if (rule.ipsText.isNotBlank()) add(textResource(R.string.routingMatchTypeIp))
+        if (rule.portsText.isNotBlank()) add(textResource(R.string.routingMatchTypePort))
+        if (rule.sourcePortsText.isNotBlank()) add(textResource(R.string.routingMatchTypeSourcePort))
+        if (rule.protocolsText.isNotBlank()) add(textResource(R.string.routingMatchTypeProtocol))
+    }.joinToString(" + ").ifBlank { textResource(R.string.noValue) }
     val status = textResource(
         if (rule.enabled) R.string.routingRuleStatusOn else R.string.routingRuleStatusOff
     )
-    val transport = textResource(rule.transport.titleRes())
-    val matchType = textResource(rule.matchType.titleRes())
+    val transport = textResource(rule.network.titleRes())
     val outboundTag = textResource(rule.outboundTag.titleRes())
     return textResource(
         R.string.routingRuleSummary,
-        matchType,
+        matchers,
         transport,
         outboundTag,
         status,
@@ -629,16 +669,6 @@ private fun String.titleRes(): Int {
         "block" -> R.string.routingOutboundBlock
         "dns-out" -> R.string.routingOutboundDnsOut
         else -> R.string.noValue
-    }
-}
-
-private fun CoreRoutingMatchType.titleRes(): Int {
-    return when (this) {
-        CoreRoutingMatchType.Domain -> R.string.routingMatchTypeDomain
-        CoreRoutingMatchType.Ip -> R.string.routingMatchTypeIp
-        CoreRoutingMatchType.Port -> R.string.routingMatchTypePort
-        CoreRoutingMatchType.SourcePort -> R.string.routingMatchTypeSourcePort
-        CoreRoutingMatchType.Protocol -> R.string.routingMatchTypeProtocol
     }
 }
 

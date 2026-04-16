@@ -5,6 +5,7 @@ REFRESH="$2"
 SETUP="$3"
 ARCHS=(arm arm64 386 amd64)
 DEST="../app/libs"
+PATCH_DIR="patches"
 
 is_in_array() {
   local value="$1"
@@ -24,6 +25,27 @@ check_target() {
     echo "Not supported"
     exit 1
   fi
+}
+
+apply_local_patches() {
+  local patch_file="$(pwd)/$PATCH_DIR/libxray-xray-core-26.3.27.patch"
+  if [[ ! -f "$patch_file" ]]; then
+    return 0
+  fi
+
+  echo "Apply local compatibility patches"
+  if git -C libXray apply --check "$patch_file" >/dev/null 2>&1; then
+    git -C libXray apply "$patch_file"
+    return 0
+  fi
+
+  if git -C libXray apply --reverse --check "$patch_file" >/dev/null 2>&1; then
+    echo "libXray compatibility patch already applied"
+    return 0
+  fi
+
+  echo "Failed to apply libXray compatibility patch: $patch_file"
+  exit 1
 }
 
 prepare_go() {
@@ -57,6 +79,7 @@ refresh_dependencies() {
 check_target
 
 pushd XrayCore
+apply_local_patches
 prepare_go
 build_android
 popd

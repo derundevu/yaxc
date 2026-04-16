@@ -11,6 +11,8 @@ class ConfigHelper(
     base: String,
 ) {
     private val base: JSONObject = JsonHelper.makeObject(base)
+    private val userRoutingConfig = config.routing
+    private val userRoutingMode = config.routingMode
 
     init {
         applyManagedRuntimeConfig()
@@ -164,27 +166,73 @@ class ConfigHelper(
             rules.put(proxyDns)
         }
 
-        val directPrivate = JSONObject()
-            .put("ip", privateAddressRanges())
-            .put("outboundTag", "direct")
-        rules.put(directPrivate)
+        if (!hasCustomPrivateRule()) {
+            val directPrivate = JSONObject()
+                .put("ip", privateAddressRanges())
+                .put("outboundTag", "direct")
+            rules.put(directPrivate)
+        }
 
         return JSONObject()
             .put("domainStrategy", "IPIfNonMatch")
             .put("rules", rules)
     }
 
+    private fun hasCustomPrivateRule(): Boolean {
+        if (userRoutingMode == Config.Mode.Disable) return false
+
+        val rules = runCatching {
+            JsonHelper.makeObject(userRoutingConfig).optJSONArray("rules")
+        }.getOrNull() ?: return false
+
+        val privateRanges = privateAddressRangesList().map(String::lowercase).toSet()
+        for (index in 0 until rules.length()) {
+            val rule = rules.optJSONObject(index) ?: continue
+            val values = extractIpRuleValues(rule.opt("ip"))
+            if (values.isEmpty()) continue
+
+            if ("geoip:private" in values) return true
+            if (privateRanges.all(values::contains)) return true
+        }
+        return false
+    }
+
+    private fun extractIpRuleValues(value: Any?): Set<String> {
+        return when (value) {
+            is JSONArray -> buildSet {
+                for (index in 0 until value.length()) {
+                    val item = value.optString(index).trim().lowercase()
+                    if (item.isNotEmpty()) add(item)
+                }
+            }
+
+            is String -> value.split(',')
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .map(String::lowercase)
+                .toSet()
+
+            else -> emptySet()
+        }
+    }
+
     private fun privateAddressRanges(): JSONArray {
         return JSONArray().apply {
-            put("10.0.0.0/8")
-            put("100.64.0.0/10")
-            put("127.0.0.0/8")
-            put("169.254.0.0/16")
-            put("172.16.0.0/12")
-            put("192.168.0.0/16")
-            put("::1/128")
-            put("fc00::/7")
-            put("fe80::/10")
+            privateAddressRangesList().forEach(::put)
         }
+    }
+
+    private fun privateAddressRangesList(): List<String> {
+        return listOf(
+            "10.0.0.0/8",
+            "100.64.0.0/10",
+            "127.0.0.0/8",
+            "169.254.0.0/16",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "::1/128",
+            "fc00::/7",
+            "fe80::/10",
+        )
     }
 }

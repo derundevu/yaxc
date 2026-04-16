@@ -24,7 +24,7 @@ data class Link(
     @ColumnInfo(name = "type")
     var type: Type = Type.Json,
     @ColumnInfo(name = "is_active")
-    var isActive: Boolean = false,
+    var isActive: Boolean = true,
     @ColumnInfo(name = "user_agent")
     var userAgent: String? = null,
 ) : Parcelable {

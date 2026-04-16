@@ -9,17 +9,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FileOpen
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -27,9 +32,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 
@@ -37,6 +45,8 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffol
 data class AssetCardState(
     val title: String,
     val value: String = "",
+    val details: String? = null,
+    val note: String? = null,
     val isInstalled: Boolean = false,
     val isLoading: Boolean = false,
     val progress: Int = 0,
@@ -48,7 +58,14 @@ fun AssetsScreen(
     geoIpState: AssetCardState,
     geoSiteState: AssetCardState,
     xrayCoreState: AssetCardState,
+    selectedGeoProvider: Settings.GeoResourcesProvider,
+    customGeoIpUrl: String,
+    customGeoSiteUrl: String,
     onBack: () -> Unit,
+    onGeoProviderSelected: (Settings.GeoResourcesProvider) -> Unit,
+    onCustomGeoIpUrlChange: (String) -> Unit,
+    onCustomGeoSiteUrlChange: (String) -> Unit,
+    onApplyCustomGeoUrls: () -> Unit,
     onGeoIpDownload: () -> Unit,
     onGeoIpPick: () -> Unit,
     onGeoIpDelete: () -> Unit,
@@ -78,6 +95,7 @@ fun AssetsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = spacing.md)
                 .padding(top = spacing.md, bottom = spacing.xl),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
@@ -86,6 +104,16 @@ fun AssetsScreen(
                 text = textResource(R.string.assetsScreenLead),
                 style = MaterialTheme.typography.bodyLarge,
                 color = YaxcTheme.extendedColors.textMuted,
+            )
+
+            GeoResourcesProviderSelector(
+                selectedProvider = selectedGeoProvider,
+                customGeoIpUrl = customGeoIpUrl,
+                customGeoSiteUrl = customGeoSiteUrl,
+                onProviderSelected = onGeoProviderSelected,
+                onCustomGeoIpUrlChange = onCustomGeoIpUrlChange,
+                onCustomGeoSiteUrlChange = onCustomGeoSiteUrlChange,
+                onApplyCustomGeoUrls = onApplyCustomGeoUrls,
             )
 
             AssetRow(
@@ -117,25 +145,23 @@ private fun AssetRow(
     onPrimaryAction: () -> Unit,
     onSecondaryAction: (() -> Unit)?,
     onDelete: () -> Unit,
-    primaryIcon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Outlined.Download,
+    primaryIcon: ImageVector = Icons.Outlined.Download,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
         shape = MaterialTheme.shapes.large,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
         border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
@@ -152,26 +178,42 @@ private fun AssetRow(
                         text = state.value,
                         style = MaterialTheme.typography.bodyMedium,
                         color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
+                    state.details?.takeIf { it.isNotBlank() }?.let { details ->
+                        Text(
+                            text = details,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = YaxcTheme.extendedColors.textMuted,
+                        )
+                    }
+                    state.note?.takeIf { it.isNotBlank() }?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = YaxcTheme.extendedColors.warning,
+                        )
+                    }
                 }
 
-                ActionIcon(
-                    icon = if (state.isInstalled) Icons.Outlined.Done else primaryIcon,
-                    onClick = onPrimaryAction,
-                )
-                if (!state.isInstalled && onSecondaryAction != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     ActionIcon(
-                        icon = Icons.Outlined.FileOpen,
-                        onClick = onSecondaryAction,
+                        icon = primaryIcon,
+                        onClick = onPrimaryAction,
                     )
-                }
-                if (state.isInstalled) {
-                    ActionIcon(
-                        icon = Icons.Outlined.Delete,
-                        onClick = onDelete,
-                    )
+                    onSecondaryAction?.let { secondaryAction ->
+                        ActionIcon(
+                            icon = Icons.Outlined.FileOpen,
+                            onClick = secondaryAction,
+                        )
+                    }
+                    if (state.isInstalled) {
+                        ActionIcon(
+                            icon = Icons.Outlined.Delete,
+                            onClick = onDelete,
+                        )
+                    }
                 }
             }
 
@@ -186,25 +228,180 @@ private fun AssetRow(
 }
 
 @Composable
-private fun ActionIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun GeoResourcesProviderSelector(
+    selectedProvider: Settings.GeoResourcesProvider,
+    customGeoIpUrl: String,
+    customGeoSiteUrl: String,
+    onProviderSelected: (Settings.GeoResourcesProvider) -> Unit,
+    onCustomGeoIpUrlChange: (String) -> Unit,
+    onCustomGeoSiteUrlChange: (String) -> Unit,
+    onApplyCustomGeoUrls: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = textResource(R.string.assetsGeoProviderTitle),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = textResource(R.string.assetsGeoProviderLead),
+                style = MaterialTheme.typography.bodyMedium,
+                color = YaxcTheme.extendedColors.textMuted,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    GeoProviderButton(
+                        label = textResource(R.string.assetsGeoProviderRunetFreedom),
+                        selected = selectedProvider == Settings.GeoResourcesProvider.RunetFreedom,
+                        onClick = { onProviderSelected(Settings.GeoResourcesProvider.RunetFreedom) },
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    GeoProviderButton(
+                        label = textResource(R.string.assetsGeoProviderLoyalSoldier),
+                        selected = selectedProvider == Settings.GeoResourcesProvider.LoyalSoldier,
+                        onClick = { onProviderSelected(Settings.GeoResourcesProvider.LoyalSoldier) },
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    GeoProviderButton(
+                        label = textResource(R.string.assetsGeoProviderCustom),
+                        selected = selectedProvider == Settings.GeoResourcesProvider.Custom,
+                        onClick = { onProviderSelected(Settings.GeoResourcesProvider.Custom) },
+                    )
+                }
+            }
+
+            if (selectedProvider == Settings.GeoResourcesProvider.Custom) {
+                CustomGeoUrlsEditor(
+                    geoIpUrl = customGeoIpUrl,
+                    geoSiteUrl = customGeoSiteUrl,
+                    onGeoIpUrlChange = onCustomGeoIpUrlChange,
+                    onGeoSiteUrlChange = onCustomGeoSiteUrlChange,
+                    onApply = onApplyCustomGeoUrls,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomGeoUrlsEditor(
+    geoIpUrl: String,
+    geoSiteUrl: String,
+    onGeoIpUrlChange: (String) -> Unit,
+    onGeoSiteUrlChange: (String) -> Unit,
+    onApply: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = textResource(R.string.assetsGeoCustomLead),
+            style = MaterialTheme.typography.bodyMedium,
+            color = YaxcTheme.extendedColors.textMuted,
+        )
+        OutlinedTextField(
+            value = geoIpUrl,
+            onValueChange = onGeoIpUrlChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(text = textResource(R.string.assetsGeoIpUrlLabel)) },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            value = geoSiteUrl,
+            onValueChange = onGeoSiteUrlChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(text = textResource(R.string.assetsGeoSiteUrlLabel)) },
+            singleLine = true,
+        )
+        FilledTonalButton(
+            onClick = onApply,
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text(text = textResource(R.string.assetsApplyCustomGeoUrls))
+        }
+    }
+}
+
+@Composable
+private fun GeoProviderButton(
+    label: String,
+    selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-        contentAlignment = Alignment.Center,
+    val selectedContainer = YaxcTheme.extendedColors.success.copy(alpha = 0.22f)
+    val selectedBorder = YaxcTheme.extendedColors.success.copy(alpha = 0.54f)
+
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = if (selected) {
+                selectedContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            },
+            contentColor = if (selected) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) selectedBorder else YaxcTheme.extendedColors.cardBorder,
+        ),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
+        Text(
+            text = label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
 @Composable
-private fun textResource(id: Int): String {
-    return androidx.compose.ui.res.stringResource(id)
+private fun ActionIcon(
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        color = Color.White.copy(alpha = 0.08f),
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+    ) {
+        Box(
+            modifier = Modifier.size(40.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.76f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun textResource(id: Int, vararg args: Any): String {
+    return androidx.compose.ui.res.stringResource(id, *args)
 }

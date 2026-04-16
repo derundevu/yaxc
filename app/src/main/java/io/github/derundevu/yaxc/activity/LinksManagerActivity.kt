@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.widget.Toast
 import android.widget.LinearLayout
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -29,6 +30,12 @@ import org.json.JSONObject
 import kotlin.reflect.cast
 
 class LinksManagerActivity : AppCompatActivity() {
+
+    private data class ParsedLinkSource(
+        val type: Link.Type,
+        val profiles: List<Profile>,
+        val title: String? = null,
+    )
 
     companion object {
         private const val LINK_REF = "ref"
@@ -81,13 +88,54 @@ class LinksManagerActivity : AppCompatActivity() {
         }
 
         LinkFormFragment(link) {
-            if (link.id == 0L) {
-                linkViewModel.insert(link)
-            } else {
-                linkViewModel.update(link)
+            lifecycleScope.launch {
+                val loadingDialog = loadingDialog()
+                loadingDialog.show()
+                val detected = resolveProfiles(link)
+                if (link.id == 0L) {
+                    val parsed = detected.getOrNull()
+                    if (parsed == null) {
+                        loadingDialog.dismiss()
+                        Toast.makeText(
+                            this@LinksManagerActivity,
+                            getString(R.string.invalidSourceContent),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        return@launch
+                    }
+                    link.type = parsed.type
+                    parsed.title?.let { link.name = it }
+                    link.id = linkViewModel.insertAndGetId(link)
+                    manageProfiles(link, emptyList(), parsed.profiles)
+                } else {
+                    linkViewModel.updateNow(link)
+                    detected.getOrNull()?.let { parsed ->
+                        var linkChanged = false
+                        if (link.type != parsed.type) {
+                            link.type = parsed.type
+                            linkChanged = true
+                        }
+                        if (!parsed.title.isNullOrBlank() && link.name != parsed.title) {
+                            link.name = parsed.title
+                            linkChanged = true
+                        }
+                        if (linkChanged) linkViewModel.updateNow(link)
+                        val profiles = profileViewModel.linkProfiles(link.id)
+                        manageProfiles(link, profiles, parsed.profiles)
+                    } ?: run {
+                        Toast.makeText(
+                            this@LinksManagerActivity,
+                            getString(R.string.linkSavedWithoutRefresh),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+                settings.lastRefreshLinks = System.currentTimeMillis()
+                TProxyService.newConfig(applicationContext)
+                loadingDialog.dismiss()
+                setResult(RESULT_OK)
+                finish()
             }
-            setResult(RESULT_OK)
-            finish()
         }.show(supportFragmentManager, null)
     }
 
@@ -109,18 +157,20 @@ class LinksManagerActivity : AppCompatActivity() {
             val links = linkViewModel.activeLinks()
                 .filter { linkId == null || it.id == linkId }
             links.forEach { link ->
-                val profiles = profileViewModel.linkProfiles(link.id)
-                runCatching {
-                    val content = HttpHelper.get(link.address, link.userAgent).trim()
-                    val newProfiles = if (link.type == Link.Type.Json) {
-                        jsonProfiles(link, content)
-                    } else {
-                        subscriptionProfiles(link, content)
+                resolveProfiles(link).getOrNull()?.let { detected ->
+                    val profiles = profileViewModel.linkProfiles(link.id)
+                    var linkChanged = false
+                    if (link.type != detected.type) {
+                        link.type = detected.type
+                        linkChanged = true
                     }
-                    if (newProfiles.isNotEmpty()) {
-                        val linkProfiles = profiles.filter { it.linkId == link.id }
-                        manageProfiles(link, linkProfiles, newProfiles)
+                    if (!detected.title.isNullOrBlank() && link.name != detected.title) {
+                        link.name = detected.title
+                        linkChanged = true
                     }
+                    if (linkChanged) linkViewModel.update(link)
+                    val linkProfiles = profiles.filter { it.linkId == link.id }
+                    manageProfiles(link, linkProfiles, detected.profiles)
                 }
             }
             withContext(Dispatchers.Main) {
@@ -134,7 +184,15 @@ class LinksManagerActivity : AppCompatActivity() {
 
     private fun jsonProfiles(link: Link, value: String): List<Profile> {
         val list = arrayListOf<Profile>()
-        val configs = runCatching { JSONArray(value) }.getOrNull() ?: JSONArray()
+        val trimmed = value.trim()
+        val configs = when {
+            trimmed.startsWith("[") -> runCatching { JSONArray(trimmed) }.getOrNull() ?: JSONArray()
+            trimmed.startsWith("{") -> runCatching { JSONObject(trimmed) }
+                .getOrNull()
+                ?.let { JSONArray().put(it) }
+                ?: JSONArray()
+            else -> JSONArray()
+        }
         for (i in 0 until configs.length()) {
             runCatching { JSONObject::class.cast(configs[i]) }.getOrNull()?.let { configuration ->
                 val label = if (configuration.has("remarks")) {
@@ -158,7 +216,8 @@ class LinksManagerActivity : AppCompatActivity() {
 
     private fun subscriptionProfiles(link: Link, value: String): List<Profile> {
         val decoded = runCatching { LinkHelper.tryDecodeBase64(value).trim() }.getOrNull() ?: ""
-        return decoded.split("\n")
+        val candidate = if (decoded.isNotBlank()) decoded else value.trim()
+        return candidate.split("\n")
             .reversed()
             .map { LinkHelper(settings, it) }
             .filter { it.isValid() }
@@ -169,6 +228,42 @@ class LinksManagerActivity : AppCompatActivity() {
                 profile.name = linkHelper.remark()
                 profile
             }
+    }
+
+    private fun detectProfiles(link: Link, value: String): Pair<Link.Type, List<Profile>> {
+        val jsonProfiles = jsonProfiles(link, value)
+        if (jsonProfiles.isNotEmpty()) {
+            return Link.Type.Json to jsonProfiles
+        }
+
+        val subscriptionProfiles = subscriptionProfiles(link, value)
+        if (subscriptionProfiles.isNotEmpty()) {
+            return Link.Type.Subscription to subscriptionProfiles
+        }
+
+        return link.type to emptyList()
+    }
+
+    private suspend fun resolveProfiles(link: Link): Result<ParsedLinkSource> {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val response = HttpHelper.fetch(
+                    link = link.address,
+                    userAgent = link.userAgent?.takeIf { it.isNotBlank() } ?: settings.userAgent,
+                )
+                val detected = detectProfiles(link, response.body.trim())
+                ParsedLinkSource(
+                    type = detected.first,
+                    profiles = detected.second,
+                    title = HttpHelper.extractSubscriptionTitle(response.headers),
+                )
+            }.mapCatching { detected ->
+                if (detected.profiles.isEmpty()) {
+                    error("No profiles detected")
+                }
+                detected
+            }
+        }
     }
 
     private suspend fun manageProfiles(

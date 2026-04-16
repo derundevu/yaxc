@@ -170,10 +170,20 @@ class TProxyService : VpnService() {
                     "dns4=${settings.primaryDns},${settings.secondaryDns}; " +
                     "dns6=${settings.primaryDnsV6},${settings.secondaryDnsV6}; ipv6=${settings.enableIpV6}"
             )
-            showToast(error)
+            showToast(userFacingConfigError(error))
             return null
         }
         return XrayConfig(dir.absolutePath, config.absolutePath)
+    }
+
+    private fun userFacingConfigError(error: String): String {
+        val normalized = error.lowercase()
+        return when {
+            "geoip.dat" in normalized || "geosite.dat" in normalized ->
+                getString(R.string.installAssetsFirst)
+
+            else -> error
+        }
     }
 
     private fun start(profile: Profile?, globalConfigs: Config) {
