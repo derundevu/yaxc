@@ -28,6 +28,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
@@ -178,7 +179,7 @@ private fun LinkRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = link.type.name,
+                    text = stringResource(link.type.titleRes),
                     style = MaterialTheme.typography.bodyMedium,
                     color = YaxcTheme.extendedColors.textMuted,
                 )

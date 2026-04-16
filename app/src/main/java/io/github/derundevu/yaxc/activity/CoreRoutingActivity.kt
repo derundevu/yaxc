@@ -4,6 +4,8 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -36,6 +38,7 @@ import org.json.JSONObject
 class CoreRoutingActivity : AppCompatActivity() {
 
     private val settings by lazy { Settings(applicationContext) }
+    private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val configViewModel: ConfigViewModel by viewModels()
 
@@ -50,6 +53,9 @@ class CoreRoutingActivity : AppCompatActivity() {
     private var preservedRoutingRules: List<JSONObject> = emptyList()
     private var preservedRoutingTopLevel = JSONObject()
     private var routingEditor: TextProcessor? = null
+    private val localizedRuleName: (Int) -> String = { index ->
+        getString(R.string.routingRuleDefaultName, index)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +75,8 @@ class CoreRoutingActivity : AppCompatActivity() {
                     isLoading = isCoreLoading,
                     onBack = ::finish,
                     onSave = ::saveCoreRouting,
+                    onImportFromClipboard = ::importRulesFromClipboard,
+                    onExportJson = ::exportRulesJson,
                     onEditorModeChange = ::switchCoreEditorMode,
                     onDomainStrategyChange = { coreDomainStrategy = it },
                     onRuleChange = ::updateCoreRule,
@@ -87,9 +95,17 @@ class CoreRoutingActivity : AppCompatActivity() {
             config = configViewModel.get()
             val storedUiRules = CoreRoutingHelper.parseUiRules(settings.coreRoutingUiRules)
             val parsed = runCatching {
-                CoreRoutingHelper.parseRoutingJson(config.routing, storedUiRules)
+                CoreRoutingHelper.parseRoutingJson(
+                    rawJson = config.routing,
+                    storedUiRules = storedUiRules,
+                    defaultRuleName = localizedRuleName,
+                )
             }.getOrElse {
-                CoreRoutingHelper.parseRoutingJson("{}", storedUiRules)
+                CoreRoutingHelper.parseRoutingJson(
+                    rawJson = "{}",
+                    storedUiRules = storedUiRules,
+                    defaultRuleName = localizedRuleName,
+                )
             }
 
             coreDomainStrategy = parsed.domainStrategy
@@ -145,7 +161,11 @@ class CoreRoutingActivity : AppCompatActivity() {
 
         persistRoutingEditor()
         val parsed = runCatching {
-            CoreRoutingHelper.parseRoutingJson(coreRoutingJson, coreRules)
+            CoreRoutingHelper.parseRoutingJson(
+                rawJson = coreRoutingJson,
+                storedUiRules = coreRules,
+                defaultRuleName = localizedRuleName,
+            )
         }.getOrElse {
             Toast.makeText(this, getString(R.string.invalidConfig), Toast.LENGTH_SHORT).show()
             return
@@ -166,7 +186,10 @@ class CoreRoutingActivity : AppCompatActivity() {
     }
 
     private fun addCoreRule() {
-        coreRules = coreRules + CoreRoutingHelper.defaultRule(coreRules.size + 1)
+        coreRules = coreRules + CoreRoutingHelper.defaultRule(
+            index = coreRules.size + 1,
+            name = getString(R.string.routingRuleDefaultName, coreRules.size + 1),
+        )
     }
 
     private fun deleteCoreRule(ruleId: String) {
@@ -206,7 +229,11 @@ class CoreRoutingActivity : AppCompatActivity() {
         if (coreEditorMode == CoreRoutingEditorMode.Json) {
             persistRoutingEditor()
             val parsed = runCatching {
-                CoreRoutingHelper.parseRoutingJson(coreRoutingJson, coreRules)
+                CoreRoutingHelper.parseRoutingJson(
+                    rawJson = coreRoutingJson,
+                    storedUiRules = coreRules,
+                    defaultRuleName = localizedRuleName,
+                )
             }.getOrElse {
                 Toast.makeText(this, getString(R.string.invalidConfig), Toast.LENGTH_SHORT).show()
                 return false
@@ -273,6 +300,74 @@ class CoreRoutingActivity : AppCompatActivity() {
             ).show()
         }
         return true
+    }
+
+    private fun importRulesFromClipboard() {
+        val raw = runCatching {
+            clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
+        }.getOrDefault("")
+        if (raw.isBlank()) {
+            Toast.makeText(this, getString(R.string.routingClipboardEmpty), Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val parsed = runCatching {
+            CoreRoutingHelper.parseImportedRules(
+                rawJson = raw,
+                fallbackDomainStrategy = coreDomainStrategy,
+                defaultRuleName = localizedRuleName,
+            )
+        }.getOrElse {
+            Toast.makeText(this, getString(R.string.routingImportFailed), Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        coreDomainStrategy = parsed.domainStrategy
+        coreRules = parsed.rules
+        coreUnsupportedRuleCount = parsed.unsupportedRuleCount
+        preservedRoutingRules = parsed.preservedRules
+        preservedRoutingTopLevel = parsed.preservedTopLevel
+        coreRoutingJson = CoreRoutingHelper.buildRoutingJson(
+            domainStrategy = parsed.domainStrategy,
+            rules = parsed.rules,
+            preservedRules = parsed.preservedRules,
+            preservedTopLevel = parsed.preservedTopLevel,
+        )
+        coreEditorMode = CoreRoutingEditorMode.Visual
+        syncEditorContent()
+        Toast.makeText(
+            this,
+            getString(R.string.routingImportedCount, parsed.rules.size),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    private fun exportRulesJson() {
+        val exportJson = runCatching {
+            if (coreEditorMode == CoreRoutingEditorMode.Json) {
+                persistRoutingEditor()
+                val parsed = CoreRoutingHelper.parseImportedRules(
+                    rawJson = coreRoutingJson,
+                    fallbackDomainStrategy = coreDomainStrategy,
+                    defaultRuleName = localizedRuleName,
+                )
+                CoreRoutingHelper.buildRulesExchangeJson(
+                    rules = parsed.rules,
+                    defaultRuleName = getString(R.string.routingRuleDefaultNameShort),
+                )
+            } else {
+                CoreRoutingHelper.buildRulesExchangeJson(
+                    rules = coreRules,
+                    defaultRuleName = getString(R.string.routingRuleDefaultNameShort),
+                )
+            }
+        }.getOrElse {
+            Toast.makeText(this, getString(R.string.routingExportFailed), Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        clipboardManager.setPrimaryClip(ClipData.newPlainText(null, exportJson))
+        Toast.makeText(this, getString(R.string.routingExported), Toast.LENGTH_SHORT).show()
     }
 
     private fun normalizeRoutingJson(rawJson: String): String {

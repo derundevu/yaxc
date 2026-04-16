@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.helper
 
 import XrayCore.XrayCore
 import android.util.Base64
+import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import org.json.JSONArray
 import org.json.JSONException
@@ -17,7 +18,7 @@ class LinkHelper(
 
     private val success: Boolean
     private val outbound: JSONObject?
-    private var remark: String = REMARK_DEFAULT
+    private var remark: String = defaultRemark()
 
     init {
         val uri = runCatching { URI(link) }.getOrNull()
@@ -25,7 +26,7 @@ class LinkHelper(
         if (parsedOutbound != null) {
             success = true
             outbound = parsedOutbound
-            remark = remark(uri, REMARK_DEFAULT)
+            remark = remark(uri, defaultRemark())
         } else {
             val base64: String = XrayCore.json(link)
             val decoded = tryDecodeBase64(base64)
@@ -42,9 +43,6 @@ class LinkHelper(
     }
 
     companion object {
-        const val REMARK_DEFAULT = "New Profile"
-        const val LINK_DEFAULT = "New Link"
-
         fun remark(uri: URI, default: String = ""): String {
             val name = uri.fragment ?: ""
             return name.ifEmpty { default }
@@ -152,7 +150,7 @@ class LinkHelper(
 
         val proxy = sanitizeObject(JSONObject(outbound!!.toString()))
         if (proxy.has("sendThrough")) {
-            remark = proxy.optString("sendThrough", REMARK_DEFAULT)
+            remark = proxy.optString("sendThrough", defaultRemark())
             proxy.remove("sendThrough")
         }
         proxy.put("tag", "proxy")
@@ -202,9 +200,7 @@ class LinkHelper(
         }
 
         val directPrivate = JSONObject()
-        val directPrivateIp = JSONArray()
-        directPrivateIp.put("geoip:private")
-        directPrivate.put("ip", directPrivateIp)
+        directPrivate.put("ip", privateAddressRanges())
         directPrivate.put("outboundTag", "direct")
 
         rules.put(proxyDns)
@@ -223,6 +219,22 @@ class LinkHelper(
         config.put("outbounds", outbounds())
         config.put("routing", routing())
         return config
+    }
+
+    private fun defaultRemark(): String = settings.getString(R.string.newProfile)
+
+    private fun privateAddressRanges(): JSONArray {
+        return JSONArray().apply {
+            put("10.0.0.0/8")
+            put("100.64.0.0/10")
+            put("127.0.0.0/8")
+            put("169.254.0.0/16")
+            put("172.16.0.0/12")
+            put("192.168.0.0/16")
+            put("::1/128")
+            put("fc00::/7")
+            put("fe80::/10")
+        }
     }
 
     private fun parseKnownOutbound(uri: URI): JSONObject? {

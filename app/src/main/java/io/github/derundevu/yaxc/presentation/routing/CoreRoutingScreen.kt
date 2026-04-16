@@ -2,6 +2,9 @@ package io.github.derundevu.yaxc.presentation.routing
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
@@ -34,6 +37,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,6 +64,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -76,6 +81,8 @@ import io.github.derundevu.yaxc.helper.CoreRoutingTransport
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +94,8 @@ fun CoreRoutingScreen(
     isLoading: Boolean,
     onBack: () -> Unit,
     onSave: () -> Boolean,
+    onImportFromClipboard: () -> Unit,
+    onExportJson: () -> Unit,
     onEditorModeChange: (CoreRoutingEditorMode) -> Unit,
     onDomainStrategyChange: (String) -> Unit,
     onRuleChange: (CoreRoutingRule) -> Unit,
@@ -101,6 +110,7 @@ fun CoreRoutingScreen(
     val reservedBottomInset = if (gestureNavigation) 0.dp else with(density) { navigationBarBottom.toDp() }
     var expandedRuleId by rememberSaveable { mutableStateOf<String?>(null) }
     var previousRulesCount by remember { mutableIntStateOf(rules.size) }
+    var actionsExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(rules.size) {
         if (rules.size > previousRulesCount && rules.isNotEmpty()) {
@@ -128,15 +138,41 @@ fun CoreRoutingScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        if (onSave() && editorMode == CoreRoutingEditorMode.Visual) {
-                            expandedRuleId = null
+                    Box {
+                        IconButton(onClick = { actionsExpanded = true }) {
+                            Icon(
+                                imageVector = Icons.Outlined.MoreVert,
+                                contentDescription = null,
+                            )
                         }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Done,
-                            contentDescription = null,
-                        )
+                        YaxcLiquidDropdownMenu(
+                            expanded = actionsExpanded,
+                            onDismissRequest = { actionsExpanded = false },
+                        ) {
+                            YaxcLiquidDropdownMenuItem(
+                                text = textResource(R.string.save),
+                                onClick = {
+                                    actionsExpanded = false
+                                    if (onSave() && editorMode == CoreRoutingEditorMode.Visual) {
+                                        expandedRuleId = null
+                                    }
+                                },
+                            )
+                            YaxcLiquidDropdownMenuItem(
+                                text = textResource(R.string.routingImportFromClipboard),
+                                onClick = {
+                                    actionsExpanded = false
+                                    onImportFromClipboard()
+                                },
+                            )
+                            YaxcLiquidDropdownMenuItem(
+                                text = textResource(R.string.routingExportJson),
+                                onClick = {
+                                    actionsExpanded = false
+                                    onExportJson()
+                                },
+                            )
+                        }
                     }
                 },
             )
@@ -196,7 +232,7 @@ fun CoreRoutingScreen(
                             Tab(
                                 selected = strategy == domainStrategy,
                                 onClick = { onDomainStrategyChange(strategy) },
-                                text = { Text(text = strategy) },
+                                text = { Text(text = textResource(strategy.titleRes())) },
                             )
                         }
                     }
@@ -331,10 +367,21 @@ private fun CoreRoutingRuleCard(
     onToggleEnabled: (Boolean) -> Unit,
     onDelete: () -> Unit,
 ) {
+    val expandRotation by animateFloatAsState(
+        targetValue = if (isExpanded) 180f else 0f,
+        animationSpec = tween(durationMillis = 240),
+        label = "routing_rule_expand_rotation",
+    )
+
     YaxcCard(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(),
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = 0.92f,
+                    stiffness = 520f,
+                ),
+            ),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -370,6 +417,7 @@ private fun CoreRoutingRuleCard(
                 ActionBubble(
                     icon = Icons.Outlined.UnfoldMore,
                     onClick = onToggleExpanded,
+                    modifier = Modifier.graphicsLayer { rotationZ = expandRotation },
                 )
                 ActionBubble(
                     icon = Icons.Outlined.DeleteOutline,
@@ -379,8 +427,14 @@ private fun CoreRoutingRuleCard(
 
             AnimatedVisibility(
                 visible = isExpanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
+                enter = expandVertically(
+                    animationSpec = tween(durationMillis = 260),
+                    expandFrom = Alignment.Top,
+                ) + fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 40)),
+                exit = shrinkVertically(
+                    animationSpec = tween(durationMillis = 220),
+                    shrinkTowards = Alignment.Top,
+                ) + fadeOut(animationSpec = tween(durationMillis = 120)),
             ) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -404,7 +458,7 @@ private fun CoreRoutingRuleCard(
                             Tab(
                                 selected = outboundTag == rule.outboundTag,
                                 onClick = { onRuleChange(rule.copy(outboundTag = outboundTag)) },
-                                text = { Text(text = outboundTag) },
+                                text = { Text(text = textResource(outboundTag.titleRes())) },
                             )
                         }
                     }
@@ -423,7 +477,7 @@ private fun CoreRoutingRuleCard(
                             Tab(
                                 selected = matchType == rule.matchType,
                                 onClick = { onRuleChange(rule.copy(matchType = matchType)) },
-                                text = { Text(text = matchType.name) },
+                                text = { Text(text = textResource(matchType.titleRes())) },
                             )
                         }
                     }
@@ -469,11 +523,12 @@ private fun CoreRoutingRuleCard(
 private fun ActionBubble(
     icon: ImageVector,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     containerSize: androidx.compose.ui.unit.Dp = 40.dp,
     iconSize: androidx.compose.ui.unit.Dp = 20.dp,
 ) {
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         color = Color.White.copy(alpha = 0.08f),
         shape = MaterialTheme.shapes.large,
         tonalElevation = 0.dp,
@@ -542,17 +597,55 @@ private fun EmptyStateCard(
 private val domainStrategyOptions = listOf("IPIfNonMatch", "AsIs", "IPOnDemand")
 private val outboundTagOptions = listOf("proxy", "direct", "block", "dns-out")
 
+@Composable
 private fun buildRuleSummary(rule: CoreRoutingRule): String {
-    val status = if (rule.enabled) "ON" else "OFF"
-    val transport = when (rule.transport) {
-        CoreRoutingTransport.Any -> "ANY"
-        CoreRoutingTransport.Tcp -> "TCP"
-        CoreRoutingTransport.Udp -> "UDP"
-    }
-    return "${rule.matchType.name} • $transport • ${rule.outboundTag} • $status"
+    val status = textResource(
+        if (rule.enabled) R.string.routingRuleStatusOn else R.string.routingRuleStatusOff
+    )
+    val transport = textResource(rule.transport.titleRes())
+    val matchType = textResource(rule.matchType.titleRes())
+    val outboundTag = textResource(rule.outboundTag.titleRes())
+    return textResource(
+        R.string.routingRuleSummary,
+        matchType,
+        transport,
+        outboundTag,
+        status,
+    )
 }
 
 @Composable
 private fun textResource(id: Int, vararg args: Any): String {
     return androidx.compose.ui.res.stringResource(id, *args)
+}
+
+private fun String.titleRes(): Int {
+    return when (this) {
+        "IPIfNonMatch" -> R.string.routingDomainStrategyIpIfNonMatch
+        "AsIs" -> R.string.routingDomainStrategyAsIs
+        "IPOnDemand" -> R.string.routingDomainStrategyIpOnDemand
+        "proxy" -> R.string.routingOutboundProxy
+        "direct" -> R.string.routingOutboundDirect
+        "block" -> R.string.routingOutboundBlock
+        "dns-out" -> R.string.routingOutboundDnsOut
+        else -> R.string.noValue
+    }
+}
+
+private fun CoreRoutingMatchType.titleRes(): Int {
+    return when (this) {
+        CoreRoutingMatchType.Domain -> R.string.routingMatchTypeDomain
+        CoreRoutingMatchType.Ip -> R.string.routingMatchTypeIp
+        CoreRoutingMatchType.Port -> R.string.routingMatchTypePort
+        CoreRoutingMatchType.SourcePort -> R.string.routingMatchTypeSourcePort
+        CoreRoutingMatchType.Protocol -> R.string.routingMatchTypeProtocol
+    }
+}
+
+private fun CoreRoutingTransport.titleRes(): Int {
+    return when (this) {
+        CoreRoutingTransport.Any -> R.string.routingTransportAny
+        CoreRoutingTransport.Tcp -> R.string.routingTransportTcp
+        CoreRoutingTransport.Udp -> R.string.routingTransportUdp
+    }
 }

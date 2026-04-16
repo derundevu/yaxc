@@ -3,7 +3,9 @@ package io.github.derundevu.yaxc.activity
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.os.LocaleListCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -104,6 +106,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldTproxyHotspot = settings.tproxyHotspot
         val oldTproxyTethering = settings.tproxyTethering
         val oldTransparentProxy = settings.transparentProxy
+        val oldLanguageTag = settings.languageTag
 
         val newSocksAddress = formState.socksAddress.trim()
         val newSocksPort = formState.socksPort.trim()
@@ -122,6 +125,7 @@ class SettingsActivity : AppCompatActivity() {
         val newHotspotInterface = formState.hotspotInterface.trim()
         val newTetheringInterface = formState.tetheringInterface.trim()
         val newTproxyAddress = formState.tproxyAddress.trim()
+        val newLanguageTag = formState.languageTag.trim().ifBlank { "en" }
         val newTproxyBypassWiFi = formState.tproxyBypassWiFi
             .split(",")
             .map(String::trim)
@@ -210,6 +214,13 @@ class SettingsActivity : AppCompatActivity() {
             settings.tproxyHotspot = formState.tproxyHotspot
             settings.tproxyTethering = formState.tproxyTethering
             settings.transparentProxy = formState.transparentProxy
+            settings.languageTag = newLanguageTag
+
+            if (oldLanguageTag != newLanguageTag) {
+                AppCompatDelegate.setApplicationLocales(
+                    LocaleListCompat.forLanguageTags(newLanguageTag)
+                )
+            }
 
             if (stopService) {
                 TProxyService.stop(this@SettingsActivity)

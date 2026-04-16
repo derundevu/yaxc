@@ -46,7 +46,7 @@ class LinkFormFragment(
             val isActiveSwitch = layout.findViewById<MaterialSwitch>(R.id.isActiveSwitch)
             Link.Type.entries.forEach {
                 val radio = MaterialRadioButton(context)
-                radio.text = it.name
+                radio.text = context.getString(it.titleRes)
                 radio.tag = it
                 typeRadioGroup.addView(radio)
                 if (it == link.type) typeRadioGroup.check(radio.id)

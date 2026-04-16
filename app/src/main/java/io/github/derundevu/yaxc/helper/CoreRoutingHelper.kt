@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.helper
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.util.UUID
 
 enum class RoutingEditorTab {
@@ -56,8 +57,11 @@ object CoreRoutingHelper {
 
     private const val DEFAULT_DOMAIN_STRATEGY = "IPIfNonMatch"
 
-    fun defaultRule(index: Int): CoreRoutingRule {
-        return CoreRoutingRule(name = "Rule $index")
+    fun defaultRule(
+        index: Int,
+        name: String = "Rule $index",
+    ): CoreRoutingRule {
+        return CoreRoutingRule(name = name)
     }
 
     fun parseUiRules(raw: String): List<CoreRoutingRule> {
@@ -104,6 +108,7 @@ object CoreRoutingHelper {
     fun parseRoutingJson(
         rawJson: String,
         storedUiRules: List<CoreRoutingRule> = emptyList(),
+        defaultRuleName: (Int) -> String = { "Rule $it" },
     ): ParsedCoreRouting {
         val json = JSONObject(rawJson.ifBlank { "{}" })
         val rulesArray = json.optJSONArray("rules") ?: JSONArray()
@@ -121,7 +126,7 @@ object CoreRoutingHelper {
         var unsupportedRuleCount = 0
         for (index in 0 until rulesArray.length()) {
             val ruleObject = rulesArray.optJSONObject(index) ?: continue
-            val parsedRule = parseRule(ruleObject, index)
+            val parsedRule = parseRule(ruleObject, index, defaultRuleName)
             if (parsedRule != null) {
                 rules.add(parsedRule)
             } else {
@@ -138,6 +143,32 @@ object CoreRoutingHelper {
             preservedTopLevel = preservedTopLevel,
             unsupportedRuleCount = unsupportedRuleCount,
         )
+    }
+
+    fun parseImportedRules(
+        rawJson: String,
+        fallbackDomainStrategy: String = DEFAULT_DOMAIN_STRATEGY,
+        defaultRuleName: (Int) -> String = { "Rule $it" },
+    ): ParsedCoreRouting {
+        val root = JSONTokener(rawJson.trim()).nextValue()
+        return when (root) {
+            is JSONArray -> parseImportedRulesArray(root, fallbackDomainStrategy, defaultRuleName)
+            is JSONObject -> {
+                if (root.has("rules") || root.has("domainStrategy")) {
+                    parseRoutingJson(
+                        rawJson = root.toString(),
+                        defaultRuleName = defaultRuleName,
+                    )
+                } else {
+                    parseImportedRulesArray(
+                        rulesArray = JSONArray().put(root),
+                        domainStrategy = fallbackDomainStrategy,
+                        defaultRuleName = defaultRuleName,
+                    )
+                }
+            }
+            else -> throw IllegalArgumentException("Unsupported routing JSON")
+        }
     }
 
     fun buildRoutingJson(
@@ -162,6 +193,17 @@ object CoreRoutingHelper {
         return routing.toString(4)
     }
 
+    fun buildRulesExchangeJson(
+        rules: List<CoreRoutingRule>,
+        defaultRuleName: String = "Rule",
+    ): String {
+        val array = JSONArray()
+        rules.forEach { rule ->
+            buildExchangeRule(rule, defaultRuleName)?.let(array::put)
+        }
+        return array.toString(4)
+    }
+
     fun isMeaningfulRoutingJson(json: String): Boolean {
         val routing = runCatching { JSONObject(json) }.getOrNull() ?: return false
         if (routing.length() == 0) return false
@@ -170,7 +212,11 @@ object CoreRoutingHelper {
         return routing.length() > 1 || domainStrategy != DEFAULT_DOMAIN_STRATEGY
     }
 
-    private fun parseRule(rule: JSONObject, index: Int): CoreRoutingRule? {
+    private fun parseRule(
+        rule: JSONObject,
+        index: Int,
+        defaultRuleName: (Int) -> String,
+    ): CoreRoutingRule? {
         val supportedKeys = CoreRoutingMatchType.entries.filter { entry ->
             when (val value = rule.opt(entry.jsonKey)) {
                 null, JSONObject.NULL -> false
@@ -186,7 +232,8 @@ object CoreRoutingHelper {
         if (valuesText.isBlank()) return null
 
         return CoreRoutingRule(
-            name = "Rule ${index + 1}",
+            name = rule.optString("remarks").ifBlank { defaultRuleName(index + 1) },
+            enabled = rule.optBoolean("enabled", true),
             matchType = matchType,
             transport = CoreRoutingTransport.fromJsonValue(rule.optString("network").ifBlank { null }),
             outboundTag = rule.optString("outboundTag", "proxy").ifBlank { "proxy" },
@@ -225,6 +272,60 @@ object CoreRoutingHelper {
             .apply {
                 rule.transport.jsonValue?.let { put("network", it) }
             }
+    }
+
+    private fun buildExchangeRule(
+        rule: CoreRoutingRule,
+        defaultRuleName: String,
+    ): JSONObject? {
+        val values = rule.valuesText
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toList()
+        if (values.isEmpty()) return null
+
+        val array = JSONArray()
+        values.forEach(array::put)
+
+        return JSONObject()
+            .put("enabled", rule.enabled)
+            .put("locked", false)
+            .put("outboundTag", rule.outboundTag.trim().ifBlank { "proxy" })
+            .put("remarks", rule.name.ifBlank { defaultRuleName })
+            .apply {
+                put(rule.matchType.jsonKey, array)
+                rule.transport.jsonValue?.let { put("network", it) }
+            }
+    }
+
+    private fun parseImportedRulesArray(
+        rulesArray: JSONArray,
+        domainStrategy: String,
+        defaultRuleName: (Int) -> String,
+    ): ParsedCoreRouting {
+        val rules = mutableListOf<CoreRoutingRule>()
+        val preservedRules = mutableListOf<JSONObject>()
+        var unsupportedRuleCount = 0
+
+        for (index in 0 until rulesArray.length()) {
+            val ruleObject = rulesArray.optJSONObject(index) ?: continue
+            val parsedRule = parseRule(ruleObject, index, defaultRuleName)
+            if (parsedRule != null) {
+                rules.add(parsedRule)
+            } else {
+                unsupportedRuleCount += 1
+                preservedRules.add(JSONObject(ruleObject.toString()))
+            }
+        }
+
+        return ParsedCoreRouting(
+            domainStrategy = domainStrategy.ifBlank { DEFAULT_DOMAIN_STRATEGY },
+            rules = rules,
+            preservedRules = preservedRules,
+            preservedTopLevel = JSONObject(),
+            unsupportedRuleCount = unsupportedRuleCount,
+        )
     }
 
     private fun applyStoredUiState(

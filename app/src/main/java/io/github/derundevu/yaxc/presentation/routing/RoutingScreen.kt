@@ -409,7 +409,7 @@ private fun CoreRoutingControls(
                     Tab(
                         selected = strategy == domainStrategy,
                         onClick = { onDomainStrategyChange(strategy) },
-                        text = { Text(text = strategy) },
+                        text = { Text(text = textResource(strategy.titleRes())) },
                     )
                 }
             }
@@ -536,7 +536,7 @@ private fun CoreRoutingRuleCard(
                     Tab(
                         selected = outboundTag == rule.outboundTag,
                         onClick = { onRuleChange(rule.copy(outboundTag = outboundTag)) },
-                        text = { Text(text = outboundTag) },
+                        text = { Text(text = textResource(outboundTag.titleRes())) },
                     )
                 }
             }
@@ -555,7 +555,7 @@ private fun CoreRoutingRuleCard(
                     Tab(
                         selected = matchType == rule.matchType,
                         onClick = { onRuleChange(rule.copy(matchType = matchType)) },
-                        text = { Text(text = matchType.name) },
+                        text = { Text(text = textResource(matchType.titleRes())) },
                     )
                 }
             }
@@ -727,4 +727,27 @@ private val outboundTagOptions = listOf("proxy", "direct", "block", "dns-out")
 @Composable
 private fun textResource(id: Int, vararg args: Any): String {
     return androidx.compose.ui.res.stringResource(id, *args)
+}
+
+private fun String.titleRes(): Int {
+    return when (this) {
+        "IPIfNonMatch" -> R.string.routingDomainStrategyIpIfNonMatch
+        "AsIs" -> R.string.routingDomainStrategyAsIs
+        "IPOnDemand" -> R.string.routingDomainStrategyIpOnDemand
+        "proxy" -> R.string.routingOutboundProxy
+        "direct" -> R.string.routingOutboundDirect
+        "block" -> R.string.routingOutboundBlock
+        "dns-out" -> R.string.routingOutboundDnsOut
+        else -> R.string.noValue
+    }
+}
+
+private fun CoreRoutingMatchType.titleRes(): Int {
+    return when (this) {
+        CoreRoutingMatchType.Domain -> R.string.routingMatchTypeDomain
+        CoreRoutingMatchType.Ip -> R.string.routingMatchTypeIp
+        CoreRoutingMatchType.Port -> R.string.routingMatchTypePort
+        CoreRoutingMatchType.SourcePort -> R.string.routingMatchTypeSourcePort
+        CoreRoutingMatchType.Protocol -> R.string.routingMatchTypeProtocol
+    }
 }

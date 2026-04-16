@@ -6,6 +6,12 @@ import java.io.File
 
 class Settings(private val context: Context) {
 
+    companion object {
+        private const val LEGACY_DEFAULT_PING_ADDRESS = "https://www.google.com"
+        private const val DEFAULT_PING_ADDRESS =
+            "https://connectivitycheck.gstatic.com/generate_204"
+    }
+
     private val sharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** Active Link ID */
@@ -77,7 +83,18 @@ class Settings(private val context: Context) {
         )!!
         set(value) = sharedPreferences.edit { putString("geoSiteAddress", value) }
     var pingAddress: String
-        get() = sharedPreferences.getString("pingAddress", "https://www.google.com")!!
+        get() {
+            val storedValue = sharedPreferences.getString("pingAddress", null)?.trim()
+            val normalizedValue = storedValue?.removeSuffix("/")
+            return when {
+                storedValue.isNullOrEmpty() -> DEFAULT_PING_ADDRESS
+                normalizedValue == LEGACY_DEFAULT_PING_ADDRESS -> {
+                    sharedPreferences.edit { putString("pingAddress", DEFAULT_PING_ADDRESS) }
+                    DEFAULT_PING_ADDRESS
+                }
+                else -> storedValue
+            }
+        }
         set(value) = sharedPreferences.edit { putString("pingAddress", value) }
     var pingTimeout: Int
         get() = sharedPreferences.getInt("pingTimeout", 5)
@@ -162,6 +179,9 @@ class Settings(private val context: Context) {
     var transparentProxy: Boolean
         get() = sharedPreferences.getBoolean("transparentProxy", false)
         set(value) = sharedPreferences.edit { putBoolean("transparentProxy", value) }
+    var languageTag: String
+        get() = sharedPreferences.getString("languageTag", defaultLanguageTag())!!
+        set(value) = sharedPreferences.edit { putString("languageTag", value) }
 
     fun baseDir(): File = context.filesDir
     fun xrayCoreFile(): File = File(baseDir(), "xray")
@@ -174,4 +194,14 @@ class Settings(private val context: Context) {
     fun networkMonitorPid(): File = File(baseDir(), "monitor.pid")
     fun networkMonitorScript(): File = File(baseDir(), "monitor.sh")
     fun xrayCoreLogs(): File = File(baseDir(), "error.log")
+    fun getString(resId: Int, vararg args: Any): String = context.getString(resId, *args)
+
+    private fun defaultLanguageTag(): String {
+        val language = context.resources.configuration.locales
+            .takeIf { !it.isEmpty }
+            ?.get(0)
+            ?.language
+            ?: java.util.Locale.getDefault().language
+        return if (language.equals("ru", ignoreCase = true)) "ru" else "en"
+    }
 }

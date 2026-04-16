@@ -261,10 +261,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDeleteProfileDialog(profile: ProfileList) {
         MaterialAlertDialogBuilder(this)
-            .setTitle("Delete Profile#${profile.index + 1} ?")
-            .setMessage("\"${profile.name}\" will delete forever !!")
-            .setNegativeButton("No", null)
-            .setPositiveButton("Yes") { _, _ ->
+            .setTitle(getString(R.string.deleteProfileDialogTitle, profile.index + 1))
+            .setMessage(getString(R.string.deleteProfileDialogMessage, profile.name))
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.deleteProfile)) { _, _ ->
                 mainViewModel.onAction(MainAction.ConfirmDeleteProfile(profile))
             }.show()
     }
@@ -335,7 +335,7 @@ class MainActivity : AppCompatActivity() {
     private fun showDeleteSourceDialog(source: Link) {
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.deleteSource))
-            .setMessage("\"${source.name}\" and all linked profiles will be deleted.")
+            .setMessage(getString(R.string.deleteSourceDialogMessage, source.name))
             .setNegativeButton(getString(R.string.cancel), null)
             .setPositiveButton(getString(R.string.deleteSource)) { _, _ ->
                 mainViewModel.onAction(MainAction.ConfirmDeleteSource(source.id))
@@ -345,7 +345,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openLink(uri: URI) {
         val link = Link()
-        link.name = LinkHelper.remark(uri, LinkHelper.LINK_DEFAULT)
+        link.name = LinkHelper.remark(uri, getString(R.string.newLink))
         link.address = uri.toString()
         val intent = LinksManagerActivity.openLink(applicationContext, link)
         linksManager.launch(intent)
@@ -367,7 +367,7 @@ class MainActivity : AppCompatActivity() {
                         profile = profile,
                     )
                 } catch (error: Exception) {
-                    error.message ?: "Ping failed"
+                    error.message ?: getString(R.string.pingFailedGeneric)
                 }
                 mainViewModel.onAction(MainAction.PingResultReceived(result))
             }
@@ -432,7 +432,7 @@ class MainActivity : AppCompatActivity() {
                                 profile = profile,
                             )
                         } catch (error: Exception) {
-                            error.message ?: "Ping failed"
+                            error.message ?: getString(R.string.pingFailedGeneric)
                         }
                         if (isActive) {
                             mainViewModel.onAction(MainAction.ProfilePingUpdated(profile.id, result))

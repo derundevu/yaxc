@@ -43,7 +43,7 @@ class LinkAdapter : ListAdapter<Link, LinkAdapter.LinkHolder>(diffCallback) {
                 ContextCompat.getColor(card.context, color)
             )
             name.text = link.name
-            type.text = link.type.name
+            type.text = card.context.getString(link.type.titleRes)
             edit.setOnClickListener { onEditClick(link) }
             delete.setOnClickListener { onDeleteClick(link) }
         }

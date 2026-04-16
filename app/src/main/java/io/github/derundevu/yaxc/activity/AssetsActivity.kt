@@ -40,9 +40,9 @@ class AssetsActivity : AppCompatActivity() {
 
     private val settings by lazy { Settings(applicationContext) }
 
-    private var geoIpState by mutableStateOf(AssetCardState(title = "GeoIP"))
-    private var geoSiteState by mutableStateOf(AssetCardState(title = "GeoSite"))
-    private var xrayCoreState by mutableStateOf(AssetCardState(title = "XTLS/Xray-core"))
+    private var geoIpState by mutableStateOf(AssetCardState(title = ""))
+    private var geoSiteState by mutableStateOf(AssetCardState(title = ""))
+    private var xrayCoreState by mutableStateOf(AssetCardState(title = ""))
 
     private val geoIpLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
         writeToFile(it, geoIpFile()) { setAssetStatus() }
@@ -116,7 +116,7 @@ class AssetsActivity : AppCompatActivity() {
         val exists = file.exists()
         val invalid = {
             delete(file)
-            "Invalid"
+            getString(R.string.invalid)
         }
         return if (exists) {
             val result = Shell.cmd(cmd).exec()

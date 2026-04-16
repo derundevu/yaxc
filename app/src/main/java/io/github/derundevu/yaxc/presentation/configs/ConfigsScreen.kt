@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -35,14 +36,14 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffol
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 
 enum class ConfigSection(
-    val title: String,
+    @StringRes val titleRes: Int,
     val isArray: Boolean,
 ) {
-    Log("log", false),
-    Dns("dns", false),
-    Inbounds("inbounds", true),
-    Outbounds("outbounds", true),
-    Routing("routing", false),
+    Log(R.string.configSectionLog, false),
+    Dns(R.string.configSectionDns, false),
+    Inbounds(R.string.configSectionInbounds, true),
+    Outbounds(R.string.configSectionOutbounds, true),
+    Routing(R.string.configSectionRouting, false),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,7 +113,7 @@ fun ConfigsScreen(
                         Tab(
                             selected = section == selectedSection,
                             onClick = { onSectionSelected(section) },
-                            text = { Text(text = section.title) },
+                            text = { Text(text = textResource(section.titleRes)) },
                         )
                     }
                 }
@@ -131,7 +132,7 @@ fun ConfigsScreen(
                         Tab(
                             selected = mode == currentMode,
                             onClick = { onModeSelected(mode) },
-                            text = { Text(text = mode.name) },
+                            text = { Text(text = textResource(mode.titleRes())) },
                         )
                     }
                 }
@@ -201,4 +202,12 @@ fun ConfigsScreen(
 @Composable
 private fun textResource(id: Int): String {
     return androidx.compose.ui.res.stringResource(id)
+}
+
+private fun Config.Mode.titleRes(): Int {
+    return when (this) {
+        Config.Mode.Disable -> R.string.configModeDisable
+        Config.Mode.Replace -> R.string.configModeReplace
+        Config.Mode.Merge -> R.string.configModeMerge
+    }
 }

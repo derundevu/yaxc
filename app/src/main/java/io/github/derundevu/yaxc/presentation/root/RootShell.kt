@@ -26,8 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 
@@ -59,21 +61,21 @@ fun RootBottomBar(
         ) {
             RootBottomTabItem(
                 icon = Icons.Outlined.ToggleOn,
-                label = "Connect",
+                label = stringResource(R.string.rootTabConnect),
                 selected = selectedDestination == RootDestination.Connect,
                 onClick = { onSelectDestination(RootDestination.Connect) },
                 modifier = Modifier.weight(1f),
             )
             RootBottomTabItem(
                 icon = Icons.AutoMirrored.Outlined.AltRoute,
-                label = "Routing",
+                label = stringResource(R.string.rootTabRouting),
                 selected = selectedDestination == RootDestination.Routing,
                 onClick = { onSelectDestination(RootDestination.Routing) },
                 modifier = Modifier.weight(1f),
             )
             RootBottomTabItem(
                 icon = Icons.Outlined.Settings,
-                label = "Settings",
+                label = stringResource(R.string.rootTabSettings),
                 selected = selectedDestination == RootDestination.Settings,
                 onClick = { onSelectDestination(RootDestination.Settings) },
                 modifier = Modifier.weight(1f),

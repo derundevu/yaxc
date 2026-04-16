@@ -1,12 +1,5 @@
 package io.github.derundevu.yaxc.presentation.main
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -39,6 +32,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
@@ -71,6 +66,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,6 +83,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -104,6 +101,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPa
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidSurface
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 private enum class MainRootTab {
@@ -144,8 +142,12 @@ fun MainScreen(
         drawRect(backdropBaseColor)
         drawContent()
     }
-    var rootTabOrdinal by rememberSaveable { mutableIntStateOf(MainRootTab.Connect.ordinal) }
-    val rootTab = MainRootTab.entries[rootTabOrdinal]
+    val pagerState = rememberPagerState(
+        initialPage = MainRootTab.Connect.ordinal,
+        pageCount = { MainRootTab.entries.size },
+    )
+    val rootTab = MainRootTab.entries[pagerState.currentPage]
+    val coroutineScope = rememberCoroutineScope()
     val shouldCollapseControls by remember(connectListState, density) {
         derivedStateOf {
             val collapseTriggerPx = with(density) { 124.dp.roundToPx() }
@@ -181,29 +183,14 @@ fun MainScreen(
                         .background(YaxcTheme.backgroundBrush)
                         .layerBackdrop(backdrop = backdrop),
                 ) {
-                    AnimatedContent(
-                        targetState = rootTab,
-                        transitionSpec = {
-                            val duration = 320
-                            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                            ContentTransform(
-                                targetContentEnter = slideInHorizontally(
-                                    animationSpec = tween(durationMillis = duration),
-                                    initialOffsetX = { fullWidth -> fullWidth * direction },
-                                ),
-                                initialContentExit = slideOutHorizontally(
-                                    animationSpec = tween(durationMillis = duration),
-                                    targetOffsetX = { fullWidth -> -fullWidth * direction },
-                                ),
-                                sizeTransform = SizeTransform(clip = false),
-                            )
-                        },
-                        label = "main_root_content",
+                    HorizontalPager(
+                        state = pagerState,
                         modifier = Modifier
                             .fillMaxSize()
                             .clipToBounds(),
-                    ) { currentRootTab ->
-                        when (currentRootTab) {
+                        beyondViewportPageCount = 1,
+                    ) { page ->
+                        when (MainRootTab.entries[page]) {
                             MainRootTab.Connect -> {
                                 ConnectContent(
                                     tabs = tabs,
@@ -292,7 +279,12 @@ fun MainScreen(
                 MainLiquidTabBar(
                     backdrop = backdrop,
                     selectedTab = rootTab,
-                    onSelectTab = { rootTabOrdinal = it.ordinal },
+                    onSelectTab = { tab ->
+                        if (pagerState.currentPage == tab.ordinal) return@MainLiquidTabBar
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(tab.ordinal)
+                        }
+                    },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .zIndex(2f)
@@ -627,19 +619,34 @@ private fun SettingsContent(
         }
         item {
             YaxcGlassPanel {
-                Text(
-                    text = textResource(R.string.appFullName),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = appVersion,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = YaxcTheme.extendedColors.textMuted,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
-                VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    VersionRow(
+                        textResource(R.string.appFullName),
+                        appVersion,
+                    )
+                    VersionRow(
+                        textResource(R.string.xrayLabel),
+                        xrayVersion,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    VersionRow(
+                        textResource(R.string.tun2socksLabel),
+                        tun2socksVersion,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                    Text(
+                        text = textResource(R.string.madeWithPeople),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                    )
+                }
             }
         }
     }
@@ -854,7 +861,7 @@ private fun MainLiquidTabBar(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(54.dp),
+                        .height(58.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
                     shape = RoundedCornerShape(28.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
@@ -867,21 +874,21 @@ private fun MainLiquidTabBar(
             ) {
                 MainBottomTabItem(
                     icon = Icons.Outlined.ToggleOn,
-                    label = "Connect",
+                    label = textResource(R.string.rootTabConnect),
                     selected = selectedTab == MainRootTab.Connect,
                     onClick = { onSelectTab(MainRootTab.Connect) },
                     modifier = Modifier.weight(1f),
                 )
                 MainBottomTabItem(
                     icon = Icons.AutoMirrored.Outlined.AltRoute,
-                    label = "Routing",
+                    label = textResource(R.string.rootTabRouting),
                     selected = selectedTab == MainRootTab.Routing,
                     onClick = { onSelectTab(MainRootTab.Routing) },
                     modifier = Modifier.weight(1f),
                 )
                 MainBottomTabItem(
                     icon = Icons.Outlined.Settings,
-                    label = "Settings",
+                    label = textResource(R.string.rootTabSettings),
                     selected = selectedTab == MainRootTab.Settings,
                     onClick = { onSelectTab(MainRootTab.Settings) },
                     modifier = Modifier.weight(1f),
@@ -1121,10 +1128,10 @@ private fun MainBottomTabItem(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .height(58.dp)
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Icon(
                 imageVector = icon,
@@ -1531,11 +1538,16 @@ private fun VersionRow(
     value: String,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = YaxcTheme.extendedColors.textMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
         Text(
             text = value,
@@ -1543,6 +1555,8 @@ private fun VersionRow(
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

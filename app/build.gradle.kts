@@ -23,7 +23,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = calcVersionCode()
-        versionName = "12.1.1"
+        versionName = "1.0.0"
     }
 
     buildFeatures {
@@ -61,7 +61,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("/tmp/yaxc.jks")
+            storeFile = file("/Users/<redacted>/.keys/yaxc.jks")
             storePassword = System.getenv("KS_PASSWORD")
             keyAlias = System.getenv("KEY_ALIAS")
             keyPassword = System.getenv("KEY_PASSWORD")

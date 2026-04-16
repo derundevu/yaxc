@@ -1,10 +1,12 @@
 package io.github.derundevu.yaxc.database
 
 import android.os.Parcelable
+import androidx.annotation.StringRes
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
+import io.github.derundevu.yaxc.R
 import kotlinx.parcelize.Parcelize
 
 @Parcelize
@@ -26,9 +28,12 @@ data class Link(
     @ColumnInfo(name = "user_agent")
     var userAgent: String? = null,
 ) : Parcelable {
-    enum class Type(val value: Int) {
-        Json(0),
-        Subscription(1);
+    enum class Type(
+        val value: Int,
+        @StringRes val titleRes: Int,
+    ) {
+        Json(0, R.string.linkTypeJson),
+        Subscription(1, R.string.linkTypeSubscription);
 
         class Convertor {
             @TypeConverter

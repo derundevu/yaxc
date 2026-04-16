@@ -165,12 +165,26 @@ class ConfigHelper(
         }
 
         val directPrivate = JSONObject()
-            .put("ip", JSONArray().put("geoip:private"))
+            .put("ip", privateAddressRanges())
             .put("outboundTag", "direct")
         rules.put(directPrivate)
 
         return JSONObject()
             .put("domainStrategy", "IPIfNonMatch")
             .put("rules", rules)
+    }
+
+    private fun privateAddressRanges(): JSONArray {
+        return JSONArray().apply {
+            put("10.0.0.0/8")
+            put("100.64.0.0/10")
+            put("127.0.0.0/8")
+            put("169.254.0.0/16")
+            put("172.16.0.0/12")
+            put("192.168.0.0/16")
+            put("::1/128")
+            put("fc00::/7")
+            put("fe80::/10")
+        }
     }
 }

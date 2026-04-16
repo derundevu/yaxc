@@ -17,6 +17,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.res.stringResource
+import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
@@ -35,48 +37,48 @@ fun DesignSystemShowcase() {
             verticalArrangement = Arrangement.spacedBy(spacing.lg),
         ) {
             Text(
-                text = "Settings",
+                text = stringResource(R.string.showcaseTitle),
                 style = MaterialTheme.typography.displayLarge,
                 color = MaterialTheme.colorScheme.onBackground,
             )
 
             Text(
-                text = "Compose foundation for the future midnight-blue UI.",
+                text = stringResource(R.string.showcaseLead),
                 style = MaterialTheme.typography.bodyLarge,
                 color = YaxcTheme.extendedColors.textMuted,
             )
 
             YaxcCard {
                 YaxcSettingsRow(
-                    title = "Theme",
-                    value = "Midnight Blue",
+                    title = stringResource(R.string.showcaseTheme),
+                    value = stringResource(R.string.showcaseThemeValue),
                     icon = Icons.Outlined.Palette,
                 )
                 YaxcSettingsRow(
-                    title = "Language",
-                    value = "Follow system",
+                    title = stringResource(R.string.showcaseLanguage),
+                    value = stringResource(R.string.showcaseLanguageValue),
                     icon = Icons.Outlined.Language,
                 )
             }
 
             YaxcCard {
                 YaxcSwitchRow(
-                    title = "Auto connect",
-                    subtitle = "Connect when the app starts",
+                    title = stringResource(R.string.showcaseAutoConnect),
+                    subtitle = stringResource(R.string.showcaseAutoConnectHint),
                     checked = true,
                     onCheckedChange = {},
                     icon = Icons.Outlined.Sync,
                 )
                 YaxcSwitchRow(
-                    title = "Kill switch",
-                    subtitle = "Block internet without VPN",
+                    title = stringResource(R.string.showcaseKillSwitch),
+                    subtitle = stringResource(R.string.showcaseKillSwitchHint),
                     checked = false,
                     onCheckedChange = {},
                     icon = Icons.Outlined.Security,
                 )
                 YaxcSettingsRow(
-                    title = "Apps routing",
-                    value = "Configure",
+                    title = stringResource(R.string.appsRouting),
+                    value = stringResource(R.string.configure),
                     icon = Icons.Outlined.Route,
                 )
             }

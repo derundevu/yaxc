@@ -142,7 +142,7 @@ class LinksManagerActivity : AppCompatActivity() {
                     configuration.remove("remarks")
                     remarks
                 } else {
-                    LinkHelper.REMARK_DEFAULT
+                    getString(R.string.newProfile)
                 }
                 val json = configuration.toString(2)
                 val profile = Profile().apply {

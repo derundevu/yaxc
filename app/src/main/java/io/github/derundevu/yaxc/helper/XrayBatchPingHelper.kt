@@ -2,6 +2,8 @@ package io.github.derundevu.yaxc.helper
 
 import android.content.Context
 import android.util.Base64
+import android.util.Log
+import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.database.Profile
@@ -13,6 +15,7 @@ import java.net.ServerSocket
 object XrayBatchPingHelper {
 
     private const val LOCAL_PING_HOST = "127.0.0.1"
+    private const val TAG = "XrayBatchPingHelper"
 
     fun supportsIsolatedPing(): Boolean {
         return runCatching {
@@ -34,7 +37,7 @@ object XrayBatchPingHelper {
         profile: Profile,
     ): String {
         if (!supportsIsolatedPing()) {
-            return "Isolated ping is unavailable"
+            return context.getString(R.string.pingIsolatedUnavailable)
         }
 
         val pingPort = findFreePort()
@@ -49,7 +52,20 @@ object XrayBatchPingHelper {
         FileHelper.createOrUpdate(configFile, runtimeConfig)
 
         return try {
+            val validationError = validateConfig(
+                dir = context.filesDir.absolutePath,
+                configPath = configFile.absolutePath,
+            )
+            if (!validationError.isNullOrBlank()) {
+                Log.e(
+                    TAG,
+                    "Isolated ping config validation failed: $validationError; " +
+                        "profileId=${profile.id}; configPath=${configFile.absolutePath}"
+                )
+                return validationError
+            }
             invokePing(
+                context = context,
                 dir = context.filesDir.absolutePath,
                 configPath = configFile.absolutePath,
                 timeout = settings.pingTimeout,
@@ -90,6 +106,7 @@ object XrayBatchPingHelper {
     }
 
     private fun invokePing(
+        context: Context,
         dir: String,
         configPath: String,
         timeout: Int,
@@ -106,16 +123,48 @@ object XrayBatchPingHelper {
                 String::class.java,
             )
             .invoke(null, dir, configPath, timeout.toLong(), url, proxy) as? String
-            ?: return "Ping failed"
+            ?: return context.getString(R.string.pingFailedGeneric)
 
         val decoded = String(Base64.decode(response, Base64.DEFAULT))
         val payload = JSONObject(decoded)
         if (!payload.optBoolean("success")) {
-            return payload.optString("error").ifBlank { "Ping failed" }
+            val error = payload.optString("error").ifBlank {
+                context.getString(R.string.pingFailedGeneric)
+            }
+            Log.e(
+                TAG,
+                "Isolated ping failed: $error; configPath=$configPath; url=$url; proxy=$proxy"
+            )
+            return error
         }
 
         val delay = payload.optLong("data", -1L)
-        return if (delay >= 0) "$delay ms" else "Ping failed"
+        return if (delay >= 0) {
+            context.getString(R.string.pingDelayMs, delay)
+        } else {
+            Log.e(
+                TAG,
+                "Isolated ping returned invalid delay payload; configPath=$configPath; url=$url"
+            )
+            context.getString(R.string.pingFailedGeneric)
+        }
+    }
+
+    private fun validateConfig(
+        dir: String,
+        configPath: String,
+    ): String? {
+        return runCatching {
+            Class.forName("XrayCore.XrayCore")
+                .getMethod(
+                    "test",
+                    String::class.java,
+                    String::class.java,
+                )
+                .invoke(null, dir, configPath) as? String
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to validate isolated ping config; configPath=$configPath", error)
+        }.getOrNull()
     }
 
     private fun findFreePort(): Int {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -22,8 +23,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -123,19 +126,23 @@ fun SettingsHomeScreen(
                 }
                 item {
                     YaxcGlassPanel {
-                        Text(
-                            text = textResource(R.string.appFullName),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            text = appVersion,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YaxcTheme.extendedColors.textMuted,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
-                        VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
+                        androidx.compose.foundation.layout.Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            VersionRow(textResource(R.string.appFullName), appVersion)
+                            VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
+                            VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
+                            Text(
+                                text = textResource(R.string.madeWithPeople),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = YaxcTheme.extendedColors.textMuted,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -158,16 +165,23 @@ private fun VersionRow(
     value: String,
     modifier: Modifier = Modifier,
 ) {
-    androidx.compose.foundation.layout.Column(modifier = modifier) {
+    androidx.compose.foundation.layout.Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = YaxcTheme.extendedColors.textMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

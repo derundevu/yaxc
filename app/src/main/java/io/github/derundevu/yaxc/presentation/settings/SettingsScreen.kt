@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Security
@@ -87,6 +88,7 @@ data class SettingsFormState(
     val tproxyHotspot: Boolean,
     val tproxyTethering: Boolean,
     val transparentProxy: Boolean,
+    val languageTag: String,
 ) {
     companion object {
         val Saver: Saver<SettingsFormState, Any> = listSaver(
@@ -126,6 +128,7 @@ data class SettingsFormState(
                     it.tproxyHotspot,
                     it.tproxyTethering,
                     it.transparentProxy,
+                    it.languageTag,
                 )
             },
             restore = { values ->
@@ -164,6 +167,7 @@ data class SettingsFormState(
                     tproxyHotspot = values[31] as Boolean,
                     tproxyTethering = values[32] as Boolean,
                     transparentProxy = values[33] as Boolean,
+                    languageTag = values.getOrNull(34) as? String ?: "en",
                 )
             },
         )
@@ -203,6 +207,7 @@ data class SettingsFormState(
             tproxyHotspot = settings.tproxyHotspot,
             tproxyTethering = settings.tproxyTethering,
             transparentProxy = settings.transparentProxy,
+            languageTag = settings.languageTag,
         )
     }
 }
@@ -225,6 +230,7 @@ fun SettingsScreen(
     val spacing = YaxcTheme.spacing
     var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.Basic) }
     var showTunRoutesDialog by rememberSaveable { mutableStateOf(false) }
+    var showLanguageDialog by rememberSaveable { mutableStateOf(false) }
     var tunRoutesDraft by rememberSaveable { mutableStateOf(tunRoutes.joinToString("\n")) }
 
     if (showTunRoutesDialog) {
@@ -263,6 +269,38 @@ fun SettingsScreen(
                     imageVector = Icons.Outlined.Tune,
                     contentDescription = null,
                 )
+            },
+        )
+    }
+
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            title = { Text(text = textResource(R.string.settingsLanguageTitle)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsLanguageEnglish),
+                        selected = formState.languageTag == "en",
+                        onClick = {
+                            onFormStateChange(formState.copy(languageTag = "en"))
+                            showLanguageDialog = false
+                        },
+                    )
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsLanguageRussian),
+                        selected = formState.languageTag == "ru",
+                        onClick = {
+                            onFormStateChange(formState.copy(languageTag = "ru"))
+                            showLanguageDialog = false
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
+                    Text(text = textResource(R.string.close))
+                }
             },
         )
     }
@@ -329,6 +367,7 @@ fun SettingsScreen(
                     SettingsTab.Basic -> BasicSettingsTab(
                         formState = formState,
                         onFormStateChange = onFormStateChange,
+                        onLanguageClick = { showLanguageDialog = true },
                     )
 
                     SettingsTab.Advanced -> AdvancedSettingsTab(
@@ -350,9 +389,27 @@ fun SettingsScreen(
 private fun BasicSettingsTab(
     formState: SettingsFormState,
     onFormStateChange: (SettingsFormState) -> Unit,
+    onLanguageClick: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
-        SettingsSection(title = "Connection")
+        SettingsSection(title = textResource(R.string.settingsLanguageSection))
+        YaxcCard {
+            YaxcSettingsRow(
+                title = textResource(R.string.settingsLanguageTitle),
+                subtitle = textResource(R.string.settingsLanguageLead),
+                value = textResource(
+                    if (formState.languageTag == "ru") {
+                        R.string.settingsLanguageOptionRuShort
+                    } else {
+                        R.string.settingsLanguageOptionEnShort
+                    }
+                ),
+                icon = Icons.Outlined.Language,
+                onClick = onLanguageClick,
+            )
+        }
+
+        SettingsSection(title = textResource(R.string.settingsSectionConnection))
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.socksAddress),
@@ -382,7 +439,7 @@ private fun BasicSettingsTab(
             )
         }
 
-        SettingsSection(title = "Resources")
+        SettingsSection(title = textResource(R.string.settingsSectionResources))
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.geoIpAddress),
@@ -417,7 +474,7 @@ private fun BasicSettingsTab(
             )
         }
 
-        SettingsSection(title = "Behavior")
+        SettingsSection(title = textResource(R.string.settingsSectionBehavior))
         YaxcCard {
             YaxcSwitchRow(
                 title = textResource(R.string.bypassLan),
@@ -474,7 +531,7 @@ private fun AdvancedSettingsTab(
     onTunRoutesClick: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
-        SettingsSection(title = "DNS")
+        SettingsSection(title = textResource(R.string.settingsSectionDns))
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.primaryDns),
@@ -501,7 +558,7 @@ private fun AdvancedSettingsTab(
             )
         }
 
-        SettingsSection(title = "Tunnel")
+        SettingsSection(title = textResource(R.string.settingsSectionTunnel))
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.tunName),
@@ -543,7 +600,7 @@ private fun AdvancedSettingsTab(
             )
         }
 
-        SettingsSection(title = "Interfaces")
+        SettingsSection(title = textResource(R.string.settingsSectionInterfaces))
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.hotspotInterface),
@@ -558,7 +615,7 @@ private fun AdvancedSettingsTab(
             )
         }
 
-        SettingsSection(title = "Transparent Proxy")
+        SettingsSection(title = textResource(R.string.settingsSectionTransparentProxy))
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.tproxyAddress),
@@ -614,14 +671,14 @@ private fun AdvancedSettingsTab(
             )
         }
 
-        SettingsSection(title = "Routes")
+        SettingsSection(title = textResource(R.string.settingsSectionRoutes))
         YaxcCard {
             YaxcSettingsRow(
                 title = textResource(R.string.tunRoutes),
                 subtitle = if (tunRoutes.isEmpty()) {
                     textResource(R.string.noTunRoutesConfigured)
                 } else {
-                    "${tunRoutes.size} routes configured"
+                    textResource(R.string.settingsRoutesConfigured, tunRoutes.size)
                 },
                 value = textResource(R.string.configure),
                 icon = Icons.Outlined.Tune,
@@ -672,6 +729,33 @@ private fun SettingsDivider() {
 }
 
 @Composable
+private fun LanguageOptionRow(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+    }
+}
+
+@Composable
 private fun textResource(id: Int): String {
     return androidx.compose.ui.res.stringResource(id)
+}
+
+@Composable
+private fun textResource(id: Int, arg0: Int): String {
+    return androidx.compose.ui.res.stringResource(id, arg0)
 }
