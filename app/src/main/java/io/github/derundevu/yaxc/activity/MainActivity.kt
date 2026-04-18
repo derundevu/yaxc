@@ -122,6 +122,7 @@ class MainActivity : AppCompatActivity() {
                 MainScreen(
                     tabs = uiState.tabs,
                     selectedTabId = uiState.selectedTabId,
+                    selectedSourceId = uiState.selectedSourceId,
                     isRunning = uiState.isRunning,
                     selectedSourceName = uiState.selectedSourceName,
                     selectedProfileName = uiState.selectedProfileName,
@@ -416,7 +417,8 @@ class MainActivity : AppCompatActivity() {
         }
         if (profiles.isEmpty()) return
 
-        val maxWorkers = minOf(20, profiles.size)
+        val deviceWorkerCap = (Runtime.getRuntime().availableProcessors() * 2).coerceAtLeast(4)
+        val maxWorkers = minOf(20, profiles.size, deviceWorkerCap)
         val semaphore = Semaphore(maxWorkers)
 
         supervisorScope {

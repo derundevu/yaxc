@@ -83,13 +83,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runtime,
     ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState, runtime: RuntimeState ->
         val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
-        val fallbackTabId = selectedProfile?.link?.takeIf { linkId ->
+        val selectedSourceId = selectedProfile?.link?.takeIf { linkId ->
             tabs.any { it.id == linkId }
         } ?: 0L
         val resolvedTabId = selection.selectedTabId.takeIf { selected ->
             selected == 0L || tabs.any { it.id == selected }
-        } ?: fallbackTabId
-        val selectedSourceName = tabs.firstOrNull { it.id == resolvedTabId }?.name
+        } ?: 0L
+        val cardSourceId = if (selectedSourceId != 0L) selectedSourceId else resolvedTabId
+        val selectedSourceName = tabs.firstOrNull { it.id == cardSourceId }?.name
             ?: application.getString(R.string.mainNoSourceSelected)
         val filteredProfiles = profiles
             .filter { resolvedTabId == 0L || it.link == resolvedTabId }
@@ -111,6 +112,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MainUiState(
             tabs = tabs,
             selectedTabId = resolvedTabId,
+            selectedSourceId = cardSourceId,
             selectedSourceName = selectedSourceName,
             filteredProfiles = filteredProfiles,
             selectedProfileId = selection.selectedProfileId,
@@ -194,7 +196,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun parsePingState(result: String): MainPingState {
-        val pingLabel = "(\\d+)\\s*ms".toRegex()
+        val pingLabel = "(\\d+)\\s*(ms|мс)".toRegex(RegexOption.IGNORE_CASE)
             .find(result)
             ?.groupValues
             ?.getOrNull(1)

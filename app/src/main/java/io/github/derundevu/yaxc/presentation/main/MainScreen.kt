@@ -1,9 +1,20 @@
 package io.github.derundevu.yaxc.presentation.main
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,7 +60,6 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.ToggleOn
-import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +69,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -101,6 +112,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPa
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidSurface
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -115,6 +127,7 @@ private enum class MainRootTab {
 fun MainScreen(
     tabs: List<Link>,
     selectedTabId: Long,
+    selectedSourceId: Long,
     isRunning: Boolean,
     selectedSourceName: String,
     selectedProfileName: String,
@@ -195,6 +208,7 @@ fun MainScreen(
                                 ConnectContent(
                                     tabs = tabs,
                                     selectedTabId = selectedTabId,
+                                    selectedSourceId = selectedSourceId,
                                     isRunning = isRunning,
                                     selectedSourceName = selectedSourceName,
                                     selectedProfileName = selectedProfileName,
@@ -252,7 +266,7 @@ fun MainScreen(
                     onPingCurrent = { onAction(MainAction.PingClicked) },
                     onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
                     onRefreshSource = {
-                        if (selectedTabId != 0L) onAction(MainAction.RefreshSourceClicked(selectedTabId))
+                        if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
                         else onAction(MainAction.RefreshLinksClicked)
                     },
                     modifier = Modifier
@@ -261,18 +275,27 @@ fun MainScreen(
                         .padding(horizontal = spacing.md, vertical = spacing.md),
                 )
 
-                if (rootTab == MainRootTab.Connect) {
+                AnimatedVisibility(
+                    visible = rootTab == MainRootTab.Connect,
+                    enter = fadeIn(animationSpec = tween(220)) +
+                        scaleIn(initialScale = 0.82f, animationSpec = tween(220)) +
+                        slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(220)),
+                    exit = fadeOut(animationSpec = tween(180)) +
+                        scaleOut(targetScale = 0.82f, animationSpec = tween(180)) +
+                        slideOutVertically(targetOffsetY = { it / 2 }, animationSpec = tween(180)),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .zIndex(3f)
+                        .padding(
+                            end = spacing.lg + 12.dp,
+                            bottom = spacing.lg + reservedBottomInset + 94.dp,
+                        ),
+                ) {
                     FloatingConnectButton(
                         backdrop = backdrop,
                         isRunning = isRunning,
                         onClick = { onAction(MainAction.ToggleVpnClicked) },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .zIndex(3f)
-                            .padding(
-                                end = spacing.lg + 12.dp,
-                                bottom = spacing.lg + reservedBottomInset + 94.dp,
-                            ),
+                        modifier = Modifier,
                     )
                 }
 
@@ -300,6 +323,7 @@ fun MainScreen(
 private fun ConnectContent(
     tabs: List<Link>,
     selectedTabId: Long,
+    selectedSourceId: Long,
     isRunning: Boolean,
     selectedSourceName: String,
     selectedProfileName: String,
@@ -322,9 +346,28 @@ private fun ConnectContent(
     }
     val sourceCenters = remember { mutableStateMapOf<Long, Float>() }
     val sourceHeights = remember { mutableStateMapOf<Long, Float>() }
+    val coroutineScope = rememberCoroutineScope()
     var draggingSourceId by remember { mutableStateOf<Long?>(null) }
     var draggingOffsetY by remember { mutableFloatStateOf(0f) }
     var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
+    var settlingSourceId by remember { mutableStateOf<Long?>(null) }
+    val settleOffsetY = remember { Animatable(0f) }
+    var dragSettleJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(tabs) {
+        val knownIds = tabs.mapTo(mutableSetOf()) { it.id }
+        sourceCenters.keys.toList().filterNot(knownIds::contains).forEach(sourceCenters::remove)
+        sourceHeights.keys.toList().filterNot(knownIds::contains).forEach(sourceHeights::remove)
+        if (draggingSourceId != null && draggingSourceId !in knownIds) {
+            draggingSourceId = null
+            draggingOffsetY = 0f
+            draggingTargetIndex = null
+        }
+        if (settlingSourceId != null && settlingSourceId !in knownIds) {
+            settlingSourceId = null
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
@@ -348,7 +391,7 @@ private fun ConnectContent(
                 onPingCurrent = { onAction(MainAction.PingClicked) },
                 onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
                 onRefreshSource = {
-                    if (selectedTabId != 0L) onAction(MainAction.RefreshSourceClicked(selectedTabId))
+                    if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
                     else onAction(MainAction.RefreshLinksClicked)
                 },
             )
@@ -358,13 +401,15 @@ private fun ConnectContent(
             items = tabs,
             key = { _, item -> item.id },
         ) { index, source ->
-            val isDragging = draggingSourceId == source.id
+            val isDragging = draggingSourceId == source.id && settlingSourceId == null
+            val isSettling = settlingSourceId == source.id
             val draggedIndex = draggingSourceId?.let { sourceId ->
                 tabs.indexOfFirst { it.id == sourceId }.takeIf { it >= 0 }
             }
             val draggedHeight = draggingSourceId?.let { sourceHeights[it] } ?: 0f
             val displacedOffsetTarget = when {
                 isDragging -> draggingOffsetY
+                isSettling -> settleOffsetY.value
                 draggedIndex == null || draggingTargetIndex == null -> 0f
                 draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
                     -(draggedHeight + sourceSpacingPx)
@@ -383,23 +428,55 @@ private fun ConnectContent(
                 Modifier.pointerInput(source.id, tabs) {
                     detectDragGesturesAfterLongPress(
                         onDragStart = {
+                            dragSettleJob?.cancel()
+                            coroutineScope.launch { settleOffsetY.snapTo(0f) }
+                            settlingSourceId = null
                             draggingSourceId = source.id
                             draggingOffsetY = 0f
                             draggingTargetIndex = index
                         },
                         onDragCancel = {
-                            draggingSourceId = null
-                            draggingOffsetY = 0f
-                            draggingTargetIndex = null
+                            dragSettleJob = coroutineScope.launch {
+                                settlingSourceId = source.id
+                                settleOffsetY.snapTo(draggingOffsetY)
+                                settleOffsetY.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(durationMillis = 180),
+                                )
+                                settleOffsetY.snapTo(0f)
+                                settlingSourceId = null
+                                draggingSourceId = null
+                                draggingOffsetY = 0f
+                                draggingTargetIndex = null
+                            }
                         },
                         onDragEnd = {
                             val toIndex = draggingTargetIndex
-                            if (toIndex != null && toIndex != index) {
-                                onAction(MainAction.MoveSource(index, toIndex))
+                            dragSettleJob?.cancel()
+                            dragSettleJob = coroutineScope.launch {
+                                val sourceCenter = sourceCenters[source.id] ?: 0f
+                                val targetCenter = if (toIndex != null && toIndex != index) {
+                                    tabs.getOrNull(toIndex)
+                                        ?.let { targetSource -> sourceCenters[targetSource.id] }
+                                        ?: sourceCenter
+                                } else {
+                                    sourceCenter
+                                }
+                                settlingSourceId = source.id
+                                settleOffsetY.snapTo(draggingOffsetY)
+                                settleOffsetY.animateTo(
+                                    targetValue = targetCenter - sourceCenter,
+                                    animationSpec = tween(durationMillis = 180),
+                                )
+                                if (toIndex != null && toIndex != index) {
+                                    onAction(MainAction.MoveSource(index, toIndex))
+                                }
+                                settleOffsetY.snapTo(0f)
+                                settlingSourceId = null
+                                draggingSourceId = null
+                                draggingOffsetY = 0f
+                                draggingTargetIndex = null
                             }
-                            draggingSourceId = null
-                            draggingOffsetY = 0f
-                            draggingTargetIndex = null
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
@@ -1241,7 +1318,7 @@ private fun SourceGroupCard(
                     .clickable(onClick = onToggleExpanded)
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     text = source.name,
@@ -1250,11 +1327,6 @@ private fun SourceGroupCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    imageVector = Icons.Outlined.UnfoldMore,
-                    contentDescription = null,
-                    tint = YaxcTheme.extendedColors.textMuted,
                 )
             }
 
@@ -1291,7 +1363,17 @@ private fun SourceGroupCard(
             }
         }
 
-        if (isExpanded) {
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically(
+                expandFrom = Alignment.Top,
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 560f),
+            ) + fadeIn(animationSpec = tween(durationMillis = 120, delayMillis = 40)),
+            exit = shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec = spring(dampingRatio = 0.96f, stiffness = 620f),
+            ) + fadeOut(animationSpec = tween(durationMillis = 90)),
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

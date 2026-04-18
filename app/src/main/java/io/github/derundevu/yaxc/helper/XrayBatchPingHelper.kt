@@ -19,12 +19,27 @@ object XrayBatchPingHelper {
     private const val TAG = "XrayBatchPingHelper"
 
     fun supportsIsolatedPing(): Boolean {
+        if (supportsTypedIsolatedPing()) return true
         return runCatching {
             Class.forName("XrayCore.XrayCore").getMethod(
                 "ping",
                 String::class.java,
                 String::class.java,
                 Long::class.javaPrimitiveType!!,
+                String::class.java,
+                String::class.java,
+            )
+        }.isSuccess
+    }
+
+    private fun supportsTypedIsolatedPing(): Boolean {
+        return runCatching {
+            Class.forName("XrayCore.XrayCore").getMethod(
+                "pingWithType",
+                String::class.java,
+                String::class.java,
+                Long::class.javaPrimitiveType!!,
+                String::class.java,
                 String::class.java,
                 String::class.java,
             )
@@ -72,6 +87,7 @@ object XrayBatchPingHelper {
                 timeout = settings.pingTimeout,
                 url = settings.pingAddress,
                 proxy = "socks5://$LOCAL_PING_HOST:$pingPort",
+                pingType = settings.pingType,
             )
         } finally {
             configFile.delete()
@@ -117,18 +133,53 @@ object XrayBatchPingHelper {
         timeout: Int,
         url: String,
         proxy: String,
+        pingType: Settings.PingType,
     ): String {
-        val response = Class.forName("XrayCore.XrayCore")
-            .getMethod(
-                "ping",
-                String::class.java,
-                String::class.java,
-                Long::class.javaPrimitiveType!!,
-                String::class.java,
-                String::class.java,
-            )
-            .invoke(null, dir, configPath, timeout.toLong(), url, proxy) as? String
-            ?: return context.getString(R.string.pingFailedGeneric)
+        val xrayCoreClass = Class.forName("XrayCore.XrayCore")
+        val response = when {
+            supportsTypedIsolatedPing() -> {
+                xrayCoreClass
+                    .getMethod(
+                        "pingWithType",
+                        String::class.java,
+                        String::class.java,
+                        Long::class.javaPrimitiveType!!,
+                        String::class.java,
+                        String::class.java,
+                        String::class.java,
+                    )
+                    .invoke(
+                        null,
+                        dir,
+                        configPath,
+                        timeout.toLong(),
+                        url,
+                        proxy,
+                        pingType.value,
+                    ) as? String
+            }
+
+            pingType == Settings.PingType.Head -> {
+                xrayCoreClass
+                    .getMethod(
+                        "ping",
+                        String::class.java,
+                        String::class.java,
+                        Long::class.javaPrimitiveType!!,
+                        String::class.java,
+                        String::class.java,
+                    )
+                    .invoke(null, dir, configPath, timeout.toLong(), url, proxy) as? String
+            }
+
+            else -> {
+                Log.e(
+                    TAG,
+                    "Typed isolated ping is unavailable for pingType=${pingType.value}; configPath=$configPath"
+                )
+                return context.getString(R.string.pingTypeRequiresCoreUpdate)
+            }
+        } ?: return context.getString(R.string.pingFailedGeneric)
 
         val decoded = String(Base64.decode(response, Base64.DEFAULT))
         val payload = JSONObject(decoded)
@@ -138,7 +189,7 @@ object XrayBatchPingHelper {
             }
             Log.e(
                 TAG,
-                "Isolated ping failed: $error; configPath=$configPath; url=$url; proxy=$proxy"
+                "Isolated ping failed: $error; configPath=$configPath; url=$url; proxy=$proxy; pingType=${pingType.value}"
             )
             return error
         }
@@ -149,7 +200,7 @@ object XrayBatchPingHelper {
         } else {
             Log.e(
                 TAG,
-                "Isolated ping returned invalid delay payload; configPath=$configPath; url=$url"
+                "Isolated ping returned invalid delay payload; configPath=$configPath; url=$url; pingType=${pingType.value}"
             )
             context.getString(R.string.pingFailedGeneric)
         }

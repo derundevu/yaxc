@@ -7,6 +7,18 @@ import java.io.File
 
 class Settings(private val context: Context) {
 
+    enum class PingType(val value: String) {
+        Head("head"),
+        Get("get"),
+        Tcp("tcp");
+
+        companion object {
+            fun fromValue(value: String?): PingType {
+                return entries.firstOrNull { it.value == value?.trim()?.lowercase() } ?: Get
+            }
+        }
+    }
+
     enum class GeoResourcesProvider(
         val value: String,
         val geoIpAddress: String,
@@ -50,6 +62,7 @@ class Settings(private val context: Context) {
         private const val PREVIOUS_DEFAULT_PING_ADDRESS = "https://www.google.com"
         private const val DEFAULT_PING_ADDRESS =
             "https://connectivitycheck.gstatic.com/generate_204"
+        private const val DEFAULT_PING_TYPE = "get"
         private const val PREVIOUS_DEFAULT_GEO_IP_ADDRESS =
             "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"
         private const val PREVIOUS_DEFAULT_GEO_SITE_ADDRESS =
@@ -171,6 +184,11 @@ class Settings(private val context: Context) {
             }
         }
         set(value) = sharedPreferences.edit { putString("pingAddress", value) }
+    var pingType: PingType
+        get() = PingType.fromValue(
+            sharedPreferences.getString("pingType", DEFAULT_PING_TYPE)
+        )
+        set(value) = sharedPreferences.edit { putString("pingType", value.value) }
     var userAgent: String
         get() {
             val storedValue = sharedPreferences.getString("userAgent", null)?.trim()

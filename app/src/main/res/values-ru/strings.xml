@@ -16,6 +16,7 @@
     <string name="pingTesting">Проверка…</string>
     <string name="pingFailedGeneric">Пинг не удался</string>
     <string name="pingIsolatedUnavailable">Изолированный пинг недоступен</string>
+    <string name="pingTypeRequiresCoreUpdate">Для этого типа пинга нужна обновленная сборка XrayCore.</string>
     <string name="pingDelayMs">%1$d мс</string>
     <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">XTLS/Xray-core</string>
@@ -252,6 +253,10 @@
     <string name="geoIpAddress">Адрес GeoIP</string>
     <string name="geoSiteAddress">Адрес GeoSite</string>
     <string name="pingAddress">Адрес для пинга</string>
+    <string name="pingType">Тип пинга</string>
+    <string name="pingTypeHead">HTTP HEAD</string>
+    <string name="pingTypeGet">HTTP GET</string>
+    <string name="pingTypeTcp">TCP Connect</string>
     <string name="pingTimeout">Таймаут пинга</string>
     <string name="refreshLinksInterval">Интервал обновления ссылок</string>
     <string name="bypassLan">Обход LAN (IPv4)</string>

@@ -38,3 +38,9 @@ func Ping(dir string, config string, timeout int, url string, proxy string) stri
 	delay, err := xray.Ping(dir, config, timeout, url, proxy)
 	return response.EncodeToBase64(delay, err)
 }
+
+func PingWithType(dir string, config string, timeout int, url string, proxy string, pingType string) string {
+	var response nodep.CallResponse[int64]
+	delay, err := xray.PingWithType(dir, config, timeout, url, proxy, pingType)
+	return response.EncodeToBase64(delay, err)
+}

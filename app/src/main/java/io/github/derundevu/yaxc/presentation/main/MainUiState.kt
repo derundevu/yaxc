@@ -19,6 +19,7 @@ data class MainProfileItem(
 data class MainUiState(
     val tabs: List<Link> = emptyList(),
     val selectedTabId: Long = 0L,
+    val selectedSourceId: Long = 0L,
     val selectedSourceName: String = "",
     val filteredProfiles: List<MainProfileItem> = emptyList(),
     val selectedProfileId: Long = 0L,

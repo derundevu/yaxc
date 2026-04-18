@@ -12,6 +12,8 @@ import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.PasswordAuthentication
 import java.net.Proxy
+import java.net.Socket
+import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -206,37 +208,80 @@ class HttpHelper(
     fun measureDelay(proxy: Boolean, callback: (result: String) -> Unit) {
         scope.launch(Dispatchers.IO) {
             val start = System.currentTimeMillis()
-            val connection = getConnection(proxy)
-            var result = "HTTP {status}, {delay} ms"
-
-            result = try {
+            val result = try {
                 setSocksAuth(getSocksAuth())
-                val responseCode = connection.responseCode
-                result.replace("{status}", "$responseCode")
+                when (settings.pingType) {
+                    Settings.PingType.Tcp -> {
+                        val target = resolveTcpTarget(settings.pingAddress)
+                        val socket = if (proxy) {
+                            Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress(settings.socksAddress, settings.socksPort.toInt())))
+                        } else {
+                            Socket()
+                        }
+                        socket.use {
+                            it.connect(target, settings.pingTimeout * 1000)
+                        }
+                        val delay = System.currentTimeMillis() - start
+                        "TCP, $delay ms"
+                    }
+
+                    Settings.PingType.Get,
+                    Settings.PingType.Head,
+                    -> {
+                        val connection = getConnection(proxy, settings.pingType)
+                        try {
+                            val responseCode = connection.responseCode
+                            val delay = System.currentTimeMillis() - start
+                            "HTTP $responseCode, $delay ms"
+                        } finally {
+                            connection.disconnect()
+                        }
+                    }
+                }
             } catch (error: Exception) {
                 error.message ?: "Http delay measure failed"
             } finally {
-                connection.disconnect()
                 setSocksAuth(null)
             }
-
-            val delay = System.currentTimeMillis() - start
             withContext(Dispatchers.Main) {
-                callback(result.replace("{delay}", "$delay"))
+                callback(result)
             }
         }
     }
 
-    private suspend fun getConnection(withProxy: Boolean): HttpURLConnection {
+    private suspend fun getConnection(
+        withProxy: Boolean,
+        pingType: Settings.PingType,
+    ): HttpURLConnection {
         return withContext(Dispatchers.IO) {
             val link = settings.pingAddress
-            val method = "HEAD"
+            val method = when (pingType) {
+                Settings.PingType.Head -> "HEAD"
+                Settings.PingType.Get -> "GET"
+                Settings.PingType.Tcp -> "GET"
+            }
             val address = InetSocketAddress(settings.socksAddress, settings.socksPort.toInt())
             val proxy = if (withProxy) Proxy(Proxy.Type.SOCKS, address) else null
             val timeout = settings.pingTimeout * 1000
 
             getConnection(link, method, proxy, timeout, settings.userAgent)
         }
+    }
+
+    private fun resolveTcpTarget(value: String): InetSocketAddress {
+        val trimmed = value.trim()
+        val uri = if (trimmed.contains("://")) {
+            URI(trimmed)
+        } else {
+            URI("tcp://$trimmed")
+        }
+        val host = uri.host ?: throw IllegalArgumentException("Invalid ping address")
+        val port = when {
+            uri.port != -1 -> uri.port
+            uri.scheme.equals("http", ignoreCase = true) -> 80
+            else -> 443
+        }
+        return InetSocketAddress(host, port)
     }
 
     private fun getSocksAuth(): Authenticator? {

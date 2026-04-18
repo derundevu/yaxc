@@ -114,6 +114,7 @@ class SettingsActivity : AppCompatActivity() {
         val newSocksPassword = formState.socksPassword
         val newUserAgent = formState.userAgent.trim()
         val newPingAddress = formState.pingAddress.trim()
+        val newPingType = Settings.PingType.fromValue(formState.pingType)
         val newPrimaryDns = formState.primaryDns.trim()
         val newSecondaryDns = formState.secondaryDns.trim()
         val newPrimaryDnsV6 = formState.primaryDnsV6.trim()
@@ -185,6 +186,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.socksPassword = newSocksPassword
             settings.userAgent = newUserAgent
             settings.pingAddress = newPingAddress
+            settings.pingType = newPingType
             settings.pingTimeout = pingTimeout
             settings.refreshLinksInterval = refreshLinksInterval
             settings.bypassLan = formState.bypassLan

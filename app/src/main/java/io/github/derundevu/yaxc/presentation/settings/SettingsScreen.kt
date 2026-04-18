@@ -60,6 +60,7 @@ data class SettingsFormState(
     val socksPassword: String,
     val userAgent: String,
     val pingAddress: String,
+    val pingType: String,
     val pingTimeout: String,
     val refreshLinksInterval: String,
     val bypassLan: Boolean,
@@ -99,6 +100,7 @@ data class SettingsFormState(
                     it.socksPassword,
                     it.userAgent,
                     it.pingAddress,
+                    it.pingType,
                     it.pingTimeout,
                     it.refreshLinksInterval,
                     it.bypassLan,
@@ -137,34 +139,35 @@ data class SettingsFormState(
                     socksPassword = values[3] as String,
                     userAgent = values[4] as String,
                     pingAddress = values[5] as String,
-                    pingTimeout = values[6] as String,
-                    refreshLinksInterval = values[7] as String,
-                    bypassLan = values[8] as Boolean,
-                    enableIpV6 = values[9] as Boolean,
-                    socksUdp = values[10] as Boolean,
-                    tun2socks = values[11] as Boolean,
-                    bootAutoStart = values[12] as Boolean,
-                    refreshLinksOnOpen = values[13] as Boolean,
-                    primaryDns = values[14] as String,
-                    secondaryDns = values[15] as String,
-                    primaryDnsV6 = values[16] as String,
-                    secondaryDnsV6 = values[17] as String,
-                    tunName = values[18] as String,
-                    tunMtu = values[19] as String,
-                    tunAddress = values[20] as String,
-                    tunPrefix = values[21] as String,
-                    tunAddressV6 = values[22] as String,
-                    tunPrefixV6 = values[23] as String,
-                    hotspotInterface = values[24] as String,
-                    tetheringInterface = values[25] as String,
-                    tproxyAddress = values[26] as String,
-                    tproxyPort = values[27] as String,
-                    tproxyBypassWiFi = values[28] as String,
-                    tproxyAutoConnect = values[29] as Boolean,
-                    tproxyHotspot = values[30] as Boolean,
-                    tproxyTethering = values[31] as Boolean,
-                    transparentProxy = values[32] as Boolean,
-                    languageTag = values.getOrNull(33) as? String ?: "en",
+                    pingType = values.getOrNull(6) as? String ?: Settings.PingType.Get.value,
+                    pingTimeout = values[7] as String,
+                    refreshLinksInterval = values[8] as String,
+                    bypassLan = values[9] as Boolean,
+                    enableIpV6 = values[10] as Boolean,
+                    socksUdp = values[11] as Boolean,
+                    tun2socks = values[12] as Boolean,
+                    bootAutoStart = values[13] as Boolean,
+                    refreshLinksOnOpen = values[14] as Boolean,
+                    primaryDns = values[15] as String,
+                    secondaryDns = values[16] as String,
+                    primaryDnsV6 = values[17] as String,
+                    secondaryDnsV6 = values[18] as String,
+                    tunName = values[19] as String,
+                    tunMtu = values[20] as String,
+                    tunAddress = values[21] as String,
+                    tunPrefix = values[22] as String,
+                    tunAddressV6 = values[23] as String,
+                    tunPrefixV6 = values[24] as String,
+                    hotspotInterface = values[25] as String,
+                    tetheringInterface = values[26] as String,
+                    tproxyAddress = values[27] as String,
+                    tproxyPort = values[28] as String,
+                    tproxyBypassWiFi = values[29] as String,
+                    tproxyAutoConnect = values[30] as Boolean,
+                    tproxyHotspot = values[31] as Boolean,
+                    tproxyTethering = values[32] as Boolean,
+                    transparentProxy = values[33] as Boolean,
+                    languageTag = values.getOrNull(34) as? String ?: "en",
                 )
             },
         )
@@ -176,6 +179,7 @@ data class SettingsFormState(
             socksPassword = settings.socksPassword,
             userAgent = settings.userAgent,
             pingAddress = settings.pingAddress,
+            pingType = settings.pingType.value,
             pingTimeout = settings.pingTimeout.toString(),
             refreshLinksInterval = settings.refreshLinksInterval.toString(),
             bypassLan = settings.bypassLan,
@@ -227,6 +231,7 @@ fun SettingsScreen(
     var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.Basic) }
     var showTunRoutesDialog by rememberSaveable { mutableStateOf(false) }
     var showLanguageDialog by rememberSaveable { mutableStateOf(false) }
+    var showPingTypeDialog by rememberSaveable { mutableStateOf(false) }
     var tunRoutesDraft by rememberSaveable { mutableStateOf(tunRoutes.joinToString("\n")) }
 
     if (showTunRoutesDialog) {
@@ -364,6 +369,7 @@ fun SettingsScreen(
                         formState = formState,
                         onFormStateChange = onFormStateChange,
                         onLanguageClick = { showLanguageDialog = true },
+                        onPingTypeClick = { showPingTypeDialog = true },
                     )
 
                     SettingsTab.Advanced -> AdvancedSettingsTab(
@@ -379,6 +385,46 @@ fun SettingsScreen(
             }
         }
     }
+
+    if (showPingTypeDialog) {
+        AlertDialog(
+            onDismissRequest = { showPingTypeDialog = false },
+            title = { Text(text = textResource(R.string.pingType)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PingTypeOption(
+                        title = textResource(R.string.pingTypeHead),
+                        selected = formState.pingType == Settings.PingType.Head.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(pingType = Settings.PingType.Head.value))
+                            showPingTypeDialog = false
+                        },
+                    )
+                    PingTypeOption(
+                        title = textResource(R.string.pingTypeGet),
+                        selected = formState.pingType == Settings.PingType.Get.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(pingType = Settings.PingType.Get.value))
+                            showPingTypeDialog = false
+                        },
+                    )
+                    PingTypeOption(
+                        title = textResource(R.string.pingTypeTcp),
+                        selected = formState.pingType == Settings.PingType.Tcp.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(pingType = Settings.PingType.Tcp.value))
+                            showPingTypeDialog = false
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPingTypeDialog = false }) {
+                    Text(text = textResource(R.string.close))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -386,6 +432,7 @@ private fun BasicSettingsTab(
     formState: SettingsFormState,
     onFormStateChange: (SettingsFormState) -> Unit,
     onLanguageClick: () -> Unit,
+    onPingTypeClick: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
         SettingsSection(title = textResource(R.string.settingsLanguageSection))
@@ -449,6 +496,17 @@ private fun BasicSettingsTab(
                 onValueChange = { onFormStateChange(formState.copy(pingAddress = it)) },
             )
             SettingsDivider()
+            YaxcSettingsRow(
+                title = textResource(R.string.pingType),
+                subtitle = when (formState.pingType) {
+                    Settings.PingType.Head.value -> textResource(R.string.pingTypeHead)
+                    Settings.PingType.Tcp.value -> textResource(R.string.pingTypeTcp)
+                    else -> textResource(R.string.pingTypeGet)
+                },
+                icon = Icons.Outlined.Speed,
+                onClick = onPingTypeClick,
+            )
+            SettingsDivider()
             SettingsTextField(
                 label = textResource(R.string.pingTimeout),
                 value = formState.pingTimeout,
@@ -510,6 +568,31 @@ private fun BasicSettingsTab(
                 icon = Icons.Outlined.Sync,
             )
         }
+    }
+}
+
+@Composable
+private fun PingTypeOption(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+        },
+        shape = MaterialTheme.shapes.large,
+        onClick = onClick,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+        )
     }
 }
 
