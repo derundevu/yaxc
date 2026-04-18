@@ -81,6 +81,7 @@ class CoreRoutingActivity : AppCompatActivity() {
                     onDomainStrategyChange = { coreDomainStrategy = it },
                     onRuleChange = ::updateCoreRule,
                     onAddRule = ::addCoreRule,
+                    onMoveRule = ::moveCoreRule,
                     onDeleteRule = ::deleteCoreRule,
                     onEditorReady = ::bindRoutingEditor,
                 )
@@ -194,6 +195,16 @@ class CoreRoutingActivity : AppCompatActivity() {
 
     private fun deleteCoreRule(ruleId: String) {
         coreRules = coreRules.filterNot { it.id == ruleId }
+    }
+
+    private fun moveCoreRule(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        if (fromIndex !in coreRules.indices || toIndex !in coreRules.indices) return
+
+        val reordered = coreRules.toMutableList()
+        val moved = reordered.removeAt(fromIndex)
+        reordered.add(toIndex, moved)
+        coreRules = reordered
     }
 
     private fun persistRoutingEditor() {

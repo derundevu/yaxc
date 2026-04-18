@@ -6,6 +6,7 @@
     <string name="scanQrCode">Сканировать QR-код</string>
     <string name="scannerScreenLead">Отсканируйте QR-код с share-ссылкой, чтобы сразу импортировать профиль в приложение.</string>
     <string name="scannerCameraError">Ошибка инициализации камеры: %1$s</string>
+    <string name="scannerCameraPermissionDenied">Для сканирования QR-кодов нужен доступ к камере.</string>
     <string name="fromClipboard">Из буфера обмена</string>
     <string name="loading">Загрузка…</string>
     <string name="vpnStart">СТАРТ</string>

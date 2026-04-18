@@ -6,6 +6,7 @@
     <string name="scanQrCode">Scan QrCode</string>
     <string name="scannerScreenLead">Scan a share link QR code to import a profile directly into the app.</string>
     <string name="scannerCameraError">Camera initialization error: %1$s</string>
+    <string name="scannerCameraPermissionDenied">Camera permission is required to scan QR codes.</string>
     <string name="fromClipboard">From Clipboard</string>
     <string name="loading">Loading…</string>
     <string name="vpnStart">START</string>

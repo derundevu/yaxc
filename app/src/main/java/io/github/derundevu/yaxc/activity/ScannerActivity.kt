@@ -1,10 +1,15 @@
 package io.github.derundevu.yaxc.activity
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import com.budiyev.android.codescanner.AutoFocusMode
 import com.budiyev.android.codescanner.CodeScanner
 import com.budiyev.android.codescanner.CodeScannerView
@@ -19,6 +24,18 @@ import io.github.derundevu.yaxc.presentation.scanner.ScannerScreen
 class ScannerActivity : AppCompatActivity() {
 
     private var codeScanner: CodeScanner? = null
+    private val cameraPermission = registerForActivityResult(RequestPermission()) { granted ->
+        if (!granted) {
+            Toast.makeText(
+                this,
+                getString(R.string.scannerCameraPermissionDenied),
+                Toast.LENGTH_LONG,
+            ).show()
+            finish()
+            return@registerForActivityResult
+        }
+        startScannerPreview()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,6 +48,8 @@ class ScannerActivity : AppCompatActivity() {
                 )
             }
         }
+
+        ensureCameraPermission()
     }
 
     private fun setupScanner(scannerView: CodeScannerView) {
@@ -65,6 +84,25 @@ class ScannerActivity : AppCompatActivity() {
         }
 
         scannerView.setOnClickListener { codeScanner?.startPreview() }
+        startScannerPreview()
+    }
+
+    private fun ensureCameraPermission() {
+        if (hasCameraPermission()) return
+        cameraPermission.launch(Manifest.permission.CAMERA)
+    }
+
+    private fun hasCameraPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CAMERA,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startScannerPreview() {
+        if (!hasCameraPermission()) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        window.decorView.post { codeScanner?.startPreview() }
     }
 
     override fun onPause() {
@@ -74,6 +112,6 @@ class ScannerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        codeScanner?.startPreview()
+        startScannerPreview()
     }
 }

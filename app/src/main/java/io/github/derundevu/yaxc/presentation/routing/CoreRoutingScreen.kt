@@ -3,6 +3,7 @@ package io.github.derundevu.yaxc.presentation.routing
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -12,6 +13,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +31,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -56,9 +58,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,12 +71,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
@@ -82,6 +91,10 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +112,7 @@ fun CoreRoutingScreen(
     onDomainStrategyChange: (String) -> Unit,
     onRuleChange: (CoreRoutingRule) -> Unit,
     onAddRule: () -> Unit,
+    onMoveRule: (Int, Int) -> Unit,
     onDeleteRule: (String) -> Unit,
     onEditorReady: (TextProcessor) -> Unit,
 ) {
@@ -110,6 +124,16 @@ fun CoreRoutingScreen(
     var expandedRuleId by rememberSaveable { mutableStateOf<String?>(null) }
     var previousRulesCount by remember { mutableIntStateOf(rules.size) }
     var actionsExpanded by remember { mutableStateOf(false) }
+    val ruleSpacingPx = remember(density) { with(density) { 16.dp.toPx() } }
+    val coroutineScope = rememberCoroutineScope()
+    val ruleCenters = remember { mutableStateMapOf<String, Float>() }
+    val ruleHeights = remember { mutableStateMapOf<String, Float>() }
+    var draggingRuleId by remember { mutableStateOf<String?>(null) }
+    var draggingOffsetY by remember { mutableFloatStateOf(0f) }
+    var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
+    var settlingRuleId by remember { mutableStateOf<String?>(null) }
+    val settleOffsetY = remember { Animatable(0f) }
+    var dragSettleJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(rules.size) {
         if (rules.size > previousRulesCount && rules.isNotEmpty()) {
@@ -118,6 +142,20 @@ fun CoreRoutingScreen(
             expandedRuleId = null
         }
         previousRulesCount = rules.size
+    }
+
+    LaunchedEffect(rules) {
+        val knownIds = rules.mapTo(mutableSetOf()) { it.id }
+        ruleCenters.keys.toList().filterNot(knownIds::contains).forEach(ruleCenters::remove)
+        ruleHeights.keys.toList().filterNot(knownIds::contains).forEach(ruleHeights::remove)
+        if (draggingRuleId != null && draggingRuleId !in knownIds) {
+            draggingRuleId = null
+            draggingOffsetY = 0f
+            draggingTargetIndex = null
+        }
+        if (settlingRuleId != null && settlingRuleId !in knownIds) {
+            settlingRuleId = null
+        }
     }
 
     Scaffold(
@@ -284,10 +322,100 @@ fun CoreRoutingScreen(
                     )
                 }
 
-                else -> items(
+                else -> itemsIndexed(
                     items = rules,
-                    key = { it.id },
-                ) { rule ->
+                    key = { _, item -> item.id },
+                ) { index, rule ->
+                    val isDragging = draggingRuleId == rule.id && settlingRuleId == null
+                    val isSettling = settlingRuleId == rule.id
+                    val draggedIndex = draggingRuleId?.let { activeId ->
+                        rules.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
+                    }
+                    val draggedHeight = draggingRuleId?.let { ruleHeights[it] } ?: 0f
+                    val displacedOffsetTarget = when {
+                        isDragging -> draggingOffsetY
+                        isSettling -> settleOffsetY.value
+                        draggedIndex == null || draggingTargetIndex == null -> 0f
+                        draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
+                            -(draggedHeight + ruleSpacingPx)
+                        draggedIndex > draggingTargetIndex!! && index in draggingTargetIndex!! until draggedIndex ->
+                            draggedHeight + ruleSpacingPx
+                        else -> 0f
+                    }
+                    val displacedOffset by animateFloatAsState(
+                        targetValue = displacedOffsetTarget,
+                        animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
+                        label = "core_routing_rule_displacement",
+                    )
+                    val dragModifier = Modifier.pointerInput(rule.id, rules) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                dragSettleJob?.cancel()
+                                coroutineScope.launch { settleOffsetY.snapTo(0f) }
+                                settlingRuleId = null
+                                draggingRuleId = rule.id
+                                draggingOffsetY = 0f
+                                draggingTargetIndex = index
+                            },
+                            onDragCancel = {
+                                dragSettleJob = coroutineScope.launch {
+                                    settlingRuleId = rule.id
+                                    settleOffsetY.snapTo(draggingOffsetY)
+                                    settleOffsetY.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = tween(durationMillis = 180),
+                                    )
+                                    settleOffsetY.snapTo(0f)
+                                    settlingRuleId = null
+                                    draggingRuleId = null
+                                    draggingOffsetY = 0f
+                                    draggingTargetIndex = null
+                                }
+                            },
+                            onDragEnd = {
+                                val toIndex = draggingTargetIndex
+                                dragSettleJob?.cancel()
+                                dragSettleJob = coroutineScope.launch {
+                                    val sourceCenter = ruleCenters[rule.id] ?: 0f
+                                    val targetCenter = if (toIndex != null && toIndex != index) {
+                                        rules.getOrNull(toIndex)
+                                            ?.let { targetRule -> ruleCenters[targetRule.id] }
+                                            ?: sourceCenter
+                                    } else {
+                                        sourceCenter
+                                    }
+                                    settlingRuleId = rule.id
+                                    settleOffsetY.snapTo(draggingOffsetY)
+                                    settleOffsetY.animateTo(
+                                        targetValue = targetCenter - sourceCenter,
+                                        animationSpec = tween(durationMillis = 180),
+                                    )
+                                    if (toIndex != null && toIndex != index) {
+                                        onMoveRule(index, toIndex)
+                                    }
+                                    settleOffsetY.snapTo(0f)
+                                    settlingRuleId = null
+                                    draggingRuleId = null
+                                    draggingOffsetY = 0f
+                                    draggingTargetIndex = null
+                                }
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                draggingOffsetY += dragAmount.y
+                                val ruleCenter = ruleCenters[rule.id] ?: 0f
+                                val finalCenter = ruleCenter + draggingOffsetY
+                                val targetId = rules
+                                    .map { it.id }
+                                    .minByOrNull { candidateId ->
+                                        abs((ruleCenters[candidateId] ?: ruleCenter) - finalCenter)
+                                    }
+                                draggingTargetIndex = rules.indexOfFirst { it.id == targetId }
+                                    .takeIf { it >= 0 }
+                                    ?: index
+                            },
+                        )
+                    }
                     CoreRoutingRuleCard(
                         rule = rule,
                         isExpanded = expandedRuleId == rule.id,
@@ -298,6 +426,16 @@ fun CoreRoutingScreen(
                         onToggleEnabled = { enabled ->
                             onRuleChange(rule.copy(enabled = enabled))
                         },
+                        dragModifier = dragModifier,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { coordinates ->
+                                ruleCenters[rule.id] =
+                                    coordinates.positionInParent().y + coordinates.size.height / 2f
+                                ruleHeights[rule.id] = coordinates.size.height.toFloat()
+                            }
+                            .graphicsLayer { translationY = displacedOffset }
+                            .zIndex(if (isDragging || isSettling) 3f else 0f),
                         onDelete = { onDeleteRule(rule.id) },
                     )
                 }
@@ -364,6 +502,8 @@ private fun CoreRoutingRuleCard(
     onToggleExpanded: () -> Unit,
     onRuleChange: (CoreRoutingRule) -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
+    dragModifier: Modifier = Modifier,
+    modifier: Modifier = Modifier,
     onDelete: () -> Unit,
 ) {
     val expandRotation by animateFloatAsState(
@@ -373,8 +513,7 @@ private fun CoreRoutingRuleCard(
     )
 
     YaxcCard(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = 0.92f,
@@ -389,6 +528,7 @@ private fun CoreRoutingRuleCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(dragModifier)
                     .clickable(onClick = onToggleExpanded),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -62,7 +62,7 @@ android {
     signingConfigs {
         create("release") {
             val ksPath = System.getenv("KS_FILE_PATH")?.takeIf { it.isNotBlank() }
-                ?: "/Users/<redacted>/.keys/yaxc.jks"
+                ?: "${System.getProperty("user.home")}/.keys/yaxc.jks"
             storeFile = file(ksPath)
             storePassword = System.getenv("KS_PASSWORD")
             keyAlias = System.getenv("KEY_ALIAS")
