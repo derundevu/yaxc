@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 
@@ -37,11 +38,14 @@ fun SettingsHomeScreen(
     appVersion: String,
     xrayVersion: String,
     tun2socksVersion: String,
+    appUpdateState: AppUpdateUiState,
     onOpenAssets: () -> Unit,
     onOpenLinks: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenConfigs: () -> Unit,
     onOpenSettings: () -> Unit,
+    onDownloadAppUpdate: () -> Unit,
+    onInstallAppUpdate: () -> Unit,
     onSelectDestination: (RootDestination) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
@@ -131,6 +135,11 @@ fun SettingsHomeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             VersionRow(textResource(R.string.appFullName), appVersion)
+                            AppUpdatePanel(
+                                state = appUpdateState,
+                                onDownload = onDownloadAppUpdate,
+                                onInstall = onInstallAppUpdate,
+                            )
                             VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
                             VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
                             Text(

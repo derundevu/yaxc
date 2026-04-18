@@ -18,6 +18,15 @@
     <string name="pingIsolatedUnavailable">Изолированный пинг недоступен</string>
     <string name="pingTypeRequiresCoreUpdate">Для этого типа пинга нужна обновленная сборка XrayCore.</string>
     <string name="pingDelayMs">%1$d мс</string>
+    <string name="appUpdateChecking">Проверка обновлений…</string>
+    <string name="appUpdateUpToDate">Установлена актуальная версия</string>
+    <string name="appUpdateAvailable">Доступна версия %1$s</string>
+    <string name="appUpdateDownloading">Скачивается %1$s…</string>
+    <string name="appUpdateReadyToInstall">Версия %1$s готова к установке</string>
+    <string name="appUpdateDownload">Скачать обновление</string>
+    <string name="appUpdateInstall">Установить обновление</string>
+    <string name="appUpdateCheckFailed">Не удалось проверить обновления</string>
+    <string name="appUpdateInstallUnavailable">Не удалось открыть установщик</string>
     <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">XTLS/Xray-core</string>
     <string name="tun2socksLabel">heiher/hev-socks5-tunnel</string>

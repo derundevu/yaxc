@@ -30,6 +30,7 @@ import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.ProfileList
+import io.github.derundevu.yaxc.helper.AppUpdateManager
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.helper.LinkHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
@@ -61,6 +62,7 @@ class MainActivity : AppCompatActivity() {
 
     private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
     private val settings by lazy { Settings(applicationContext) }
+    private val appUpdateManager by lazy { AppUpdateManager(applicationContext, settings) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val mainViewModel: MainViewModel by viewModels()
     private val configRepository by lazy { Yaxc::class.cast(application).configRepository }
@@ -107,6 +109,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val appUpdateDownloadReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val downloadId = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, 0L) ?: 0L
+            appUpdateManager.handleDownloadComplete(downloadId)?.let(::startInstallerIntent)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -135,6 +144,9 @@ class MainActivity : AppCompatActivity() {
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),
                     tun2socksVersion = getString(R.string.tun2socksVersion),
+                    appUpdateState = appUpdateManager.uiState,
+                    onDownloadAppUpdate = ::downloadAppUpdate,
+                    onInstallAppUpdate = ::installAppUpdate,
                     onAction = mainViewModel::onAction,
                 )
             }
@@ -146,6 +158,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        lifecycleScope.launch {
+            appUpdateManager.refresh()
+        }
+
         intent?.data?.let { deepLink ->
             val pathSegments = deepLink.pathSegments
             if (pathSegments.isNotEmpty()) processLink(pathSegments[0])
@@ -154,6 +170,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        appUpdateManager.syncPendingDownloadState()
         lifecycleScope.launch {
             if (settings.transparentProxy) transparentProxyHelper.install()
         }
@@ -176,6 +193,14 @@ class MainActivity : AppCompatActivity() {
             it.action = TProxyService.STATUS_VPN_SERVICE_ACTION_NAME
             startService(it)
         }
+        IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE).also {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(appUpdateDownloadReceiver, it, RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(appUpdateDownloadReceiver, it)
+            }
+        }
         if (settings.refreshLinksOnOpen) {
             val interval = (settings.refreshLinksInterval * 60 * 1000).toLong()
             val diff = System.currentTimeMillis() - settings.lastRefreshLinks
@@ -186,6 +211,26 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         unregisterReceiver(vpnServiceEventReceiver)
+        unregisterReceiver(appUpdateDownloadReceiver)
+    }
+
+    private fun downloadAppUpdate() {
+        appUpdateManager.startDownload()
+    }
+
+    private fun installAppUpdate() {
+        appUpdateManager.installDownloadedUpdate()?.let(::startInstallerIntent)
+    }
+
+    private fun startInstallerIntent(intent: Intent) {
+        runCatching { startActivity(intent) }
+            .onFailure {
+                Toast.makeText(
+                    applicationContext,
+                    getString(R.string.appUpdateInstallUnavailable),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
     }
 
     private fun handleToggleVpnRequest() {

@@ -3,7 +3,6 @@ package io.github.derundevu.yaxc.presentation.routing
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -63,7 +62,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -91,7 +89,6 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -125,15 +122,11 @@ fun CoreRoutingScreen(
     var previousRulesCount by remember { mutableIntStateOf(rules.size) }
     var actionsExpanded by remember { mutableStateOf(false) }
     val ruleSpacingPx = remember(density) { with(density) { 16.dp.toPx() } }
-    val coroutineScope = rememberCoroutineScope()
     val ruleCenters = remember { mutableStateMapOf<String, Float>() }
     val ruleHeights = remember { mutableStateMapOf<String, Float>() }
     var draggingRuleId by remember { mutableStateOf<String?>(null) }
     var draggingOffsetY by remember { mutableFloatStateOf(0f) }
     var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
-    var settlingRuleId by remember { mutableStateOf<String?>(null) }
-    val settleOffsetY = remember { Animatable(0f) }
-    var dragSettleJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(rules.size) {
         if (rules.size > previousRulesCount && rules.isNotEmpty()) {
@@ -152,9 +145,6 @@ fun CoreRoutingScreen(
             draggingRuleId = null
             draggingOffsetY = 0f
             draggingTargetIndex = null
-        }
-        if (settlingRuleId != null && settlingRuleId !in knownIds) {
-            settlingRuleId = null
         }
     }
 
@@ -326,15 +316,13 @@ fun CoreRoutingScreen(
                     items = rules,
                     key = { _, item -> item.id },
                 ) { index, rule ->
-                    val isDragging = draggingRuleId == rule.id && settlingRuleId == null
-                    val isSettling = settlingRuleId == rule.id
+                    val isDragging = draggingRuleId == rule.id
                     val draggedIndex = draggingRuleId?.let { activeId ->
                         rules.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
                     }
                     val draggedHeight = draggingRuleId?.let { ruleHeights[it] } ?: 0f
                     val displacedOffsetTarget = when {
                         isDragging -> draggingOffsetY
-                        isSettling -> settleOffsetY.value
                         draggedIndex == null || draggingTargetIndex == null -> 0f
                         draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
                             -(draggedHeight + ruleSpacingPx)
@@ -350,55 +338,23 @@ fun CoreRoutingScreen(
                     val dragModifier = Modifier.pointerInput(rule.id, rules) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = {
-                                dragSettleJob?.cancel()
-                                coroutineScope.launch { settleOffsetY.snapTo(0f) }
-                                settlingRuleId = null
                                 draggingRuleId = rule.id
                                 draggingOffsetY = 0f
                                 draggingTargetIndex = index
                             },
                             onDragCancel = {
-                                dragSettleJob = coroutineScope.launch {
-                                    settlingRuleId = rule.id
-                                    settleOffsetY.snapTo(draggingOffsetY)
-                                    settleOffsetY.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = tween(durationMillis = 180),
-                                    )
-                                    settleOffsetY.snapTo(0f)
-                                    settlingRuleId = null
-                                    draggingRuleId = null
-                                    draggingOffsetY = 0f
-                                    draggingTargetIndex = null
-                                }
+                                draggingRuleId = null
+                                draggingOffsetY = 0f
+                                draggingTargetIndex = null
                             },
                             onDragEnd = {
                                 val toIndex = draggingTargetIndex
-                                dragSettleJob?.cancel()
-                                dragSettleJob = coroutineScope.launch {
-                                    val sourceCenter = ruleCenters[rule.id] ?: 0f
-                                    val targetCenter = if (toIndex != null && toIndex != index) {
-                                        rules.getOrNull(toIndex)
-                                            ?.let { targetRule -> ruleCenters[targetRule.id] }
-                                            ?: sourceCenter
-                                    } else {
-                                        sourceCenter
-                                    }
-                                    settlingRuleId = rule.id
-                                    settleOffsetY.snapTo(draggingOffsetY)
-                                    settleOffsetY.animateTo(
-                                        targetValue = targetCenter - sourceCenter,
-                                        animationSpec = tween(durationMillis = 180),
-                                    )
-                                    if (toIndex != null && toIndex != index) {
-                                        onMoveRule(index, toIndex)
-                                    }
-                                    settleOffsetY.snapTo(0f)
-                                    settlingRuleId = null
-                                    draggingRuleId = null
-                                    draggingOffsetY = 0f
-                                    draggingTargetIndex = null
+                                if (toIndex != null && toIndex != index) {
+                                    onMoveRule(index, toIndex)
                                 }
+                                draggingRuleId = null
+                                draggingOffsetY = 0f
+                                draggingTargetIndex = null
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
@@ -435,7 +391,7 @@ fun CoreRoutingScreen(
                                 ruleHeights[rule.id] = coordinates.size.height.toFloat()
                             }
                             .graphicsLayer { translationY = displacedOffset }
-                            .zIndex(if (isDragging || isSettling) 3f else 0f),
+                            .zIndex(if (isDragging) 3f else 0f),
                         onDelete = { onDeleteRule(rule.id) },
                     )
                 }

@@ -90,6 +90,14 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getLong("lastRefreshLinks", 0L)
         set(value) = sharedPreferences.edit { putLong("lastRefreshLinks", value) }
 
+    /** Pending app update download */
+    var appUpdateDownloadId: Long
+        get() = sharedPreferences.getLong("appUpdateDownloadId", 0L)
+        set(value) = sharedPreferences.edit { putLong("appUpdateDownloadId", value) }
+    var appUpdatePendingVersion: String
+        get() = sharedPreferences.getString("appUpdatePendingVersion", "")!!
+        set(value) = sharedPreferences.edit { putString("appUpdatePendingVersion", value) }
+
     /** XrayHelper Version Code */
     var xrayHelperVersionCode: Int
         get() = sharedPreferences.getInt("xrayHelperVersionCode", 0)

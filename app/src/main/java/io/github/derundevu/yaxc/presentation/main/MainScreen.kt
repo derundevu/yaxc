@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -107,12 +106,13 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidSurface
-import kotlinx.coroutines.Job
+import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -140,6 +140,9 @@ fun MainScreen(
     appVersion: String,
     xrayVersion: String,
     tun2socksVersion: String,
+    appUpdateState: AppUpdateUiState,
+    onDownloadAppUpdate: () -> Unit,
+    onInstallAppUpdate: () -> Unit,
     onAction: (MainAction) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
@@ -240,6 +243,9 @@ fun MainScreen(
                                     appVersion = appVersion,
                                     xrayVersion = xrayVersion,
                                     tun2socksVersion = tun2socksVersion,
+                                    appUpdateState = appUpdateState,
+                                    onDownloadAppUpdate = onDownloadAppUpdate,
+                                    onInstallAppUpdate = onInstallAppUpdate,
                                     topPadding = 86.dp,
                                     bottomPadding = tabBottomPadding,
                                     onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
@@ -346,14 +352,9 @@ private fun ConnectContent(
     }
     val sourceCenters = remember { mutableStateMapOf<Long, Float>() }
     val sourceHeights = remember { mutableStateMapOf<Long, Float>() }
-    val coroutineScope = rememberCoroutineScope()
     var draggingSourceId by remember { mutableStateOf<Long?>(null) }
     var draggingOffsetY by remember { mutableFloatStateOf(0f) }
     var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
-    var settlingSourceId by remember { mutableStateOf<Long?>(null) }
-    val settleOffsetY = remember { Animatable(0f) }
-    var dragSettleJob by remember { mutableStateOf<Job?>(null) }
-
     LaunchedEffect(tabs) {
         val knownIds = tabs.mapTo(mutableSetOf()) { it.id }
         sourceCenters.keys.toList().filterNot(knownIds::contains).forEach(sourceCenters::remove)
@@ -362,9 +363,6 @@ private fun ConnectContent(
             draggingSourceId = null
             draggingOffsetY = 0f
             draggingTargetIndex = null
-        }
-        if (settlingSourceId != null && settlingSourceId !in knownIds) {
-            settlingSourceId = null
         }
     }
 
@@ -401,15 +399,13 @@ private fun ConnectContent(
             items = tabs,
             key = { _, item -> item.id },
         ) { index, source ->
-            val isDragging = draggingSourceId == source.id && settlingSourceId == null
-            val isSettling = settlingSourceId == source.id
+            val isDragging = draggingSourceId == source.id
             val draggedIndex = draggingSourceId?.let { sourceId ->
                 tabs.indexOfFirst { it.id == sourceId }.takeIf { it >= 0 }
             }
             val draggedHeight = draggingSourceId?.let { sourceHeights[it] } ?: 0f
             val displacedOffsetTarget = when {
                 isDragging -> draggingOffsetY
-                isSettling -> settleOffsetY.value
                 draggedIndex == null || draggingTargetIndex == null -> 0f
                 draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
                     -(draggedHeight + sourceSpacingPx)
@@ -422,78 +418,42 @@ private fun ConnectContent(
                 animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
                 label = "source_group_displacement",
             )
-            val dragModifier = if (source.id == selectedTabId) {
-                Modifier
-            } else {
-                Modifier.pointerInput(source.id, tabs) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = {
-                            dragSettleJob?.cancel()
-                            coroutineScope.launch { settleOffsetY.snapTo(0f) }
-                            settlingSourceId = null
-                            draggingSourceId = source.id
-                            draggingOffsetY = 0f
-                            draggingTargetIndex = index
-                        },
-                        onDragCancel = {
-                            dragSettleJob = coroutineScope.launch {
-                                settlingSourceId = source.id
-                                settleOffsetY.snapTo(draggingOffsetY)
-                                settleOffsetY.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = tween(durationMillis = 180),
-                                )
-                                settleOffsetY.snapTo(0f)
-                                settlingSourceId = null
-                                draggingSourceId = null
-                                draggingOffsetY = 0f
-                                draggingTargetIndex = null
+            val dragModifier = Modifier.pointerInput(source.id, tabs) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        draggingSourceId = source.id
+                        draggingOffsetY = 0f
+                        draggingTargetIndex = index
+                    },
+                    onDragCancel = {
+                        draggingSourceId = null
+                        draggingOffsetY = 0f
+                        draggingTargetIndex = null
+                    },
+                    onDragEnd = {
+                        val toIndex = draggingTargetIndex
+                        if (toIndex != null && toIndex != index) {
+                            onAction(MainAction.MoveSource(index, toIndex))
+                        }
+                        draggingSourceId = null
+                        draggingOffsetY = 0f
+                        draggingTargetIndex = null
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        draggingOffsetY += dragAmount.y
+                        val sourceCenter = sourceCenters[source.id] ?: 0f
+                        val finalCenter = sourceCenter + draggingOffsetY
+                        val targetId = tabs
+                            .map { it.id }
+                            .minByOrNull { sourceId ->
+                                abs((sourceCenters[sourceId] ?: sourceCenter) - finalCenter)
                             }
-                        },
-                        onDragEnd = {
-                            val toIndex = draggingTargetIndex
-                            dragSettleJob?.cancel()
-                            dragSettleJob = coroutineScope.launch {
-                                val sourceCenter = sourceCenters[source.id] ?: 0f
-                                val targetCenter = if (toIndex != null && toIndex != index) {
-                                    tabs.getOrNull(toIndex)
-                                        ?.let { targetSource -> sourceCenters[targetSource.id] }
-                                        ?: sourceCenter
-                                } else {
-                                    sourceCenter
-                                }
-                                settlingSourceId = source.id
-                                settleOffsetY.snapTo(draggingOffsetY)
-                                settleOffsetY.animateTo(
-                                    targetValue = targetCenter - sourceCenter,
-                                    animationSpec = tween(durationMillis = 180),
-                                )
-                                if (toIndex != null && toIndex != index) {
-                                    onAction(MainAction.MoveSource(index, toIndex))
-                                }
-                                settleOffsetY.snapTo(0f)
-                                settlingSourceId = null
-                                draggingSourceId = null
-                                draggingOffsetY = 0f
-                                draggingTargetIndex = null
-                            }
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            draggingOffsetY += dragAmount.y
-                            val sourceCenter = sourceCenters[source.id] ?: 0f
-                            val finalCenter = sourceCenter + draggingOffsetY
-                            val targetId = tabs
-                                .map { it.id }
-                                .minByOrNull { sourceId ->
-                                    abs((sourceCenters[sourceId] ?: sourceCenter) - finalCenter)
-                                }
-                            draggingTargetIndex = tabs.indexOfFirst { it.id == targetId }
-                                .takeIf { it >= 0 }
-                                ?: index
-                        },
-                    )
-                }
+                        draggingTargetIndex = tabs.indexOfFirst { it.id == targetId }
+                            .takeIf { it >= 0 }
+                            ?: index
+                    },
+                )
             }
             SourceGroupCard(
                 source = source,
@@ -635,6 +595,9 @@ private fun SettingsContent(
     appVersion: String,
     xrayVersion: String,
     tun2socksVersion: String,
+    appUpdateState: AppUpdateUiState,
+    onDownloadAppUpdate: () -> Unit,
+    onInstallAppUpdate: () -> Unit,
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenAssets: () -> Unit,
@@ -703,6 +666,11 @@ private fun SettingsContent(
                     VersionRow(
                         textResource(R.string.appFullName),
                         appVersion,
+                    )
+                    AppUpdatePanel(
+                        state = appUpdateState,
+                        onDownload = onDownloadAppUpdate,
+                        onInstall = onInstallAppUpdate,
                     )
                     VersionRow(
                         textResource(R.string.xrayLabel),
