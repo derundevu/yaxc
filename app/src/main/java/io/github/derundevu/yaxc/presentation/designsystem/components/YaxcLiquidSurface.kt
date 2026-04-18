@@ -20,8 +20,8 @@ import com.kyant.backdrop.effects.vibrancy
 fun YaxcLiquidSurface(
     backdrop: LayerBackdrop,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(32.dp),
-    contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+    shape: Shape = RoundedCornerShape(30.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     surfaceTint: Color = Color.White.copy(alpha = 0.28f),
     blurRadius: androidx.compose.ui.unit.Dp = 16.dp,
     lensRadius: androidx.compose.ui.unit.Dp = 22.dp,

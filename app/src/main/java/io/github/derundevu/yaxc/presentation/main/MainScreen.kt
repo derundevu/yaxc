@@ -1345,15 +1345,20 @@ private fun ProfileCard(
     )
     val borderColor by animateColorAsState(
         targetValue = if (isSelected) {
-            YaxcTheme.extendedColors.success.copy(alpha = 0.26f)
+            YaxcTheme.extendedColors.success.copy(alpha = 0.46f)
         } else {
             Color.White.copy(alpha = 0.12f)
         },
         animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
         label = "profile_card_border",
     )
+    val accentAlpha by animateFloatAsState(
+        targetValue = if (isSelected) 0.22f else 0.08f,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
+        label = "profile_card_accent_alpha",
+    )
     val shadowElevation by animateDpAsState(
-        targetValue = if (isSelected) 18.dp else 12.dp,
+        targetValue = if (isSelected) 20.dp else 10.dp,
         animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
         label = "profile_card_shadow",
     )
@@ -1367,8 +1372,9 @@ private fun ProfileCard(
                 onClick = onSelect,
             ),
         shape = MaterialTheme.shapes.large,
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 10.dp),
         accentColor = accentColor,
+        accentAlpha = accentAlpha,
         borderColor = borderColor,
         shadowElevation = shadowElevation,
     ) {
@@ -1377,7 +1383,7 @@ private fun ProfileCard(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Column(
                 modifier = Modifier.weight(1f),

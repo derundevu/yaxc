@@ -96,11 +96,11 @@ fun YaxcTheme(
 
     val spacing = YaxcSpacing(
         xs = 4.dp,
-        sm = 8.dp,
-        md = 16.dp,
-        lg = 20.dp,
-        xl = 28.dp,
-        xxl = 40.dp,
+        sm = 7.dp,
+        md = 14.dp,
+        lg = 18.dp,
+        xl = 24.dp,
+        xxl = 36.dp,
     )
 
     MaterialTheme(
@@ -198,7 +198,7 @@ private fun lightSlateColorScheme() = lightColorScheme(
 
 private fun midnightBlueExtendedColors() = YaxcExtendedColors(
     accentSoft = Color(0xFF12243D),
-    success = Color(0xFF4FD8AE),
+    success = Color(0xFF66EDBC),
     warning = Color(0xFFFFC468),
     danger = Color(0xFFFF7C82),
     textMuted = Color(0xFF738399),
@@ -212,7 +212,7 @@ private fun midnightBlueExtendedColors() = YaxcExtendedColors(
 
 private fun graphiteExtendedColors() = YaxcExtendedColors(
     accentSoft = Color(0xFF2A3444),
-    success = Color(0xFF6FD1AA),
+    success = Color(0xFF7ADEB8),
     warning = Color(0xFFF1BE72),
     danger = Color(0xFFFF8A8A),
     textMuted = Color(0xFF9199A4),
@@ -226,7 +226,7 @@ private fun graphiteExtendedColors() = YaxcExtendedColors(
 
 private fun lightSlateExtendedColors() = YaxcExtendedColors(
     accentSoft = Color(0xFFD8E5F6),
-    success = Color(0xFF1B8B6C),
+    success = Color(0xFF15956F),
     warning = Color(0xFFB77408),
     danger = Color(0xFFB3202C),
     textMuted = Color(0xFF5F6D80),
@@ -242,23 +242,53 @@ private fun yaxcTypography() = Typography().run {
     copy(
         displayLarge = displayLarge.copy(
             color = Color.Unspecified,
+            fontSize = 56.sp,
             letterSpacing = (-1.5).sp,
         ),
         headlineMedium = headlineMedium.copy(
             color = Color.Unspecified,
+            fontSize = 27.sp,
             letterSpacing = (-0.5).sp,
         ),
         titleLarge = titleLarge.copy(
             color = Color.Unspecified,
+            fontSize = 21.sp,
             letterSpacing = (-0.25).sp,
+        ),
+        titleMedium = titleMedium.copy(
+            color = Color.Unspecified,
+            fontSize = 15.sp,
+        ),
+        titleSmall = titleSmall.copy(
+            color = Color.Unspecified,
+            fontSize = 13.sp,
         ),
         bodyLarge = bodyLarge.copy(
             color = Color.Unspecified,
-            lineHeight = 24.sp,
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
         ),
         bodyMedium = bodyMedium.copy(
             color = Color.Unspecified,
-            lineHeight = 21.sp,
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+        ),
+        bodySmall = bodySmall.copy(
+            color = Color.Unspecified,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        ),
+        labelLarge = labelLarge.copy(
+            color = Color.Unspecified,
+            fontSize = 13.sp,
+        ),
+        labelMedium = labelMedium.copy(
+            color = Color.Unspecified,
+            fontSize = 11.sp,
+        ),
+        labelSmall = labelSmall.copy(
+            color = Color.Unspecified,
+            fontSize = 10.sp,
         ),
     )
 }

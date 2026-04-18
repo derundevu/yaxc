@@ -24,11 +24,12 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun YaxcGlassPanel(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(30.dp),
-    contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+    shape: Shape = RoundedCornerShape(28.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     accentColor: Color = MaterialTheme.colorScheme.primary,
+    accentAlpha: Float = 0.10f,
     borderColor: Color = Color.White.copy(alpha = 0.12f),
-    shadowElevation: Dp = 14.dp,
+    shadowElevation: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Surface(
@@ -45,7 +46,7 @@ fun YaxcGlassPanel(
                     brush = Brush.verticalGradient(
                         listOf(
                             MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                            accentColor.copy(alpha = 0.10f),
+                            accentColor.copy(alpha = accentAlpha),
                             MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
                         )
                     ),

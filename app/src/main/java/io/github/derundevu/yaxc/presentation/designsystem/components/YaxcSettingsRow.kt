@@ -43,18 +43,18 @@ fun YaxcSettingsRow(
     Row(
         modifier = clickableModifier
             .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .padding(vertical = 10.dp),
+            .heightIn(min = 68.dp)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (icon != null) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(44.dp)
                     .background(
                         color = YaxcTheme.extendedColors.accentSoft,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -68,7 +68,7 @@ fun YaxcSettingsRow(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(
                 text = title,

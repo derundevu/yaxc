@@ -20,14 +20,14 @@ fun YaxcCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
             content = content,
         )
     }
