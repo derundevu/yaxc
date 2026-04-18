@@ -18,7 +18,7 @@ sealed interface MainAction {
     data class ConfirmRenameSource(val sourceId: Long, val name: String) : MainAction
     data class RequestDeleteSource(val sourceId: Long) : MainAction
     data class ConfirmDeleteSource(val sourceId: Long) : MainAction
-    data class MoveSource(val fromIndex: Int, val toIndex: Int) : MainAction
+    data class CommitSourceOrder(val orderedIds: List<Long>) : MainAction
     data class SetBatchPingSource(val sourceId: Long?) : MainAction
 
     data object ToggleVpnClicked : MainAction

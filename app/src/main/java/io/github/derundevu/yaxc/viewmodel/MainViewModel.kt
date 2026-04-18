@@ -315,18 +315,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     linkRepository.delete(source)
                 }
             }
-            is MainAction.MoveSource -> {
-                val currentTabs = uiState.value.tabs
-                if (
-                    action.fromIndex !in currentTabs.indices ||
-                    action.toIndex !in currentTabs.indices ||
-                    action.fromIndex == action.toIndex
-                ) return
-                val reordered = currentTabs.toMutableList().apply {
-                    add(action.toIndex, removeAt(action.fromIndex))
-                }
+            is MainAction.CommitSourceOrder -> {
+                val currentIds = uiState.value.tabs.map { it.id }
+                if (action.orderedIds.isEmpty() || action.orderedIds == currentIds) return
                 viewModelScope.launch {
-                    linkRepository.reorder(reordered.map { it.id })
+                    linkRepository.reorder(action.orderedIds)
                 }
             }
             is MainAction.SetBatchPingSource -> {

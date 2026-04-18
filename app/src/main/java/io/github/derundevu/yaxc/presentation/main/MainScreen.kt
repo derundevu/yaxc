@@ -400,8 +400,9 @@ private fun ConnectContent(
             key = { _, item -> item.id },
         ) { index, source ->
             val isDragging = draggingSourceId == source.id
-            val draggedIndex = draggingSourceId?.let { sourceId ->
-                tabs.indexOfFirst { it.id == sourceId }.takeIf { it >= 0 }
+            val isExpanded = source.id == selectedTabId
+            val draggedIndex = draggingSourceId?.let { activeId ->
+                tabs.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
             }
             val draggedHeight = draggingSourceId?.let { sourceHeights[it] } ?: 0f
             val displacedOffsetTarget = when {
@@ -416,9 +417,12 @@ private fun ConnectContent(
             val displacedOffset by animateFloatAsState(
                 targetValue = displacedOffsetTarget,
                 animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
-                label = "source_group_displacement",
+                label = "main_source_displacement",
             )
-            val dragModifier = Modifier.pointerInput(source.id, tabs) {
+            val dragModifier = if (isExpanded) {
+                Modifier
+            } else {
+                Modifier.pointerInput(source.id, tabs) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = {
                         draggingSourceId = source.id
@@ -431,9 +435,16 @@ private fun ConnectContent(
                         draggingTargetIndex = null
                     },
                     onDragEnd = {
+                        val sourceId = draggingSourceId
+                        val fromIndex = sourceId?.let { activeId ->
+                            tabs.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
+                        }
                         val toIndex = draggingTargetIndex
-                        if (toIndex != null && toIndex != index) {
-                            onAction(MainAction.MoveSource(index, toIndex))
+                        if (fromIndex != null && toIndex != null && fromIndex != toIndex) {
+                            val orderedIds = tabs.map { it.id }.toMutableList().apply {
+                                add(toIndex, removeAt(fromIndex))
+                            }
+                            onAction(MainAction.CommitSourceOrder(orderedIds))
                         }
                         draggingSourceId = null
                         draggingOffsetY = 0f
@@ -442,12 +453,12 @@ private fun ConnectContent(
                     onDrag = { change, dragAmount ->
                         change.consume()
                         draggingOffsetY += dragAmount.y
-                        val sourceCenter = sourceCenters[source.id] ?: 0f
+                        val sourceCenter = sourceCenters[source.id] ?: return@detectDragGesturesAfterLongPress
                         val finalCenter = sourceCenter + draggingOffsetY
                         val targetId = tabs
                             .map { it.id }
-                            .minByOrNull { sourceId ->
-                                abs((sourceCenters[sourceId] ?: sourceCenter) - finalCenter)
+                            .minByOrNull { candidateId ->
+                                abs((sourceCenters[candidateId] ?: sourceCenter) - finalCenter)
                             }
                         draggingTargetIndex = tabs.indexOfFirst { it.id == targetId }
                             .takeIf { it >= 0 }
@@ -455,11 +466,12 @@ private fun ConnectContent(
                     },
                 )
             }
+            }
             SourceGroupCard(
                 source = source,
-                isExpanded = source.id == selectedTabId,
+                isExpanded = isExpanded,
                 isBatchPingRunning = activeBatchPingSourceId == source.id,
-                profiles = if (source.id == selectedTabId) profiles else emptyList(),
+                profiles = if (isExpanded) profiles else emptyList(),
                 selectedProfileId = selectedProfileId,
                 onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
                 onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
