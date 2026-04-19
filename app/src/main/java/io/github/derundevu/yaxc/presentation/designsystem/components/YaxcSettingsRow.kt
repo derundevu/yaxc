@@ -30,10 +30,11 @@ fun YaxcSettingsRow(
     subtitle: String? = null,
     value: String? = null,
     icon: ImageVector? = null,
+    enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
 ) {
-    val clickableModifier = if (onClick != null) {
+    val clickableModifier = if (enabled && onClick != null) {
         modifier.yaxcClickable(shape = RoundedCornerShape(18.dp), onClick = onClick)
     } else {
         modifier
@@ -60,7 +61,11 @@ fun YaxcSettingsRow(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = if (enabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        YaxcTheme.extendedColors.textMuted
+                    },
                 )
             }
         }
@@ -72,7 +77,11 @@ fun YaxcSettingsRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    YaxcTheme.extendedColors.textMuted
+                },
                 maxLines = 2,
                 overflow = TextOverflow.Clip,
             )
@@ -110,17 +119,20 @@ fun YaxcSwitchRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     icon: ImageVector? = null,
+    enabled: Boolean = true,
 ) {
     YaxcSettingsRow(
         title = title,
         subtitle = subtitle,
         icon = icon,
         modifier = modifier,
+        enabled = enabled,
         onClick = { onCheckedChange(!checked) },
         trailing = {
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
+                enabled = enabled,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                     checkedTrackColor = MaterialTheme.colorScheme.primary,

@@ -1,0 +1,356 @@
+diff --git a/src/hev-jni.c b/src/hev-jni.c
+index 9698555..cc79df8 100644
+--- a/src/hev-jni.c
++++ b/src/hev-jni.c
+@@ -17,6 +17,8 @@
+ #include <signal.h>
+ #include <string.h>
+ 
++#include <lwip/ip_addr.h>
++
+ #include "hev-main.h"
+ 
+ #include "hev-jni.h"
+@@ -35,6 +37,7 @@
+ #define N_ELEMENTS(arr) (sizeof (arr) / sizeof ((arr)[0]))
+ 
+ typedef struct _ThreadData ThreadData;
++typedef struct _OwnerCheckState OwnerCheckState;
+ 
+ struct _ThreadData
+ {
+@@ -42,16 +45,41 @@ struct _ThreadData
+     int fd;
+ };
+ 
++struct _OwnerCheckState
++{
++    int protocol;
++    u16_t local_port;
++    u16_t remote_port;
++    int result;
++    char local_addr[48];
++    char remote_addr[48];
++};
++
+ static int is_working;
+ static JavaVM *java_vm;
+ static pthread_t work_thread;
+ static pthread_mutex_t mutex;
++static pthread_t owner_check_thread;
++static pthread_mutex_t owner_check_mutex;
++static pthread_cond_t owner_check_cond;
+ static pthread_key_t current_jni_env;
++static jobject service_instance;
++static jmethodID should_allow_connection_method;
++static jmethodID should_use_owner_check_method;
++static int owner_check_enabled;
++static int owner_check_thread_running;
++static int owner_check_stop_requested;
++static int owner_check_request_pending;
++static int owner_check_response_pending;
++static OwnerCheckState owner_check_state;
+ 
+ static void native_start_service (JNIEnv *env, jobject thiz, jstring conig_path,
+                                   jint fd);
+ static void native_stop_service (JNIEnv *env, jobject thiz);
+ static jlongArray native_get_stats (JNIEnv *env, jobject thiz);
++static JNIEnv *get_jni_env (void);
++static void *owner_check_thread_handler (void *data);
++static void stop_owner_check_thread (void);
+ 
+ static JNINativeMethod native_methods[] = {
+     { "TProxyStartService", "(Ljava/lang/String;I)V",
+@@ -84,6 +112,8 @@ JNI_OnLoad (JavaVM *vm, void *reserved)
+ 
+     pthread_key_create (&current_jni_env, detach_current_thread);
+     pthread_mutex_init (&mutex, NULL);
++    pthread_mutex_init (&owner_check_mutex, NULL);
++    pthread_cond_init (&owner_check_cond, NULL);
+ 
+     return JNI_VERSION_1_4;
+ }
+@@ -101,11 +131,88 @@ thread_handler (void *data)
+     return NULL;
+ }
+ 
++static void *
++owner_check_thread_handler (void *data)
++{
++    JNIEnv *env;
++
++    env = get_jni_env ();
++
++    pthread_mutex_lock (&owner_check_mutex);
++    for (;;) {
++        OwnerCheckState request;
++        jboolean allowed;
++        jstring local_addr;
++        jstring remote_addr;
++
++        while (!owner_check_request_pending && !owner_check_stop_requested)
++            pthread_cond_wait (&owner_check_cond, &owner_check_mutex);
++
++        if (owner_check_stop_requested) {
++            pthread_mutex_unlock (&owner_check_mutex);
++            return NULL;
++        }
++
++        memcpy (&request, &owner_check_state, sizeof (request));
++        owner_check_request_pending = 0;
++        pthread_mutex_unlock (&owner_check_mutex);
++
++        request.result = 1;
++        local_addr = NULL;
++        remote_addr = NULL;
++        if (env && service_instance && should_allow_connection_method) {
++            local_addr = (*env)->NewStringUTF (env, request.local_addr);
++            remote_addr = (*env)->NewStringUTF (env, request.remote_addr);
++            if (local_addr && remote_addr) {
++                allowed =
++                    (*env)->CallBooleanMethod (env, service_instance,
++                                               should_allow_connection_method,
++                                               request.protocol, local_addr,
++                                               (jint)request.local_port,
++                                               remote_addr,
++                                               (jint)request.remote_port);
++                if ((*env)->ExceptionCheck (env)) {
++                    (*env)->ExceptionClear (env);
++                } else {
++                    request.result = allowed ? 1 : 0;
++                }
++            }
++        }
++
++        if (local_addr)
++            (*env)->DeleteLocalRef (env, local_addr);
++        if (remote_addr)
++            (*env)->DeleteLocalRef (env, remote_addr);
++
++        pthread_mutex_lock (&owner_check_mutex);
++        owner_check_state.result = request.result;
++        owner_check_response_pending = 1;
++        pthread_cond_broadcast (&owner_check_cond);
++    }
++}
++
++static JNIEnv *
++get_jni_env (void)
++{
++    JNIEnv *env;
++
++    env = pthread_getspecific (current_jni_env);
++    if (env)
++        return env;
++
++    if ((*java_vm)->AttachCurrentThread (java_vm, &env, NULL) != JNI_OK)
++        return NULL;
++
++    pthread_setspecific (current_jni_env, env);
++    return env;
++}
++
+ static void
+ native_start_service (JNIEnv *env, jobject thiz, jstring config_path, jint fd)
+ {
+     const jbyte *bytes;
+     ThreadData *tdata;
++    jclass klass;
+     int res;
+ 
+     pthread_mutex_lock (&mutex);
+@@ -113,6 +220,38 @@ native_start_service (JNIEnv *env, jobject thiz, jstring config_path, jint fd)
+     if (is_working)
+         goto exit;
+ 
++    if (service_instance) {
++        (*env)->DeleteGlobalRef (env, service_instance);
++        service_instance = NULL;
++    }
++
++    service_instance = (*env)->NewGlobalRef (env, thiz);
++    klass = (*env)->GetObjectClass (env, thiz);
++    should_use_owner_check_method =
++        (*env)->GetMethodID (env, klass, "shouldUseTunConnectionOwnerCheck", "()Z");
++    should_allow_connection_method =
++        (*env)->GetMethodID (env, klass, "shouldAllowTunConnection",
++                             "(ILjava/lang/String;ILjava/lang/String;I)Z");
++    owner_check_enabled =
++        should_use_owner_check_method
++            ? (*env)->CallBooleanMethod (env, thiz, should_use_owner_check_method)
++            : 0;
++    (*env)->DeleteLocalRef (env, klass);
++
++    if (owner_check_enabled && should_allow_connection_method &&
++        !owner_check_thread_running) {
++        owner_check_stop_requested = 0;
++        owner_check_request_pending = 0;
++        owner_check_response_pending = 0;
++        res = pthread_create (&owner_check_thread, NULL,
++                              owner_check_thread_handler, NULL);
++        if (res == 0) {
++            owner_check_thread_running = 1;
++        } else {
++            owner_check_enabled = 0;
++        }
++    }
++
+     tdata = malloc (sizeof (ThreadData));
+     tdata->fd = fd;
+ 
+@@ -124,6 +263,7 @@ native_start_service (JNIEnv *env, jobject thiz, jstring config_path, jint fd)
+     if (res != 0) {
+         free (tdata->path);
+         free (tdata);
++        stop_owner_check_thread ();
+         goto exit;
+     }
+ 
+@@ -142,12 +282,42 @@ native_stop_service (JNIEnv *env, jobject thiz)
+ 
+     hev_socks5_tunnel_quit ();
+     pthread_join (work_thread, NULL);
++    stop_owner_check_thread ();
+ 
+     is_working = 0;
++    if (service_instance) {
++        (*env)->DeleteGlobalRef (env, service_instance);
++        service_instance = NULL;
++    }
++    owner_check_enabled = 0;
++    should_use_owner_check_method = NULL;
++    should_allow_connection_method = NULL;
+ exit:
+     pthread_mutex_unlock (&mutex);
+ }
+ 
++static void
++stop_owner_check_thread (void)
++{
++    if (!owner_check_thread_running)
++        return;
++
++    pthread_mutex_lock (&owner_check_mutex);
++    owner_check_stop_requested = 1;
++    pthread_cond_broadcast (&owner_check_cond);
++    pthread_mutex_unlock (&owner_check_mutex);
++
++    pthread_join (owner_check_thread, NULL);
++
++    pthread_mutex_lock (&owner_check_mutex);
++    owner_check_thread_running = 0;
++    owner_check_stop_requested = 0;
++    owner_check_request_pending = 0;
++    owner_check_response_pending = 0;
++    memset (&owner_check_state, 0, sizeof (owner_check_state));
++    pthread_mutex_unlock (&owner_check_mutex);
++}
++
+ static jlongArray
+ native_get_stats (JNIEnv *env, jobject thiz)
+ {
+@@ -167,4 +337,53 @@ native_get_stats (JNIEnv *env, jobject thiz)
+     return res;
+ }
+ 
++int
++hev_jni_should_allow_connection (int protocol, const ip_addr_t *local_ip,
++                                 u16_t local_port, const ip_addr_t *remote_ip,
++                                 u16_t remote_port)
++{
++    char local_buf[48];
++    char remote_buf[48];
++    int result;
++
++    if (!service_instance || !should_allow_connection_method)
++        return 1;
++
++    if (!owner_check_enabled)
++        return 1;
++
++    if (!local_ip || !remote_ip)
++        return 1;
++
++    if (!owner_check_thread_running)
++        return 1;
++    if (!ipaddr_ntoa_r (local_ip, local_buf, sizeof (local_buf)))
++        return 1;
++    if (!ipaddr_ntoa_r (remote_ip, remote_buf, sizeof (remote_buf)))
++        return 1;
++
++    pthread_mutex_lock (&owner_check_mutex);
++    while ((owner_check_request_pending || owner_check_response_pending) &&
++           !owner_check_stop_requested)
++        pthread_cond_wait (&owner_check_cond, &owner_check_mutex);
++
++    owner_check_state.protocol = protocol;
++    owner_check_state.local_port = local_port;
++    owner_check_state.remote_port = remote_port;
++    memcpy (owner_check_state.local_addr, local_buf, sizeof (local_buf));
++    memcpy (owner_check_state.remote_addr, remote_buf, sizeof (remote_buf));
++    owner_check_request_pending = 1;
++    owner_check_response_pending = 0;
++    pthread_cond_broadcast (&owner_check_cond);
++
++    while (!owner_check_response_pending && !owner_check_stop_requested)
++        pthread_cond_wait (&owner_check_cond, &owner_check_mutex);
++
++    result = owner_check_stop_requested ? 1 : owner_check_state.result;
++    owner_check_response_pending = 0;
++    pthread_mutex_unlock (&owner_check_mutex);
++
++    return result ? 1 : 0;
++}
++
+ #endif /* ANDROID */
+diff --git a/src/hev-jni.h b/src/hev-jni.h
+index 89090a2..29b77e2 100644
+--- a/src/hev-jni.h
++++ b/src/hev-jni.h
+@@ -10,4 +10,11 @@
+ #ifndef __HEV_JNI_H__
+ #define __HEV_JNI_H__
+ 
++#include <lwip/ip_addr.h>
++
++int hev_jni_should_allow_connection (int protocol, const ip_addr_t *local_ip,
++                                     u16_t local_port,
++                                     const ip_addr_t *remote_ip,
++                                     u16_t remote_port);
++
+ #endif /* __HEV_JNI_H__ */
+diff --git a/src/hev-socks5-tunnel.c b/src/hev-socks5-tunnel.c
+index d025c6f..e13a58f 100644
+--- a/src/hev-socks5-tunnel.c
++++ b/src/hev-socks5-tunnel.c
+@@ -31,6 +31,7 @@
+ #include "hev-config.h"
+ #include "hev-logger.h"
+ #include "hev-tunnel.h"
++#include "hev-jni.h"
+ #include "hev-compiler.h"
+ #include "hev-mapped-dns.h"
+ #include "hev-config-const.h"
+@@ -173,6 +174,13 @@ tcp_accept_handler (void *arg, struct tcp_pcb *pcb, err_t err)
+     if (!run)
+         return ERR_RST;
+ 
++    if (!hev_jni_should_allow_connection (IP_PROTO_TCP, &pcb->remote_ip,
++                                          pcb->remote_port, &pcb->local_ip,
++                                          pcb->local_port)) {
++        tcp_abort (pcb);
++        return ERR_ABRT;
++    }
++
+     tcp = hev_socks5_session_tcp_new (pcb, &mutex);
+     if (!tcp)
+         return ERR_MEM;
+@@ -234,6 +242,8 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
+     HevTask *task;
+ 
+     if (!run) {
++        if (p)
++            pbuf_free (p);
+         udp_remove (pcb);
+         return;
+     }

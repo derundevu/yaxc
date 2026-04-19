@@ -99,6 +99,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldSecondaryDnsV6 = settings.secondaryDnsV6
         val oldSocksUdp = settings.socksUdp
         val oldTun2socks = settings.tun2socks
+        val oldTunOwnerDefense = settings.tunOwnerDefense
         val oldTunName = settings.tunName
         val oldTunMtu = settings.tunMtu
         val oldTunAddress = settings.tunAddress
@@ -167,6 +168,7 @@ class SettingsActivity : AppCompatActivity() {
                 oldSecondaryDnsV6 != newSecondaryDnsV6 ||
                 oldSocksUdp != formState.socksUdp ||
                 oldTun2socks != formState.tun2socks ||
+                oldTunOwnerDefense != formState.tunOwnerDefense ||
                 oldTunName != newTunName ||
                 oldTunMtu != tunMtu ||
                 oldTunAddress != newTunAddress ||
@@ -203,6 +205,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.enableIpV6 = formState.enableIpV6
             settings.socksUdp = formState.socksUdp
             settings.tun2socks = formState.tun2socks
+            settings.tunOwnerDefense = formState.tunOwnerDefense
             settings.bootAutoStart = formState.bootAutoStart
             settings.refreshLinksOnOpen = formState.refreshLinksOnOpen
             settings.primaryDns = newPrimaryDns

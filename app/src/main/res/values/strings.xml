@@ -288,6 +288,9 @@
     <string name="settingsSectionInterfaces">Interfaces</string>
     <string name="settingsSectionTransparentProxy">Transparent Proxy</string>
     <string name="settingsSectionRoutes">Routes</string>
+    <string name="settingsTunOwnerDefense">Protect tun0 (Android 10+)</string>
+    <string name="settingsTunOwnerDefenseLead">Drops TCP flows whose owner UID is not allowed by Apps Routing. Helps stop apps outside the tunnel from probing tun0.</string>
+    <string name="settingsTunOwnerDefenseUnsupported">Requires Android 10 or newer.</string>
     <string name="deleteProfileDialogTitle">Delete Profile #%1$d?</string>
     <string name="deleteProfileDialogMessage">"%1$s" will be deleted forever.</string>
     <string name="deleteSourceDialogMessage">"%1$s" and all linked profiles will be deleted.</string>

@@ -17,8 +17,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.util.Log
 import android.widget.Toast
+import androidx.annotation.Keep
 import androidx.core.app.NotificationCompat
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
@@ -37,6 +39,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import kotlin.reflect.cast
 
 @SuppressLint("VpnServicePolicy")
@@ -100,6 +104,7 @@ class TProxyService : VpnService() {
     private var tunDevice: ParcelFileDescriptor? = null
     private var cellularCallback: ConnectivityManager.NetworkCallback? = null
     private var toast: Toast? = null
+    private val tunOwnerPolicyCache = linkedMapOf<Int, Boolean>()
 
     private external fun TProxyStartService(configPath: String, fd: Int)
     private external fun TProxyStopService()
@@ -128,6 +133,7 @@ class TProxyService : VpnService() {
         cellularCallback = null
         serviceRunning = false
         toast = null
+        synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
         super.onDestroy()
     }
 
@@ -223,6 +229,7 @@ class TProxyService : VpnService() {
             transparentProxyHelper.enableProxy()
             transparentProxyHelper.monitorNetwork()
         } else if (settings.tun2socks) {
+            synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
             val result = runCatching {
                 /** Create Tun */
                 val tun = Builder()
@@ -330,6 +337,7 @@ class TProxyService : VpnService() {
     }
 
     private fun stopVPN() {
+        synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
         if (settings.transparentProxy) {
             transparentProxyHelper.disableProxy()
         } else {
@@ -367,6 +375,113 @@ class TProxyService : VpnService() {
                 Log.w("TProxyService", "Skip apps routing package: $packageName", error)
             }
         }
+    }
+
+    @Keep
+    private fun shouldUseTunConnectionOwnerCheck(): Boolean {
+        return settings.tunOwnerDefense && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+    }
+
+    @Keep
+    private fun shouldAllowTunConnection(
+        protocol: Int,
+        localAddress: String,
+        localPort: Int,
+        remoteAddress: String,
+        remotePort: Int,
+    ): Boolean {
+        if (!settings.tunOwnerDefense || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return true
+        }
+
+        val local = runCatching {
+            InetSocketAddress(InetAddress.getByName(localAddress), localPort)
+        }.getOrElse {
+            Log.w(
+                "TProxyService",
+                "tun0 defense failed to parse local address: $localAddress:$localPort",
+                it,
+            )
+            return false
+        }
+        val remote = runCatching {
+            InetSocketAddress(InetAddress.getByName(remoteAddress), remotePort)
+        }.getOrElse {
+            Log.w(
+                "TProxyService",
+                "tun0 defense failed to parse remote address: $remoteAddress:$remotePort",
+                it,
+            )
+            return false
+        }
+
+        val ownerUid = runCatching {
+            connectivityManager.getConnectionOwnerUid(protocol, local, remote)
+        }.getOrElse {
+            Log.w(
+                "TProxyService",
+                "tun0 defense failed to resolve owner uid for $localAddress:$localPort -> $remoteAddress:$remotePort",
+                it,
+            )
+            return false
+        }
+
+        if (ownerUid == Process.INVALID_UID) {
+            val isDnsBootstrapFlow = localPort == 53 ||
+                localPort == 853 ||
+                remotePort == 53 ||
+                remotePort == 853
+            if (isDnsBootstrapFlow) {
+                return true
+            }
+
+            Log.w(
+                "TProxyService",
+                "tun0 defense blocked unresolved uid for $localAddress:$localPort -> $remoteAddress:$remotePort"
+            )
+            return false
+        }
+
+        if (ownerUid == Process.myUid() || ownerUid < Process.FIRST_APPLICATION_UID) {
+            return true
+        }
+
+        synchronized(tunOwnerPolicyCache) {
+            tunOwnerPolicyCache[ownerUid]?.let { return it }
+        }
+
+        val packages = packageManager.getPackagesForUid(ownerUid)
+            ?.asSequence()
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.toSet()
+            .orEmpty()
+
+        val allowedPackages = settings.appsRouting
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .filter { it != applicationContext.packageName }
+            .toSet()
+
+        val isAllowed = if (settings.appsRoutingMode) {
+            packages.none { it == applicationContext.packageName || it in allowedPackages }
+        } else {
+            packages.any { it in allowedPackages }
+        }
+
+        synchronized(tunOwnerPolicyCache) {
+            tunOwnerPolicyCache[ownerUid] = isAllowed
+        }
+
+        if (!isAllowed) {
+            Log.w(
+                "TProxyService",
+                "tun0 defense blocked uid=$ownerUid packages=$packages for $localAddress:$localPort -> $remoteAddress:$remotePort"
+            )
+        }
+
+        return isAllowed
     }
 
     private fun broadcastStart(action: String, configName: String) {
