@@ -13,7 +13,6 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.dto.AppList
-import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.routing.AppsRoutingScreen
 import io.github.derundevu.yaxc.service.TProxyService
@@ -24,7 +23,6 @@ import kotlinx.coroutines.withContext
 class AppsRoutingActivity : AppCompatActivity() {
 
     private val settings by lazy { Settings(applicationContext) }
-    private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
 
     private var apps by mutableStateOf<List<AppList>>(emptyList())
     private var selectedPackages by mutableStateOf<Set<String>>(emptySet())
@@ -106,13 +104,12 @@ class AppsRoutingActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val tproxySettingsChanged = settings.appsRoutingMode != appsRoutingMode ||
                     settings.appsRouting != appsRouting
-            val stopService = tproxySettingsChanged && TProxyService.isActive()
-            if (tproxySettingsChanged && settings.transparentProxy) transparentProxyHelper.kill()
+            val restartService = tproxySettingsChanged && TProxyService.isActive()
 
             withContext(Dispatchers.Main) {
                 settings.appsRoutingMode = appsRoutingMode
                 settings.appsRouting = appsRouting
-                if (stopService) TProxyService.stop(this@AppsRoutingActivity)
+                if (restartService) TProxyService.restart(this@AppsRoutingActivity)
                 finish()
             }
         }

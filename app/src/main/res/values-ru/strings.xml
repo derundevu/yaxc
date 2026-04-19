@@ -219,6 +219,11 @@
     <string name="mainProfilesSubtitle">%1$d профилей доступно • активный: %2$s</string>
     <string name="mainProfilesCount">%1$d профилей</string>
     <string name="mainBatchPingPending">Batch ping для всего источника пока не реализован.</string>
+    <string name="mainConnectionInfo">Инфо о подключении</string>
+    <string name="mainServerAddress">Адрес сервера</string>
+    <string name="mainResolvedAddress">Резолв в IP</string>
+    <string name="mainConnectionPasswordHidden">Скрыт</string>
+    <string name="mainConnectionResolveFailed">Не удалось резолвить</string>
     <string name="mainPingFailedShort">ОШ</string>
     <string name="mainTrafficPlaceholder">↓ -   ↑ -</string>
     <string name="mainNoProfilesInSource">В этом источнике пока нет профилей.</string>

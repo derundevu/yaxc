@@ -5,7 +5,7 @@ import io.github.derundevu.yaxc.dto.ProfileList
 sealed interface MainAction {
     data class SelectTab(val linkId: Long) : MainAction
     data class UpdateVpnStatus(val isRunning: Boolean) : MainAction
-    data class PingResultReceived(val result: String) : MainAction
+    data class PingResultReceived(val profileId: Long, val result: String) : MainAction
     data class ProfilePingUpdated(val profileId: Long, val result: String) : MainAction
     data class SetProfilePingState(val profileId: Long, val state: MainPingState) : MainAction
     data class SelectProfile(val profileId: Long, val reloadRuntime: Boolean = true) : MainAction

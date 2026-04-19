@@ -33,9 +33,6 @@ class AssetsActivity : AppCompatActivity() {
         XrayCore,
     }
 
-    private var downloading: Boolean = false
-    private var activeDownload: AssetKind? = null
-
     private val settings by lazy { Settings(applicationContext) }
 
     private var geoIpState by mutableStateOf(AssetCardState(title = ""))
@@ -197,8 +194,8 @@ class AssetsActivity : AppCompatActivity() {
             details = getString(R.string.assetsInstalledSource, installedGeoIpLabel),
             note = if (geoIpNeedsUpdate) getString(R.string.assetsUpdateRequired) else null,
             isInstalled = geoIpExists,
-            isLoading = activeDownload == AssetKind.GeoIp,
-            progress = if (activeDownload == AssetKind.GeoIp) geoIpState.progress else 0,
+            isLoading = geoIpState.isLoading,
+            progress = if (geoIpState.isLoading) geoIpState.progress else 0,
         )
 
         val geoSite = geoSiteFile()
@@ -218,8 +215,8 @@ class AssetsActivity : AppCompatActivity() {
             details = getString(R.string.assetsInstalledSource, installedGeoSiteLabel),
             note = if (geoSiteNeedsUpdate) getString(R.string.assetsUpdateRequired) else null,
             isInstalled = geoSiteExists,
-            isLoading = activeDownload == AssetKind.GeoSite,
-            progress = if (activeDownload == AssetKind.GeoSite) geoSiteState.progress else 0,
+            isLoading = geoSiteState.isLoading,
+            progress = if (geoSiteState.isLoading) geoSiteState.progress else 0,
         )
 
         val xrayCore = settings.xrayCoreFile()
@@ -234,7 +231,7 @@ class AssetsActivity : AppCompatActivity() {
     }
 
     private fun download(kind: AssetKind, url: String, file: File) {
-        if (downloading) {
+        if (isDownloadActive(kind)) {
             Toast.makeText(
                 applicationContext,
                 getString(R.string.anotherDownloadRunning),
@@ -252,9 +249,7 @@ class AssetsActivity : AppCompatActivity() {
             return
         }
 
-        downloading = true
-        activeDownload = kind
-        updateProgress(kind, 0)
+        setDownloadState(kind, isLoading = true, progress = 0)
 
         DownloadHelper(lifecycleScope, url, file, object : DownloadHelper.DownloadListener {
             override fun onProgress(progress: Int) {
@@ -262,15 +257,13 @@ class AssetsActivity : AppCompatActivity() {
             }
 
             override fun onError(exception: Exception) {
-                downloading = false
-                activeDownload = null
+                setDownloadState(kind, isLoading = false, progress = 0)
                 Toast.makeText(applicationContext, exception.message, Toast.LENGTH_SHORT).show()
                 setAssetStatus()
             }
 
             override fun onComplete() {
-                downloading = false
-                activeDownload = null
+                setDownloadState(kind, isLoading = false, progress = 0)
                 when (kind) {
                     AssetKind.GeoIp -> {
                         settings.installedGeoIpSourceLabel = currentGeoProviderLabel()
@@ -290,10 +283,22 @@ class AssetsActivity : AppCompatActivity() {
     }
 
     private fun updateProgress(kind: AssetKind, progress: Int) {
+        setDownloadState(kind, isLoading = true, progress = progress)
+    }
+
+    private fun setDownloadState(kind: AssetKind, isLoading: Boolean, progress: Int) {
         when (kind) {
-            AssetKind.GeoIp -> geoIpState = geoIpState.copy(isLoading = true, progress = progress)
-            AssetKind.GeoSite -> geoSiteState = geoSiteState.copy(isLoading = true, progress = progress)
+            AssetKind.GeoIp -> geoIpState = geoIpState.copy(isLoading = isLoading, progress = progress)
+            AssetKind.GeoSite -> geoSiteState = geoSiteState.copy(isLoading = isLoading, progress = progress)
             AssetKind.XrayCore -> Unit
+        }
+    }
+
+    private fun isDownloadActive(kind: AssetKind): Boolean {
+        return when (kind) {
+            AssetKind.GeoIp -> geoIpState.isLoading
+            AssetKind.GeoSite -> geoSiteState.isLoading
+            AssetKind.XrayCore -> xrayCoreState.isLoading
         }
     }
 

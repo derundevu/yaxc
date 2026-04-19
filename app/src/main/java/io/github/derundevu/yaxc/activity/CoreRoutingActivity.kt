@@ -281,13 +281,9 @@ class CoreRoutingActivity : AppCompatActivity() {
 
         val routingChanged = config.routing != (if (finalRoutingMode == Config.Mode.Disable) "{}" else finalRoutingJson) ||
                 config.routingMode != finalRoutingMode
-        val stopService = TProxyService.isActive() && routingChanged
+        val restartService = TProxyService.isActive() && routingChanged
 
         lifecycleScope.launch {
-            if (stopService && settings.transparentProxy) {
-                transparentProxyHelper.kill()
-            }
-
             settings.coreRoutingUiRules = CoreRoutingHelper.encodeUiRules(finalUiRules)
             config.routing = if (finalRoutingMode == Config.Mode.Disable) "{}" else finalRoutingJson
             config.routingMode = finalRoutingMode
@@ -300,8 +296,8 @@ class CoreRoutingActivity : AppCompatActivity() {
             preservedRoutingRules = finalPreservedRules
             preservedRoutingTopLevel = finalPreservedTopLevel
 
-            if (stopService) {
-                TProxyService.stop(this@CoreRoutingActivity)
+            if (restartService) {
+                TProxyService.restart(this@CoreRoutingActivity)
             }
             Toast.makeText(
                 this@CoreRoutingActivity,

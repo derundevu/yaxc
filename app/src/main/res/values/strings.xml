@@ -219,6 +219,11 @@
     <string name="mainProfilesSubtitle">%1$d profiles available • active: %2$s</string>
     <string name="mainProfilesCount">%1$d profiles</string>
     <string name="mainBatchPingPending">Batch ping for the whole source is not implemented yet.</string>
+    <string name="mainConnectionInfo">Connection Info</string>
+    <string name="mainServerAddress">Server Address</string>
+    <string name="mainResolvedAddress">Resolved IP</string>
+    <string name="mainConnectionPasswordHidden">Hidden</string>
+    <string name="mainConnectionResolveFailed">Unable to resolve</string>
     <string name="mainPingFailedShort">ERR</string>
     <string name="mainTrafficPlaceholder">↓ -   ↑ -</string>
     <string name="mainNoProfilesInSource">No profiles in this source yet.</string>

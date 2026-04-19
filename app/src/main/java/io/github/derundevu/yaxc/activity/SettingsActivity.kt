@@ -15,7 +15,6 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
-import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
@@ -29,7 +28,6 @@ import java.net.InetAddress
 class SettingsActivity : AppCompatActivity() {
 
     private val settings by lazy { Settings(applicationContext) }
-    private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -185,13 +183,9 @@ class SettingsActivity : AppCompatActivity() {
                 oldTproxyTethering != formState.tproxyTethering ||
                 oldTransparentProxy != formState.transparentProxy
 
-        val stopService = vpnSettingsChanged && TProxyService.isActive()
+        val restartService = vpnSettingsChanged && TProxyService.isActive()
 
         lifecycleScope.launch {
-            if (vpnSettingsChanged && oldTransparentProxy) {
-                transparentProxyHelper.kill()
-            }
-
             settings.socksAddress = newSocksAddress
             settings.socksPort = newSocksPort
             settings.socksUsername = newSocksUsername
@@ -236,8 +230,8 @@ class SettingsActivity : AppCompatActivity() {
 
             val themeChanged = oldThemeStyle != newThemeStyle
 
-            if (stopService) {
-                TProxyService.stop(this@SettingsActivity)
+            if (restartService) {
+                TProxyService.restart(this@SettingsActivity)
             }
 
             if (themeChanged) {

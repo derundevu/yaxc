@@ -53,6 +53,8 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
 import kotlin.coroutines.resume
 import kotlin.reflect.cast
@@ -67,6 +69,8 @@ class MainActivity : AppCompatActivity() {
     private val configRepository by lazy { Yaxc::class.cast(application).configRepository }
     private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
     private var batchPingJob: Job? = null
+    private var singlePingJob: Job? = null
+    private var queuedSinglePingProfileId: Long? = null
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
         if (!it) return@registerForActivityResult
@@ -135,6 +139,11 @@ class MainActivity : AppCompatActivity() {
                     selectedSourceName = uiState.selectedSourceName,
                     selectedProfileName = uiState.selectedProfileName,
                     selectedServerLabel = uiState.selectedServerLabel,
+                    socksAddress = uiState.socksAddress,
+                    socksPort = uiState.socksPort,
+                    socksUsername = uiState.socksUsername,
+                    socksPassword = uiState.socksPassword,
+                    pingAddress = uiState.pingAddress,
                     pingState = uiState.pingState,
                     profiles = uiState.filteredProfiles,
                     selectedProfileId = uiState.selectedProfileId,
@@ -251,7 +260,7 @@ class MainActivity : AppCompatActivity() {
     private fun handleEffect(effect: MainEffect) {
         when (effect) {
             MainEffect.HandleToggleVpn -> handleToggleVpnRequest()
-            MainEffect.RunPing -> runPingMeasurement()
+            is MainEffect.RunPing -> runPingMeasurement(effect.profileId)
             is MainEffect.RunBatchPing -> runBatchPing(effect)
             MainEffect.RefreshLinks -> refreshLinks()
             is MainEffect.RefreshSelectedSource -> refreshSource(effect.linkId)
@@ -396,31 +405,49 @@ class MainActivity : AppCompatActivity() {
         linksManager.launch(intent)
     }
 
-    private fun runPingMeasurement() {
-        val profileId = mainViewModel.uiState.value.selectedProfileId
+    private fun runPingMeasurement(profileId: Long) {
         if (profileId == 0L) return
-
-        if (XrayBatchPingHelper.supportsIsolatedPing()) {
-            lifecycleScope.launch {
-                val result = try {
-                    val profile = profileRepository.find(profileId)
-                    val globalConfig = configRepository.get()
-                    XrayBatchPingHelper.measureProfileDelay(
-                        context = applicationContext,
-                        settings = settings,
-                        globalConfig = globalConfig,
-                        profile = profile,
-                    )
-                } catch (error: Exception) {
-                    error.message ?: getString(R.string.pingFailedGeneric)
-                }
-                mainViewModel.onAction(MainAction.PingResultReceived(result))
-            }
+        if (singlePingJob?.isActive == true) {
+            queuedSinglePingProfileId = profileId
             return
         }
 
-        HttpHelper(lifecycleScope, settings).measureDelay(!settings.transparentProxy) {
-            mainViewModel.onAction(MainAction.PingResultReceived(it))
+        singlePingJob = lifecycleScope.launch {
+            val timeoutMs = ((settings.pingTimeout + 2).coerceAtLeast(1) * 1000L)
+            val result = withTimeoutOrNull(timeoutMs) {
+                try {
+                    if (XrayBatchPingHelper.supportsIsolatedPing()) {
+                        withContext(Dispatchers.IO) {
+                            val profile = profileRepository.find(profileId)
+                            val globalConfig = configRepository.get()
+                            XrayBatchPingHelper.measureProfileDelay(
+                                context = applicationContext,
+                                settings = settings,
+                                globalConfig = globalConfig,
+                                profile = profile,
+                            )
+                        }
+                    } else {
+                        measureDelaySuspend()
+                    }
+                } catch (error: Exception) {
+                    error.message ?: getString(R.string.pingFailedGeneric)
+                }
+            } ?: getString(R.string.pingFailedGeneric)
+
+            if (queuedSinglePingProfileId == null) {
+                mainViewModel.onAction(MainAction.PingResultReceived(profileId, result))
+            }
+        }.also { job ->
+            job.invokeOnCompletion {
+                lifecycleScope.launch {
+                    val nextProfileId = queuedSinglePingProfileId
+                    queuedSinglePingProfileId = null
+                    if (nextProfileId != null && lifecycle.currentState != Lifecycle.State.DESTROYED) {
+                        runPingMeasurement(nextProfileId)
+                    }
+                }
+            }
         }
     }
 

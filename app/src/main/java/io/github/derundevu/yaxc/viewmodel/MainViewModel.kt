@@ -108,6 +108,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?.config
             ?.let(::extractServerLabel)
             ?: application.getString(R.string.noValue)
+        val socksAddress = settings.socksAddress.trim()
+        val socksPort = settings.socksPort.trim()
+        val socksUsername = settings.socksUsername.trim()
+        val socksPassword = settings.socksPassword
+        val pingAddress = settings.pingAddress.trim()
 
         MainUiState(
             tabs = tabs,
@@ -118,6 +123,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedProfileId = selection.selectedProfileId,
             selectedProfileName = selectedProfileName,
             selectedServerLabel = selectedServerLabel,
+            socksAddress = socksAddress,
+            socksPort = socksPort,
+            socksUsername = socksUsername,
+            socksPassword = socksPassword,
+            pingAddress = pingAddress,
             profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
             pingState = selectedProfilePingState,
@@ -250,10 +260,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when (action) {
             is MainAction.SelectTab -> selectTab(action.linkId)
             is MainAction.UpdateVpnStatus -> updateVpnRunning(action.isRunning)
-            is MainAction.PingResultReceived -> {
-                val profileId = selectedProfileId.value
-                if (profileId != 0L) updatePingResult(profileId, action.result)
-            }
+            is MainAction.PingResultReceived -> updatePingResult(action.profileId, action.result)
             is MainAction.ProfilePingUpdated -> updatePingResult(action.profileId, action.result)
             is MainAction.SetProfilePingState -> setProfilePingState(action.profileId, action.state)
             is MainAction.SelectProfile -> {
@@ -338,7 +345,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 markPingTesting(profileId)
-                _effects.tryEmit(MainEffect.RunPing)
+                _effects.tryEmit(MainEffect.RunPing(profileId))
             }
             MainAction.PingAllProfilesClicked -> {
                 requestBatchPing(

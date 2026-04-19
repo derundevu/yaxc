@@ -55,6 +55,7 @@ class TProxyService : VpnService() {
         const val STATUS_VPN_SERVICE_ACTION_NAME = "$PKG_NAME.VpnStatus"
         const val STOP_VPN_SERVICE_ACTION_NAME = "$PKG_NAME.VpnStop"
         const val START_VPN_SERVICE_ACTION_NAME = "$PKG_NAME.VpnStart"
+        const val RESTART_VPN_SERVICE_ACTION_NAME = "$PKG_NAME.VpnRestart"
         const val NEW_CONFIG_SERVICE_ACTION_NAME = "$PKG_NAME.NewConfig"
         const val NETWORK_UPDATE_SERVICE_ACTION_NAME = "$PKG_NAME.NetworkUpdate"
         private const val VPN_SERVICE_NOTIFICATION_ID = 1
@@ -67,6 +68,7 @@ class TProxyService : VpnService() {
 
         fun status(context: Context) = startCommand(context, STATUS_VPN_SERVICE_ACTION_NAME)
         fun stop(context: Context) = startCommand(context, STOP_VPN_SERVICE_ACTION_NAME)
+        fun restart(context: Context) = startCommand(context, RESTART_VPN_SERVICE_ACTION_NAME)
         fun newConfig(context: Context) = startCommand(context, NEW_CONFIG_SERVICE_ACTION_NAME)
 
         fun start(context: Context, check: Boolean) {
@@ -105,6 +107,7 @@ class TProxyService : VpnService() {
     private var cellularCallback: ConnectivityManager.NetworkCallback? = null
     private var toast: Toast? = null
     private val tunOwnerPolicyCache = linkedMapOf<Int, Boolean>()
+    private var activeTransparentProxy: Boolean = false
 
     private external fun TProxyStartService(configPath: String, fd: Int)
     private external fun TProxyStopService()
@@ -114,6 +117,7 @@ class TProxyService : VpnService() {
         scope.launch {
             when (intent?.action) {
                 START_VPN_SERVICE_ACTION_NAME -> start(getProfile(), globalConfigs())
+                RESTART_VPN_SERVICE_ACTION_NAME -> restart(getProfile(), globalConfigs())
                 NEW_CONFIG_SERVICE_ACTION_NAME -> newConfig(getProfile(), globalConfigs())
                 STOP_VPN_SERVICE_ACTION_NAME -> stopVPN()
                 STATUS_VPN_SERVICE_ACTION_NAME -> broadcastStatus()
@@ -140,7 +144,7 @@ class TProxyService : VpnService() {
     private fun configName(profile: Profile?): String = profile?.name ?: settings.tunName
 
     private fun getIsRunning(): Boolean {
-        return if (settings.transparentProxy) {
+        return if (activeTransparentProxy) {
             transparentProxyHelper.isRunning()
         } else {
             isRunning
@@ -200,6 +204,19 @@ class TProxyService : VpnService() {
         }
     }
 
+    private fun restart(profile: Profile?, globalConfigs: Config) {
+        if (!getIsRunning()) {
+            start(profile, globalConfigs)
+            return
+        }
+        if (profile == null) {
+            stopVPN()
+            return
+        }
+        stopVpnInternal(notifyStop = false, stopService = false)
+        start(profile, globalConfigs)
+    }
+
     private fun newConfig(profile: Profile?, globalConfigs: Config) {
         if (!getIsRunning() || profile == null) return
         stopXray()
@@ -225,6 +242,7 @@ class TProxyService : VpnService() {
     }
 
     private fun startVPN(profile: Profile?) {
+        activeTransparentProxy = settings.transparentProxy
         if (settings.transparentProxy) {
             transparentProxyHelper.enableProxy()
             transparentProxyHelper.monitorNetwork()
@@ -337,21 +355,33 @@ class TProxyService : VpnService() {
     }
 
     private fun stopVPN() {
+        stopVpnInternal(notifyStop = true, stopService = true)
+    }
+
+    private fun stopVpnInternal(
+        notifyStop: Boolean,
+        stopService: Boolean,
+    ) {
         synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
-        if (settings.transparentProxy) {
+        if (activeTransparentProxy) {
             transparentProxyHelper.disableProxy()
         } else {
             TProxyStopService()
             runCatching { tunDevice?.close() }
             tunDevice = null
-            isRunning = false
         }
+        isRunning = false
+        activeTransparentProxy = false
         serviceRunning = false
         stopXray()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        showToast("Stop VPN")
-        broadcastStop()
-        stopSelf()
+        if (notifyStop) {
+            showToast("Stop VPN")
+            broadcastStop()
+        }
+        if (stopService) {
+            stopSelf()
+        }
     }
 
     private fun applyAppsRouting(tun: Builder) {
