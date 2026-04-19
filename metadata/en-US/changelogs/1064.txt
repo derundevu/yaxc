@@ -1,0 +1,10 @@
+- Fixed pings
+- Fixed QR code scan
+- Fixed ui bugs
+- Added GET/HEAD/TCP pings
+- Added stale and graphite themes
+- Added update checking in-app
+- Added generating random socks5 creds
+- Added buttons to copy socks5 creds
+- Added User Agent yaxc/version for requesting subs
+- Added descriptons for some options in settings

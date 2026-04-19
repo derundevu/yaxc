@@ -115,6 +115,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPa
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidSurface
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
 import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -723,17 +724,14 @@ private fun ConnectionTopCard(
         animationSpec = spring(dampingRatio = 0.82f, stiffness = 720f),
         label = "main_control_bar_scale",
     )
+    val shadowElevation = 20.dp * (1f - collapseProgress)
 
     YaxcGlassPanel(
         modifier = modifier.graphicsLayer {
             alpha = 1f - collapseProgress * 0.38f
-            scaleX = (1f - collapseProgress * 0.04f) * pressScale
-            scaleY = (1f - collapseProgress * 0.04f) * pressScale
-        }.clickable(
-            interactionSource = interactionSource,
-            indication = null,
-            onClick = onPingCurrent,
-        ),
+            scaleX = pressScale
+            scaleY = pressScale
+        }.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onPingCurrent),
         shape = MaterialTheme.shapes.extraLarge,
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
         accentColor = if (isRunning) {
@@ -742,7 +740,7 @@ private fun ConnectionTopCard(
             MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
         },
         borderColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isRunning) 0.24f else 0.16f),
-        shadowElevation = 20.dp,
+        shadowElevation = shadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1004,7 +1002,10 @@ private fun MainTopChrome(
         Box {
             YaxcLiquidSurface(
                 backdrop = backdrop,
-                modifier = Modifier.clickable(onClick = { actionsExpanded = true }),
+                modifier = Modifier.yaxcClickable(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    onClick = { actionsExpanded = true },
+                ),
                 shape = MaterialTheme.shapes.extraLarge,
                 contentPadding = PaddingValues(0.dp),
                 surfaceTint = yaxcSoftFill(darkAlpha = 0.26f, lightAlpha = 0.86f),
@@ -1213,7 +1214,7 @@ private fun SettingsActionCard(
     onClick: () -> Unit,
 ) {
     YaxcGlassPanel(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.yaxcClickable(shape = RoundedCornerShape(28.dp), onClick = onClick),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1280,16 +1281,17 @@ private fun SourceGroupCard(
 
     YaxcGlassPanel(modifier = modifier) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .yaxcClickable(shape = RoundedCornerShape(22.dp), onClick = onToggleExpanded)
+                .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .then(dragModifier)
-                    .clickable(onClick = onToggleExpanded)
-                    .padding(vertical = 6.dp),
+                    .then(dragModifier),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1564,7 +1566,7 @@ private fun ActionBubble(
     loading: Boolean = false,
 ) {
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onClick),
         color = yaxcSoftFill(darkAlpha = 0.08f, lightAlpha = 0.84f),
         shape = MaterialTheme.shapes.large,
         tonalElevation = 0.dp,

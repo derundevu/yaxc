@@ -1,7 +1,6 @@
 package io.github.derundevu.yaxc.presentation.root
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +33,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 
 enum class RootDestination {
@@ -96,7 +96,7 @@ fun RootSectionCard(
     modifier: Modifier = Modifier,
 ) {
     YaxcGlassPanel(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier.yaxcClickable(shape = RoundedCornerShape(28.dp), onClick = onClick),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -147,7 +147,7 @@ private fun RootBottomTabItem(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier.yaxcClickable(shape = RoundedCornerShape(28.dp), onClick = onClick),
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f)
         } else {

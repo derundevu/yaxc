@@ -1,7 +1,6 @@
 package io.github.derundevu.yaxc.presentation.designsystem.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +34,7 @@ fun YaxcSettingsRow(
     trailing: @Composable (() -> Unit)? = null,
 ) {
     val clickableModifier = if (onClick != null) {
-        modifier.clickable(onClick = onClick)
+        modifier.yaxcClickable(shape = RoundedCornerShape(18.dp), onClick = onClick)
     } else {
         modifier
     }
