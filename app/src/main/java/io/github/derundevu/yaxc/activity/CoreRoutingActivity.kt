@@ -27,8 +27,7 @@ import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
 import io.github.derundevu.yaxc.helper.CoreRoutingHelper
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.routing.CoreRoutingScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
@@ -66,7 +65,7 @@ class CoreRoutingActivity : AppCompatActivity() {
         }
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 CoreRoutingScreen(
                     editorMode = coreEditorMode,
                     domainStrategy = coreDomainStrategy,

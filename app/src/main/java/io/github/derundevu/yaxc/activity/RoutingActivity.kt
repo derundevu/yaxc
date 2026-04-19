@@ -8,8 +8,7 @@ import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.root.RootDestination
 import io.github.derundevu.yaxc.presentation.root.RoutingHomeScreen
 
@@ -25,7 +24,7 @@ class RoutingActivity : AppCompatActivity() {
         }
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 RoutingHomeScreen(
                     onOpenAppsRouting = {
                         startActivity(Intent(applicationContext, AppsRoutingActivity::class.java))

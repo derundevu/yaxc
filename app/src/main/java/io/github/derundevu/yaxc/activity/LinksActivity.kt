@@ -11,8 +11,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.derundevu.yaxc.database.Link
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.links.LinksScreen
 import io.github.derundevu.yaxc.viewmodel.LinkViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -27,7 +26,7 @@ class LinksActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 LinksScreen(
                     links = links,
                     onBack = ::finish,

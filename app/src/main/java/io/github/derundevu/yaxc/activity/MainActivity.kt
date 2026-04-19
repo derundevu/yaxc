@@ -37,8 +37,7 @@ import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
@@ -127,7 +126,7 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             val uiState = mainViewModel.uiState.collectAsStateWithLifecycle().value
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 MainScreen(
                     tabs = uiState.tabs,
                     selectedTabId = uiState.selectedTabId,

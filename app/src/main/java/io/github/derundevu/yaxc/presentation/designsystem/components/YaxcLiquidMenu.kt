@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 
 @Composable
 fun YaxcLiquidDropdownMenu(
@@ -28,7 +29,7 @@ fun YaxcLiquidDropdownMenu(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
         tonalElevation = 0.dp,
         shadowElevation = 18.dp,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+        border = BorderStroke(1.dp, yaxcSoftStroke(darkAlpha = 0.10f, lightAlpha = 0.92f)),
         content = content,
     )
 }

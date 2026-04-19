@@ -31,6 +31,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 
 enum class RootDestination {
@@ -47,11 +50,11 @@ fun RootBottomBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(0.94f),
-        color = Color.White.copy(alpha = 0.10f),
+        color = yaxcSoftFill(darkAlpha = 0.10f, lightAlpha = 0.86f),
         shape = RoundedCornerShape(36.dp),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+        border = BorderStroke(1.dp, yaxcSoftStroke(darkAlpha = 0.10f, lightAlpha = 0.92f)),
     ) {
         Row(
             modifier = Modifier
@@ -101,7 +104,7 @@ fun RootSectionCard(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Surface(
-                color = Color.White.copy(alpha = 0.10f),
+                color = yaxcSoftFill(darkAlpha = 0.10f, lightAlpha = 0.86f),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Box(
@@ -111,7 +114,7 @@ fun RootSectionCard(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.86f),
+                        tint = yaxcSoftOnSurface(darkAlpha = 0.86f, lightAlpha = 0.84f),
                     )
                 }
             }
@@ -166,7 +169,7 @@ private fun RootBottomTabItem(
                 tint = if (selected) {
                     MaterialTheme.colorScheme.primary
                 } else {
-                    Color.White.copy(alpha = 0.68f)
+                    yaxcSoftOnSurface(darkAlpha = 0.68f, lightAlpha = 0.64f)
                 },
             )
             Text(
@@ -175,7 +178,7 @@ private fun RootBottomTabItem(
                 color = if (selected) {
                     MaterialTheme.colorScheme.primary
                 } else {
-                    Color.White.copy(alpha = 0.68f)
+                    yaxcSoftOnSurface(darkAlpha = 0.68f, lightAlpha = 0.64f)
                 },
             )
         }

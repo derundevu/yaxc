@@ -15,8 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.logs.LogsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,7 +38,7 @@ class LogsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 LogsScreen(
                     logsText = logsText,
                     onBack = ::finish,

@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 
 @Composable
 fun YaxcGlassPanel(
@@ -28,35 +30,55 @@ fun YaxcGlassPanel(
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     accentColor: Color = MaterialTheme.colorScheme.primary,
     accentAlpha: Float = 0.10f,
-    borderColor: Color = Color.White.copy(alpha = 0.12f),
+    borderColor: Color = Color.Unspecified,
     shadowElevation: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val isLightTheme = yaxcIsLightTheme()
+    val resolvedBorderColor = if (borderColor == Color.Unspecified) {
+        yaxcSoftStroke(darkAlpha = 0.12f, lightAlpha = 0.72f)
+    } else {
+        borderColor
+    }
+    val effectiveAccentAlpha = if (isLightTheme) accentAlpha * 0.24f else accentAlpha * 0.7f
+    val baseGradient = if (isLightTheme) {
+        listOf(
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.99f),
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+        )
+    } else {
+        listOf(
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f),
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+        )
+    }
+    val radialHighlight = if (isLightTheme) {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.012f)
+    } else {
+        Color.White.copy(alpha = 0.05f)
+    }
+    val topHighlight = if (isLightTheme) {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.008f)
+    } else {
+        Color.White.copy(alpha = 0.02f)
+    }
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = shape,
         color = Color.Transparent,
         tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
-        border = BorderStroke(1.dp, borderColor),
+        border = BorderStroke(1.dp, resolvedBorderColor),
     ) {
         Box(
             modifier = Modifier
                 .background(
-                    brush = Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                            accentColor.copy(alpha = accentAlpha),
-                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
-                        )
-                    ),
+                    brush = Brush.verticalGradient(baseGradient),
                     shape = shape,
                 )
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f),
-                    shape = shape,
-                ),
         ) {
             Box(
                 modifier = Modifier
@@ -64,7 +86,21 @@ fun YaxcGlassPanel(
                     .background(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                Color.White.copy(alpha = 0.08f),
+                                accentColor.copy(alpha = effectiveAccentAlpha),
+                                Color.Transparent,
+                            ),
+                            radius = 820f,
+                        ),
+                        shape = shape,
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                radialHighlight,
                                 Color.Transparent,
                             ),
                             radius = 900f,
@@ -78,7 +114,7 @@ fun YaxcGlassPanel(
                     .background(
                         brush = Brush.verticalGradient(
                             listOf(
-                                Color.White.copy(alpha = 0.04f),
+                                topHighlight,
                                 Color.Transparent,
                             )
                         ),

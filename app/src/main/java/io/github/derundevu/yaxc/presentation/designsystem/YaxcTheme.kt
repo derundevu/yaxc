@@ -6,18 +6,38 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.derundevu.yaxc.Settings
 
 enum class YaxcThemeStyle {
+    System,
     MidnightBlue,
     Graphite,
     LightSlate,
+
+    ;
+
+    val value: String
+        get() = name.lowercase()
+
+    companion object {
+        fun fromValue(value: String?): YaxcThemeStyle {
+            return entries.firstOrNull { it.value == value?.trim()?.lowercase() } ?: System
+        }
+    }
 }
 
 @Immutable
@@ -74,21 +94,60 @@ object YaxcTheme {
 }
 
 @Composable
-fun YaxcTheme(
-    style: YaxcThemeStyle = if (isSystemInDarkTheme()) {
-        YaxcThemeStyle.MidnightBlue
+@ReadOnlyComposable
+fun yaxcIsLightTheme(): Boolean = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+
+@Composable
+@ReadOnlyComposable
+fun yaxcSoftFill(darkAlpha: Float, lightAlpha: Float = darkAlpha): Color {
+    return if (yaxcIsLightTheme()) {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = lightAlpha)
     } else {
-        YaxcThemeStyle.LightSlate
-    },
+        Color.White.copy(alpha = darkAlpha)
+    }
+}
+
+@Composable
+@ReadOnlyComposable
+fun yaxcSoftStroke(darkAlpha: Float, lightAlpha: Float = darkAlpha): Color {
+    return if (yaxcIsLightTheme()) {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = lightAlpha)
+    } else {
+        Color.White.copy(alpha = darkAlpha)
+    }
+}
+
+@Composable
+@ReadOnlyComposable
+fun yaxcSoftOnSurface(darkAlpha: Float, lightAlpha: Float = darkAlpha): Color {
+    return MaterialTheme.colorScheme.onSurface.copy(
+        alpha = if (yaxcIsLightTheme()) lightAlpha else darkAlpha,
+    )
+}
+
+@Composable
+fun YaxcTheme(
+    style: YaxcThemeStyle = YaxcThemeStyle.System,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when (style) {
+    val resolvedStyle = when (style) {
+        YaxcThemeStyle.System -> if (isSystemInDarkTheme()) {
+            YaxcThemeStyle.MidnightBlue
+        } else {
+            YaxcThemeStyle.LightSlate
+        }
+        else -> style
+    }
+
+    val colorScheme = when (resolvedStyle) {
+        YaxcThemeStyle.System -> error("System theme must be resolved before color selection")
         YaxcThemeStyle.MidnightBlue -> midnightBlueColorScheme()
         YaxcThemeStyle.Graphite -> graphiteColorScheme()
         YaxcThemeStyle.LightSlate -> lightSlateColorScheme()
     }
 
-    val extendedColors = when (style) {
+    val extendedColors = when (resolvedStyle) {
+        YaxcThemeStyle.System -> error("System theme must be resolved before color selection")
         YaxcThemeStyle.MidnightBlue -> midnightBlueExtendedColors()
         YaxcThemeStyle.Graphite -> graphiteExtendedColors()
         YaxcThemeStyle.LightSlate -> lightSlateExtendedColors()
@@ -113,6 +172,29 @@ fun YaxcTheme(
             content = content,
         )
     }
+}
+
+@Composable
+fun YaxcAppTheme(
+    content: @Composable () -> Unit,
+) {
+    val context = LocalContext.current.applicationContext
+    val settings = remember(context) { Settings(context) }
+    var themeStyle by remember(settings) { mutableStateOf(settings.themeStyle) }
+
+    DisposableEffect(settings) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "themeStyle") {
+                themeStyle = settings.themeStyle
+            }
+        }
+        settings.registerChangeListener(listener)
+        onDispose {
+            settings.unregisterChangeListener(listener)
+        }
+    }
+
+    YaxcTheme(style = themeStyle, content = content)
 }
 
 private fun midnightBlueColorScheme() = darkColorScheme(

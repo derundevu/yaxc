@@ -108,6 +108,9 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
@@ -819,13 +822,13 @@ private fun FloatingConnectButton(
         targetValue = if (isRunning) {
             YaxcTheme.extendedColors.success.copy(alpha = 0.34f)
         } else {
-            Color.White.copy(alpha = 0.18f)
+            yaxcSoftFill(darkAlpha = 0.18f, lightAlpha = 0.88f)
         },
         animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f),
         label = "floating_connect_tint",
     )
     val iconTint by animateColorAsState(
-        targetValue = if (isRunning) Color(0xFFD9FFF1) else Color.White.copy(alpha = 0.94f),
+        targetValue = if (isRunning) YaxcTheme.extendedColors.success else yaxcSoftOnSurface(darkAlpha = 0.94f, lightAlpha = 0.90f),
         animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f),
         label = "floating_connect_icon",
     )
@@ -885,7 +888,7 @@ private fun MainLiquidTabBar(
         modifier = modifier.fillMaxWidth(0.94f),
         shape = RoundedCornerShape(36.dp),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        surfaceTint = Color.White.copy(alpha = 0.16f),
+        surfaceTint = yaxcSoftFill(darkAlpha = 0.16f, lightAlpha = 0.88f),
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -973,12 +976,12 @@ private fun MainTopChrome(
             backdrop = backdrop,
             shape = MaterialTheme.shapes.extraLarge,
             contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp),
-            surfaceTint = Color.White.copy(alpha = 0.26f),
+            surfaceTint = yaxcSoftFill(darkAlpha = 0.26f, lightAlpha = 0.86f),
         ) {
             Text(
                 text = textResource(R.string.appName),
                 style = MaterialTheme.typography.titleSmall,
-                color = Color.White.copy(alpha = 0.96f),
+                color = yaxcSoftOnSurface(darkAlpha = 0.96f, lightAlpha = 0.92f),
             )
         }
 
@@ -1004,7 +1007,7 @@ private fun MainTopChrome(
                 modifier = Modifier.clickable(onClick = { actionsExpanded = true }),
                 shape = MaterialTheme.shapes.extraLarge,
                 contentPadding = PaddingValues(0.dp),
-                surfaceTint = Color.White.copy(alpha = 0.26f),
+                surfaceTint = yaxcSoftFill(darkAlpha = 0.26f, lightAlpha = 0.86f),
             ) {
                 Box(
                     modifier = Modifier.size(40.dp),
@@ -1013,7 +1016,7 @@ private fun MainTopChrome(
                     Icon(
                         imageVector = Icons.Outlined.Add,
                         contentDescription = textResource(R.string.newProfile),
-                        tint = Color.White.copy(alpha = 0.9f),
+                        tint = yaxcSoftOnSurface(darkAlpha = 0.9f, lightAlpha = 0.88f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -1070,9 +1073,9 @@ private fun MiniControlBar(
     )
     val surfaceTint by animateColorAsState(
         targetValue = if (pressed) {
-            Color.White.copy(alpha = 0.28f)
+            yaxcSoftFill(darkAlpha = 0.28f, lightAlpha = 0.9f)
         } else {
-            Color.White.copy(alpha = 0.22f)
+            yaxcSoftFill(darkAlpha = 0.22f, lightAlpha = 0.84f)
         },
         animationSpec = spring(dampingRatio = 0.86f, stiffness = 560f),
         label = "mini_control_bar_tint",
@@ -1109,7 +1112,7 @@ private fun MiniControlBar(
                 Text(
                     text = selectedSourceName,
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.92f),
+                    color = yaxcSoftOnSurface(darkAlpha = 0.92f, lightAlpha = 0.9f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1186,7 +1189,7 @@ private fun MainBottomTabItem(
                 tint = if (selected) {
                     MaterialTheme.colorScheme.primary
                 } else {
-                    Color.White.copy(alpha = 0.68f)
+                    yaxcSoftOnSurface(darkAlpha = 0.68f, lightAlpha = 0.66f)
                 },
             )
             Text(
@@ -1195,7 +1198,7 @@ private fun MainBottomTabItem(
                 color = if (selected) {
                     MaterialTheme.colorScheme.primary
                 } else {
-                    Color.White.copy(alpha = 0.68f)
+                    yaxcSoftOnSurface(darkAlpha = 0.68f, lightAlpha = 0.66f)
                 },
             )
         }
@@ -1218,7 +1221,7 @@ private fun SettingsActionCard(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Surface(
-                color = Color.White.copy(alpha = 0.10f),
+                color = yaxcSoftFill(darkAlpha = 0.10f, lightAlpha = 0.86f),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Box(
@@ -1228,7 +1231,7 @@ private fun SettingsActionCard(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.86f),
+                        tint = yaxcSoftOnSurface(darkAlpha = 0.86f, lightAlpha = 0.84f),
                     )
                 }
             }
@@ -1399,7 +1402,7 @@ private fun ProfileCard(
         targetValue = if (isSelected) {
             YaxcTheme.extendedColors.success.copy(alpha = 0.46f)
         } else {
-            Color.White.copy(alpha = 0.12f)
+            yaxcSoftStroke(darkAlpha = 0.12f, lightAlpha = 0.92f)
         },
         animationSpec = spring(dampingRatio = 0.9f, stiffness = 420f),
         label = "profile_card_border",
@@ -1562,11 +1565,11 @@ private fun ActionBubble(
 ) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        color = Color.White.copy(alpha = 0.08f),
+        color = yaxcSoftFill(darkAlpha = 0.08f, lightAlpha = 0.84f),
         shape = MaterialTheme.shapes.large,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+        border = BorderStroke(1.dp, yaxcSoftStroke(darkAlpha = 0.12f, lightAlpha = 0.92f)),
     ) {
         Box(
             modifier = Modifier.size(containerSize),
@@ -1576,13 +1579,13 @@ private fun ActionBubble(
                 CircularProgressIndicator(
                     modifier = Modifier.size(iconSize),
                     strokeWidth = 2.dp,
-                    color = Color.White.copy(alpha = 0.82f),
+                    color = yaxcSoftOnSurface(darkAlpha = 0.82f, lightAlpha = 0.8f),
                 )
             } else {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.76f),
+                    tint = yaxcSoftOnSurface(darkAlpha = 0.76f, lightAlpha = 0.74f),
                     modifier = Modifier.size(iconSize),
                 )
             }

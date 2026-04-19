@@ -74,8 +74,8 @@ fun YaxcSettingsRow(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
             )
             subtitle?.takeIf { it.isNotBlank() }?.let {
                 Text(

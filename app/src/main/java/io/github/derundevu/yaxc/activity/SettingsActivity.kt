@@ -7,7 +7,6 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.os.LocaleListCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,8 +16,8 @@ import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
 import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
 import io.github.derundevu.yaxc.service.TProxyService
@@ -49,7 +48,7 @@ class SettingsActivity : AppCompatActivity() {
                 mutableStateOf(settings.tunRoutes.toList())
             }
 
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 SettingsScreen(
                     formState = formState,
                     tunRoutes = tunRoutes,
@@ -116,6 +115,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldTproxyTethering = settings.tproxyTethering
         val oldTransparentProxy = settings.transparentProxy
         val oldLanguageTag = settings.languageTag
+        val oldThemeStyle = settings.themeStyle
 
         val newSocksAddress = formState.socksAddress.trim()
         val newSocksPort = formState.socksPort.trim()
@@ -134,7 +134,8 @@ class SettingsActivity : AppCompatActivity() {
         val newHotspotInterface = formState.hotspotInterface.trim()
         val newTetheringInterface = formState.tetheringInterface.trim()
         val newTproxyAddress = formState.tproxyAddress.trim()
-        val newLanguageTag = formState.languageTag.trim().ifBlank { "en" }
+        val newLanguageTag = formState.languageTag.trim().ifBlank { "system" }
+        val newThemeStyle = YaxcThemeStyle.fromValue(formState.themeStyle)
         val newTproxyBypassWiFi = formState.tproxyBypassWiFi
             .split(",")
             .map(String::trim)
@@ -224,18 +225,23 @@ class SettingsActivity : AppCompatActivity() {
             settings.tproxyTethering = formState.tproxyTethering
             settings.transparentProxy = formState.transparentProxy
             settings.languageTag = newLanguageTag
+            settings.themeStyle = newThemeStyle
 
             if (oldLanguageTag != newLanguageTag) {
-                AppCompatDelegate.setApplicationLocales(
-                    LocaleListCompat.forLanguageTags(newLanguageTag)
-                )
+                AppCompatDelegate.setApplicationLocales(settings.appLocales())
             }
+
+            val themeChanged = oldThemeStyle != newThemeStyle
 
             if (stopService) {
                 TProxyService.stop(this@SettingsActivity)
             }
 
-            finish()
+            if (themeChanged) {
+                recreate()
+            } else {
+                finish()
+            }
         }
     }
 

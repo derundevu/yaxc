@@ -17,8 +17,7 @@ import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.AppUpdateManager
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.root.RootDestination
 import io.github.derundevu.yaxc.presentation.root.SettingsHomeScreen
 import androidx.lifecycle.lifecycleScope
@@ -46,7 +45,7 @@ class SettingsHomeActivity : AppCompatActivity() {
         }
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 SettingsHomeScreen(
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),

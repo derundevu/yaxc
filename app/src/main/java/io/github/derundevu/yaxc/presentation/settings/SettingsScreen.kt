@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.presentation.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,6 +11,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Public
@@ -19,6 +21,8 @@ import androidx.compose.material.icons.outlined.SettingsEthernet
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,12 +46,16 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
@@ -90,6 +98,7 @@ data class SettingsFormState(
     val tproxyTethering: Boolean,
     val transparentProxy: Boolean,
     val languageTag: String,
+    val themeStyle: String,
 ) {
     companion object {
         val Saver: Saver<SettingsFormState, Any> = listSaver(
@@ -130,6 +139,7 @@ data class SettingsFormState(
                     it.tproxyTethering,
                     it.transparentProxy,
                     it.languageTag,
+                    it.themeStyle,
                 )
             },
             restore = { values ->
@@ -168,7 +178,8 @@ data class SettingsFormState(
                     tproxyHotspot = values[31] as Boolean,
                     tproxyTethering = values[32] as Boolean,
                     transparentProxy = values[33] as Boolean,
-                    languageTag = values.getOrNull(34) as? String ?: "en",
+                    languageTag = values.getOrNull(34) as? String ?: "system",
+                    themeStyle = values.getOrNull(35) as? String ?: io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle.System.value,
                 )
             },
         )
@@ -209,6 +220,7 @@ data class SettingsFormState(
             tproxyTethering = settings.tproxyTethering,
             transparentProxy = settings.transparentProxy,
             languageTag = settings.languageTag,
+            themeStyle = settings.themeStyle.value,
         )
     }
 }
@@ -232,6 +244,7 @@ fun SettingsScreen(
     var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.Basic) }
     var showTunRoutesDialog by rememberSaveable { mutableStateOf(false) }
     var showLanguageDialog by rememberSaveable { mutableStateOf(false) }
+    var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showPingTypeDialog by rememberSaveable { mutableStateOf(false) }
     var tunRoutesDraft by rememberSaveable { mutableStateOf(tunRoutes.joinToString("\n")) }
 
@@ -282,6 +295,14 @@ fun SettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LanguageOptionRow(
+                        title = textResource(R.string.settingsLanguageSystem),
+                        selected = formState.languageTag == "system",
+                        onClick = {
+                            onFormStateChange(formState.copy(languageTag = "system"))
+                            showLanguageDialog = false
+                        },
+                    )
+                    LanguageOptionRow(
                         title = textResource(R.string.settingsLanguageEnglish),
                         selected = formState.languageTag == "en",
                         onClick = {
@@ -301,6 +322,54 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLanguageDialog = false }) {
+                    Text(text = textResource(R.string.close))
+                }
+            },
+        )
+    }
+
+    if (showThemeDialog) {
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text(text = textResource(R.string.settingsThemeTitle)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsThemeSystem),
+                        selected = formState.themeStyle == YaxcThemeStyle.System.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(themeStyle = YaxcThemeStyle.System.value))
+                            showThemeDialog = false
+                        },
+                    )
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsThemeMidnightBlue),
+                        selected = formState.themeStyle == YaxcThemeStyle.MidnightBlue.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(themeStyle = YaxcThemeStyle.MidnightBlue.value))
+                            showThemeDialog = false
+                        },
+                    )
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsThemeGraphite),
+                        selected = formState.themeStyle == YaxcThemeStyle.Graphite.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(themeStyle = YaxcThemeStyle.Graphite.value))
+                            showThemeDialog = false
+                        },
+                    )
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsThemeLightSlate),
+                        selected = formState.themeStyle == YaxcThemeStyle.LightSlate.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(themeStyle = YaxcThemeStyle.LightSlate.value))
+                            showThemeDialog = false
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemeDialog = false }) {
                     Text(text = textResource(R.string.close))
                 }
             },
@@ -373,6 +442,7 @@ fun SettingsScreen(
                         formState = formState,
                         onFormStateChange = onFormStateChange,
                         onLanguageClick = { showLanguageDialog = true },
+                        onThemeClick = { showThemeDialog = true },
                         onPingTypeClick = { showPingTypeDialog = true },
                     )
 
@@ -436,8 +506,21 @@ private fun BasicSettingsTab(
     formState: SettingsFormState,
     onFormStateChange: (SettingsFormState) -> Unit,
     onLanguageClick: () -> Unit,
+    onThemeClick: () -> Unit,
     onPingTypeClick: () -> Unit,
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+    val copyToClipboard: (Int, String) -> Unit = { labelRes, value ->
+        clipboardManager.setText(AnnotatedString(value))
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.settingsValueCopied, context.getString(labelRes)),
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
         SettingsSection(title = textResource(R.string.settingsLanguageSection))
         YaxcCard {
@@ -445,7 +528,9 @@ private fun BasicSettingsTab(
                 title = textResource(R.string.settingsLanguageTitle),
                 subtitle = textResource(R.string.settingsLanguageLead),
                 value = textResource(
-                    if (formState.languageTag == "ru") {
+                    if (formState.languageTag == "system") {
+                        R.string.settingsLanguageOptionSystemShort
+                    } else if (formState.languageTag == "ru") {
                         R.string.settingsLanguageOptionRuShort
                     } else {
                         R.string.settingsLanguageOptionEnShort
@@ -453,6 +538,21 @@ private fun BasicSettingsTab(
                 ),
                 icon = Icons.Outlined.Language,
                 onClick = onLanguageClick,
+            )
+            SettingsDivider()
+            YaxcSettingsRow(
+                title = textResource(R.string.settingsThemeTitle),
+                subtitle = textResource(R.string.settingsThemeLead),
+                value = textResource(
+                    when (formState.themeStyle) {
+                        YaxcThemeStyle.MidnightBlue.value -> R.string.settingsThemeMidnightBlueShort
+                        YaxcThemeStyle.Graphite.value -> R.string.settingsThemeGraphiteShort
+                        YaxcThemeStyle.LightSlate.value -> R.string.settingsThemeLightSlateShort
+                        else -> R.string.settingsThemeSystemShort
+                    }
+                ),
+                icon = Icons.Outlined.Tune,
+                onClick = onThemeClick,
             )
         }
 
@@ -475,6 +575,17 @@ private fun BasicSettingsTab(
                 label = textResource(R.string.socksUsername),
                 value = formState.socksUsername,
                 onValueChange = { onFormStateChange(formState.copy(socksUsername = it)) },
+                helperText = textResource(R.string.settingsSocksUsernameLead),
+                trailingContent = {
+                    IconButton(
+                        onClick = { copyToClipboard(R.string.socksUsername, formState.socksUsername) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.ContentCopy,
+                            contentDescription = textResource(R.string.settingsCopyUsername),
+                        )
+                    }
+                },
             )
             SettingsDivider()
             SettingsTextField(
@@ -482,7 +593,36 @@ private fun BasicSettingsTab(
                 value = formState.socksPassword,
                 onValueChange = { onFormStateChange(formState.copy(socksPassword = it)) },
                 keyboardType = KeyboardType.Password,
-                isPassword = true,
+                isPassword = !passwordVisible,
+                helperText = textResource(R.string.settingsSocksPasswordLead),
+                trailingContent = {
+                    Row {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) {
+                                    Icons.Outlined.VisibilityOff
+                                } else {
+                                    Icons.Outlined.Visibility
+                                },
+                                contentDescription = textResource(
+                                    if (passwordVisible) {
+                                        R.string.settingsHidePassword
+                                    } else {
+                                        R.string.settingsShowPassword
+                                    }
+                                ),
+                            )
+                        }
+                        IconButton(
+                            onClick = { copyToClipboard(R.string.socksPassword, formState.socksPassword) }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = textResource(R.string.settingsCopyPassword),
+                            )
+                        }
+                    }
+                },
             )
         }
 
@@ -816,6 +956,7 @@ private fun SettingsTextField(
     keyboardType: KeyboardType = KeyboardType.Text,
     isPassword: Boolean = false,
     helperText: String? = null,
+    trailingContent: @Composable (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -828,9 +969,10 @@ private fun SettingsTextField(
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
             label = { Text(text = label) },
-            singleLine = !isPassword,
+            singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+            trailingIcon = trailingContent,
         )
         helperText?.takeIf { it.isNotBlank() }?.let {
             Text(

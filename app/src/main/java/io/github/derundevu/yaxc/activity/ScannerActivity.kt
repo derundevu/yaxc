@@ -17,8 +17,7 @@ import com.budiyev.android.codescanner.DecodeCallback
 import com.budiyev.android.codescanner.ErrorCallback
 import com.budiyev.android.codescanner.ScanMode
 import io.github.derundevu.yaxc.R
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.scanner.ScannerScreen
 
 class ScannerActivity : AppCompatActivity() {
@@ -41,7 +40,7 @@ class ScannerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 ScannerScreen(
                     onBack = ::finish,
                     onScannerViewReady = ::setupScanner,

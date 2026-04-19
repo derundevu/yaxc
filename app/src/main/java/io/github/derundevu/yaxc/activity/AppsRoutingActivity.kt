@@ -14,8 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.dto.AppList
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.routing.AppsRoutingScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +42,7 @@ class AppsRoutingActivity : AppCompatActivity() {
         appsRoutingMode = settings.appsRoutingMode
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 AppsRoutingScreen(
                     apps = apps,
                     isLoading = isLoading,

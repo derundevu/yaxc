@@ -16,8 +16,7 @@ import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.DownloadHelper
 import io.github.derundevu.yaxc.presentation.assets.AssetCardState
 import io.github.derundevu.yaxc.presentation.assets.AssetsScreen
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,7 +78,7 @@ class AssetsActivity : AppCompatActivity() {
         customGeoSiteUrl = settings.customGeoSiteAddress
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 AssetsScreen(
                     geoIpState = geoIpState,
                     geoSiteState = geoSiteState,

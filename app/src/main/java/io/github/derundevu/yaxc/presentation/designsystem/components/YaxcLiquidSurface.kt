@@ -15,6 +15,7 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 
 @Composable
 fun YaxcLiquidSurface(
@@ -22,12 +23,18 @@ fun YaxcLiquidSurface(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(30.dp),
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-    surfaceTint: Color = Color.White.copy(alpha = 0.28f),
+    surfaceTint: Color = Color.Unspecified,
     blurRadius: androidx.compose.ui.unit.Dp = 16.dp,
     lensRadius: androidx.compose.ui.unit.Dp = 22.dp,
     lensDistortion: androidx.compose.ui.unit.Dp = 44.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val resolvedSurfaceTint = if (surfaceTint == Color.Unspecified) {
+        yaxcSoftFill(darkAlpha = 0.28f, lightAlpha = 0.82f)
+    } else {
+        surfaceTint
+    }
+
     Column(
         modifier = modifier
             .drawBackdrop(
@@ -38,7 +45,7 @@ fun YaxcLiquidSurface(
                     blur(blurRadius.toPx())
                     lens(lensRadius.toPx(), lensDistortion.toPx())
                 },
-                onDrawSurface = { drawRect(surfaceTint) },
+                onDrawSurface = { drawRect(resolvedSurfaceTint) },
             )
             .padding(contentPadding),
         content = content,

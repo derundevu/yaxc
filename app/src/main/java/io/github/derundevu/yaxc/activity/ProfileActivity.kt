@@ -27,8 +27,7 @@ import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.helper.ConfigHelper
 import io.github.derundevu.yaxc.helper.FileHelper
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
 import io.github.derundevu.yaxc.viewmodel.ProfileViewModel
@@ -75,7 +74,7 @@ class ProfileActivity : AppCompatActivity() {
         id = intent.getLongExtra(PROFILE_ID, 0L)
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 ProfileScreen(
                     title = if (isNew()) getString(R.string.newProfile) else getString(R.string.editProfile),
                     name = profileName,

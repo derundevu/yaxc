@@ -18,8 +18,6 @@ class Yaxc : Application() {
     override fun onCreate() {
         super.onCreate()
         val settings = Settings(this)
-        AppCompatDelegate.setApplicationLocales(
-            LocaleListCompat.forLanguageTags(settings.languageTag)
-        )
+        AppCompatDelegate.setApplicationLocales(settings.appLocales())
     }
 }

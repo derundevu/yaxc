@@ -1,9 +1,13 @@
 package io.github.derundevu.yaxc
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
+import androidx.core.os.LocaleListCompat
 import io.github.derundevu.yaxc.BuildConfig
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import java.io.File
+import java.security.SecureRandom
 
 class Settings(private val context: Context) {
 
@@ -63,6 +67,7 @@ class Settings(private val context: Context) {
         private const val DEFAULT_PING_ADDRESS =
             "https://connectivitycheck.gstatic.com/generate_204"
         private const val DEFAULT_PING_TYPE = "get"
+        private const val SYSTEM_LANGUAGE_TAG = "system"
         private const val PREVIOUS_DEFAULT_GEO_IP_ADDRESS =
             "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"
         private const val PREVIOUS_DEFAULT_GEO_SITE_ADDRESS =
@@ -71,9 +76,17 @@ class Settings(private val context: Context) {
         val DEFAULT_GEO_PROVIDER = GeoResourcesProvider.RunetFreedom
         val DEFAULT_GEO_IP_ADDRESS = GeoResourcesProvider.RunetFreedom.geoIpAddress
         val DEFAULT_GEO_SITE_ADDRESS = GeoResourcesProvider.RunetFreedom.geoSiteAddress
+        val USERNAME_ALPHABET: CharArray = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
+        val PASSWORD_ALPHABET: CharArray =
+            "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray()
     }
 
     private val sharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val random = SecureRandom()
+
+    init {
+        initializeSocksCredentialsIfNeeded()
+    }
 
     /** Active Link ID */
     var selectedLink: Long
@@ -295,8 +308,13 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getBoolean("transparentProxy", false)
         set(value) = sharedPreferences.edit { putBoolean("transparentProxy", value) }
     var languageTag: String
-        get() = sharedPreferences.getString("languageTag", defaultLanguageTag())!!
+        get() = sharedPreferences.getString("languageTag", SYSTEM_LANGUAGE_TAG)!!
         set(value) = sharedPreferences.edit { putString("languageTag", value) }
+    var themeStyle: YaxcThemeStyle
+        get() = YaxcThemeStyle.fromValue(
+            sharedPreferences.getString("themeStyle", YaxcThemeStyle.System.value)
+        )
+        set(value) = sharedPreferences.edit { putString("themeStyle", value.value) }
 
     fun baseDir(): File = context.filesDir
     fun xrayCoreFile(): File = File(baseDir(), "xray")
@@ -330,6 +348,22 @@ class Settings(private val context: Context) {
         }
     }
 
+    fun appLocales(): LocaleListCompat {
+        return if (languageTag == SYSTEM_LANGUAGE_TAG) {
+            LocaleListCompat.getEmptyLocaleList()
+        } else {
+            LocaleListCompat.forLanguageTags(languageTag)
+        }
+    }
+
+    fun registerChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        sharedPreferences.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun unregisterChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        sharedPreferences.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
     fun updateCustomGeoResources(
         geoIpAddress: String,
         geoSiteAddress: String,
@@ -340,12 +374,26 @@ class Settings(private val context: Context) {
         this.geoSiteAddress = geoSiteAddress
     }
 
-    private fun defaultLanguageTag(): String {
-        val language = context.resources.configuration.locales
-            .takeIf { !it.isEmpty }
-            ?.get(0)
-            ?.language
-            ?: java.util.Locale.getDefault().language
-        return if (language.equals("ru", ignoreCase = true)) "ru" else "en"
+    private fun initializeSocksCredentialsIfNeeded() {
+        if (sharedPreferences.getBoolean("socksCredentialsInitialized", false)) return
+
+        val storedUsername = sharedPreferences.getString("socksUsername", "")?.trim().orEmpty()
+        val storedPassword = sharedPreferences.getString("socksPassword", "").orEmpty()
+        val username = storedUsername.ifBlank { "yaxc_${randomString(6, USERNAME_ALPHABET)}" }
+        val password = storedPassword.ifBlank { randomString(8, PASSWORD_ALPHABET) }
+
+        sharedPreferences.edit {
+            putString("socksUsername", username)
+            putString("socksPassword", password)
+            putBoolean("socksCredentialsInitialized", true)
+        }
+    }
+
+    private fun randomString(length: Int, alphabet: CharArray): String {
+        return buildString(length) {
+            repeat(length) {
+                append(alphabet[random.nextInt(alphabet.size)])
+            }
+        }
     }
 }

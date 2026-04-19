@@ -21,8 +21,7 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.configs.ConfigSection
 import io.github.derundevu.yaxc.presentation.configs.ConfigsScreen
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -48,7 +47,7 @@ class ConfigsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            YaxcTheme(style = YaxcThemeStyle.MidnightBlue) {
+            YaxcAppTheme {
                 ConfigsScreen(
                     selectedSection = selectedSection,
                     currentMode = modeBySection[selectedSection] ?: Config.Mode.Disable,
