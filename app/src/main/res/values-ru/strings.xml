@@ -288,6 +288,9 @@
     <string name="settingsSectionInterfaces">Интерфейсы</string>
     <string name="settingsSectionTransparentProxy">Прозрачный прокси</string>
     <string name="settingsSectionRoutes">Маршруты</string>
+    <string name="settingsTunOwnerDefense">Защита tun0 (Android 10+)</string>
+    <string name="settingsTunOwnerDefenseLead">Блокирует TCP потоки, чей UID не разрешен правилами маршрутизации приложений. Помогает закрыть попытки приложений вне туннеля обращаться к tun0.</string>
+    <string name="settingsTunOwnerDefenseUnsupported">Требуется Android 10 или новее.</string>
     <string name="deleteProfileDialogTitle">Удалить профиль #%1$d?</string>
     <string name="deleteProfileDialogMessage">"%1$s" будет удален навсегда.</string>
     <string name="deleteSourceDialogMessage">"%1$s" и все связанные профили будут удалены.</string>

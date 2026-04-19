@@ -242,6 +242,9 @@ class Settings(private val context: Context) {
     var tun2socks: Boolean
         get() = sharedPreferences.getBoolean("tun2socks", true)
         set(value) = sharedPreferences.edit { putBoolean("tun2socks", value) }
+    var tunOwnerDefense: Boolean
+        get() = sharedPreferences.getBoolean("tunOwnerDefense", false)
+        set(value) = sharedPreferences.edit { putBoolean("tunOwnerDefense", value) }
     var bootAutoStart: Boolean
         get() = sharedPreferences.getBoolean("bootAutoStart", false)
         set(value) = sharedPreferences.edit { putBoolean("bootAutoStart", value) }
