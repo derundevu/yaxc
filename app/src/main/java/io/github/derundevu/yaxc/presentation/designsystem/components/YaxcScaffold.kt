@@ -27,9 +27,14 @@ fun YaxcScaffold(
             modifier = Modifier
                 .fillMaxSize()
                 .background(YaxcTheme.backgroundBrush)
-                .padding(innerPadding)
         ) {
-            content(PaddingValues())
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                content(PaddingValues())
+            }
         }
     }
 }

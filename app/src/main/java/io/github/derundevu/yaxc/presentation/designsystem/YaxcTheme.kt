@@ -247,48 +247,48 @@ private fun yaxcTypography() = Typography().run {
         ),
         headlineMedium = headlineMedium.copy(
             color = Color.Unspecified,
-            fontSize = 27.sp,
+            fontSize = 26.sp,
             letterSpacing = (-0.5).sp,
         ),
         titleLarge = titleLarge.copy(
             color = Color.Unspecified,
-            fontSize = 21.sp,
+            fontSize = 20.sp,
             letterSpacing = (-0.25).sp,
         ),
         titleMedium = titleMedium.copy(
             color = Color.Unspecified,
-            fontSize = 15.sp,
+            fontSize = 14.sp,
         ),
         titleSmall = titleSmall.copy(
             color = Color.Unspecified,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
         ),
         bodyLarge = bodyLarge.copy(
             color = Color.Unspecified,
-            fontSize = 15.sp,
-            lineHeight = 22.sp,
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
         ),
         bodyMedium = bodyMedium.copy(
             color = Color.Unspecified,
-            fontSize = 13.sp,
-            lineHeight = 19.sp,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
         ),
         bodySmall = bodySmall.copy(
             color = Color.Unspecified,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
+            fontSize = 10.sp,
+            lineHeight = 15.sp,
         ),
         labelLarge = labelLarge.copy(
             color = Color.Unspecified,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
         ),
         labelMedium = labelMedium.copy(
             color = Color.Unspecified,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
         ),
         labelSmall = labelSmall.copy(
             color = Color.Unspecified,
-            fontSize = 10.sp,
+            fontSize = 9.sp,
         ),
     )
 }

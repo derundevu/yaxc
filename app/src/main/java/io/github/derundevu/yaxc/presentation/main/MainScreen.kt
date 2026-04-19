@@ -251,7 +251,6 @@ fun MainScreen(
                                     onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
                                     onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
                                     onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
-                                    onOpenConfigs = { onAction(MainAction.OpenConfigsClicked) },
                                     onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
                                 )
                             }
@@ -615,7 +614,6 @@ private fun SettingsContent(
     onOpenAssets: () -> Unit,
     onOpenLinks: () -> Unit,
     onOpenLogs: () -> Unit,
-    onOpenConfigs: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
@@ -651,14 +649,6 @@ private fun SettingsContent(
                 title = textResource(R.string.logs),
                 description = textResource(R.string.logsScreenLead),
                 onClick = onOpenLogs,
-            )
-        }
-        item {
-            SettingsActionCard(
-                icon = Icons.AutoMirrored.Outlined.Subject,
-                title = textResource(R.string.configs),
-                description = textResource(R.string.configsScreenLead),
-                onClick = onOpenConfigs,
             )
         }
         item {

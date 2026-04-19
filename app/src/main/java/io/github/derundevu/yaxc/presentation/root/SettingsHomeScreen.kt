@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Subject
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Settings
@@ -42,7 +41,6 @@ fun SettingsHomeScreen(
     onOpenAssets: () -> Unit,
     onOpenLinks: () -> Unit,
     onOpenLogs: () -> Unit,
-    onOpenConfigs: () -> Unit,
     onOpenSettings: () -> Unit,
     onDownloadAppUpdate: () -> Unit,
     onInstallAppUpdate: () -> Unit,
@@ -110,14 +108,6 @@ fun SettingsHomeScreen(
                         title = textResource(R.string.logs),
                         description = textResource(R.string.logsScreenLead),
                         onClick = onOpenLogs,
-                    )
-                }
-                item {
-                    RootSectionCard(
-                        icon = Icons.AutoMirrored.Outlined.Subject,
-                        title = textResource(R.string.configs),
-                        description = textResource(R.string.configsScreenLead),
-                        onClick = onOpenConfigs,
                     )
                 }
                 item {

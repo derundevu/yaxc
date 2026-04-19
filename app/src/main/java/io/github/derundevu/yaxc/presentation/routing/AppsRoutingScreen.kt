@@ -72,10 +72,6 @@ fun AppsRoutingScreen(
     val spacing = YaxcTheme.spacing
     var query by rememberSaveable { mutableStateOf("") }
     var routingModeHelpVisible by rememberSaveable { mutableStateOf(false) }
-    val density = LocalDensity.current
-    val navigationBarBottom = WindowInsets.navigationBars.getBottom(density)
-    val gestureNavigation = navigationBarBottom <= with(density) { 32.dp.roundToPx() }
-    val reservedBottomInset = if (gestureNavigation) 0.dp else with(density) { navigationBarBottom.toDp() }
 
     val filteredApps = remember(apps, query) {
         val keyword = query.trim().lowercase()
@@ -118,16 +114,9 @@ fun AppsRoutingScreen(
                 .background(YaxcTheme.backgroundBrush)
                 .padding(innerPadding)
                 .padding(horizontal = spacing.md)
-                .padding(top = spacing.md, bottom = spacing.xl)
-                .padding(bottom = reservedBottomInset),
+                .padding(top = spacing.md),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
-            Text(
-                text = textResource(R.string.appsRoutingLead),
-                style = MaterialTheme.typography.bodyLarge,
-                color = YaxcTheme.extendedColors.textMuted,
-            )
-
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -147,7 +136,7 @@ fun AppsRoutingScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
+                        .padding(bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -186,7 +175,7 @@ fun AppsRoutingScreen(
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = YaxcTheme.extendedColors.textMuted,
-                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                 )
             }
 
@@ -224,7 +213,7 @@ fun AppsRoutingScreen(
             when {
                 isLoading -> {
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -236,32 +225,37 @@ fun AppsRoutingScreen(
                 }
 
                 filteredApps.isEmpty() -> {
-                    YaxcCard {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Tune,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = textResource(R.string.noAppsFound),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.TopStart,
+                    ) {
+                        YaxcCard {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = textResource(R.string.noAppsFound),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                         }
                     }
                 }
 
                 else -> {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = spacing.md),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = spacing.xl),
                         verticalArrangement = Arrangement.spacedBy(spacing.sm),
                     ) {
                         items(

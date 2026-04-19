@@ -55,7 +55,6 @@ class SettingsHomeActivity : AppCompatActivity() {
                     onOpenAssets = { startActivity(Intent(applicationContext, AssetsActivity::class.java)) },
                     onOpenLinks = { startActivity(Intent(applicationContext, LinksActivity::class.java)) },
                     onOpenLogs = { startActivity(Intent(applicationContext, LogsActivity::class.java)) },
-                    onOpenConfigs = { startActivity(Intent(applicationContext, ConfigsActivity::class.java)) },
                     onOpenSettings = { startActivity(Intent(applicationContext, SettingsActivity::class.java)) },
                     onDownloadAppUpdate = ::downloadAppUpdate,
                     onInstallAppUpdate = ::installAppUpdate,

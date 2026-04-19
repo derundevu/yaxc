@@ -26,9 +26,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -333,26 +334,28 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = spacing.md)
-                .padding(top = spacing.md, bottom = spacing.xl),
+                .padding(top = spacing.md),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
-            Text(
-                text = textResource(R.string.settingsScreenLead),
-                style = MaterialTheme.typography.bodyLarge,
-                color = YaxcTheme.extendedColors.textMuted,
-            )
-
             Surface(
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                TabRow(selectedTabIndex = selectedTab.ordinal) {
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                ) {
                     SettingsTab.entries.forEach { tab ->
-                        Tab(
+                        SegmentedButton(
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = tab.ordinal,
+                                count = SettingsTab.entries.size,
+                            ),
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
-                            text = { Text(text = textResource(tab.titleRes)) },
+                            label = { Text(text = textResource(tab.titleRes)) },
                         )
                     }
                 }
@@ -360,8 +363,9 @@ fun SettingsScreen(
 
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(spacing.lg),
             ) {
                 when (selectedTab) {
@@ -488,17 +492,20 @@ private fun BasicSettingsTab(
                 label = textResource(R.string.settingsUserAgent),
                 value = formState.userAgent,
                 onValueChange = { onFormStateChange(formState.copy(userAgent = it)) },
+                helperText = textResource(R.string.settingsUserAgentLead),
             )
             SettingsDivider()
             SettingsTextField(
                 label = textResource(R.string.pingAddress),
                 value = formState.pingAddress,
                 onValueChange = { onFormStateChange(formState.copy(pingAddress = it)) },
+                helperText = textResource(R.string.settingsPingAddressLead),
             )
             SettingsDivider()
             YaxcSettingsRow(
                 title = textResource(R.string.pingType),
-                subtitle = when (formState.pingType) {
+                subtitle = textResource(R.string.settingsPingTypeLead),
+                value = when (formState.pingType) {
                     Settings.PingType.Head.value -> textResource(R.string.pingTypeHead)
                     Settings.PingType.Tcp.value -> textResource(R.string.pingTypeTcp)
                     else -> textResource(R.string.pingTypeGet)
@@ -512,6 +519,7 @@ private fun BasicSettingsTab(
                 value = formState.pingTimeout,
                 onValueChange = { onFormStateChange(formState.copy(pingTimeout = it)) },
                 keyboardType = KeyboardType.Number,
+                helperText = textResource(R.string.settingsPingTimeoutLead),
             )
             SettingsDivider()
             SettingsTextField(
@@ -519,6 +527,7 @@ private fun BasicSettingsTab(
                 value = formState.refreshLinksInterval,
                 onValueChange = { onFormStateChange(formState.copy(refreshLinksInterval = it)) },
                 keyboardType = KeyboardType.Number,
+                helperText = textResource(R.string.settingsRefreshLinksIntervalLead),
             )
         }
 
@@ -529,6 +538,7 @@ private fun BasicSettingsTab(
                 checked = formState.bypassLan,
                 onCheckedChange = { onFormStateChange(formState.copy(bypassLan = it)) },
                 icon = Icons.Outlined.Tune,
+                subtitle = textResource(R.string.settingsBypassLanLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -543,6 +553,7 @@ private fun BasicSettingsTab(
                 checked = formState.socksUdp,
                 onCheckedChange = { onFormStateChange(formState.copy(socksUdp = it)) },
                 icon = Icons.Outlined.Sync,
+                subtitle = textResource(R.string.settingsSocksUdpLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -550,6 +561,7 @@ private fun BasicSettingsTab(
                 checked = formState.tun2socks,
                 onCheckedChange = { onFormStateChange(formState.copy(tun2socks = it)) },
                 icon = Icons.Outlined.SettingsEthernet,
+                subtitle = textResource(R.string.settingsTun2socksLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -688,12 +700,16 @@ private fun AdvancedSettingsTab(
             )
         }
 
-        SettingsSection(title = textResource(R.string.settingsSectionTransparentProxy))
+        SettingsSection(
+            title = textResource(R.string.settingsSectionTransparentProxy),
+            description = textResource(R.string.settingsSectionTransparentProxyLead),
+        )
         YaxcCard {
             SettingsTextField(
                 label = textResource(R.string.tproxyAddress),
                 value = formState.tproxyAddress,
                 onValueChange = { onFormStateChange(formState.copy(tproxyAddress = it)) },
+                helperText = textResource(R.string.settingsTproxyAddressLead),
             )
             SettingsDivider()
             SettingsTextField(
@@ -701,12 +717,14 @@ private fun AdvancedSettingsTab(
                 value = formState.tproxyPort,
                 onValueChange = { onFormStateChange(formState.copy(tproxyPort = it)) },
                 keyboardType = KeyboardType.Number,
+                helperText = textResource(R.string.settingsTproxyPortLead),
             )
             SettingsDivider()
             SettingsTextField(
                 label = textResource(R.string.tproxyBypassWiFi),
                 value = formState.tproxyBypassWiFi,
                 onValueChange = { onFormStateChange(formState.copy(tproxyBypassWiFi = it)) },
+                helperText = textResource(R.string.settingsTproxyBypassWifiLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -716,6 +734,7 @@ private fun AdvancedSettingsTab(
                     onFormStateChange(formState.copy(tproxyAutoConnect = it))
                 },
                 icon = Icons.Outlined.Speed,
+                subtitle = textResource(R.string.settingsTproxyAutoConnectLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -723,6 +742,7 @@ private fun AdvancedSettingsTab(
                 checked = formState.tproxyHotspot,
                 onCheckedChange = { onFormStateChange(formState.copy(tproxyHotspot = it)) },
                 icon = Icons.Outlined.Public,
+                subtitle = textResource(R.string.settingsTproxyHotspotLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -732,6 +752,7 @@ private fun AdvancedSettingsTab(
                     onFormStateChange(formState.copy(tproxyTethering = it))
                 },
                 icon = Icons.Outlined.Sync,
+                subtitle = textResource(R.string.settingsTproxyTetheringLead),
             )
             SettingsDivider()
             YaxcSwitchRow(
@@ -741,6 +762,7 @@ private fun AdvancedSettingsTab(
                     onFormStateChange(formState.copy(transparentProxy = it))
                 },
                 icon = Icons.Outlined.Security,
+                subtitle = textResource(R.string.settingsTransparentProxyLead),
             )
         }
 
@@ -762,13 +784,27 @@ private fun AdvancedSettingsTab(
 }
 
 @Composable
-private fun SettingsSection(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        color = YaxcTheme.extendedColors.textMuted,
+private fun SettingsSection(
+    title: String,
+    description: String? = null,
+) {
+    Column(
         modifier = Modifier.padding(top = 4.dp, start = 4.dp),
-    )
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = YaxcTheme.extendedColors.textMuted,
+        )
+        description?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = YaxcTheme.extendedColors.textMuted,
+            )
+        }
+    }
 }
 
 @Composable
@@ -779,18 +815,32 @@ private fun SettingsTextField(
     modifier: Modifier = Modifier,
     keyboardType: KeyboardType = KeyboardType.Text,
     isPassword: Boolean = false,
+    helperText: String? = null,
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
-        label = { Text(text = label) },
-        singleLine = !isPassword,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-    )
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(text = label) },
+            singleLine = !isPassword,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        )
+        helperText?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = YaxcTheme.extendedColors.textMuted,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+    }
 }
 
 @Composable

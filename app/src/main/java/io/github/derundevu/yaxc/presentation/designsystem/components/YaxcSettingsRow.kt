@@ -43,15 +43,15 @@ fun YaxcSettingsRow(
     Row(
         modifier = clickableModifier
             .fillMaxWidth()
-            .heightIn(min = 68.dp)
-            .padding(vertical = 8.dp),
+            .heightIn(min = 64.dp)
+            .padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (icon != null) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(40.dp)
                     .background(
                         color = YaxcTheme.extendedColors.accentSoft,
                         shape = RoundedCornerShape(14.dp),
@@ -82,8 +82,8 @@ fun YaxcSettingsRow(
                     text = it,
                     style = MaterialTheme.typography.bodyMedium,
                     color = YaxcTheme.extendedColors.textMuted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 4,
+                    overflow = TextOverflow.Clip,
                 )
             }
         }

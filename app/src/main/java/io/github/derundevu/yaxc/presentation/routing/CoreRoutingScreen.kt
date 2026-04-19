@@ -38,9 +38,11 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.UnfoldMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -121,6 +123,7 @@ fun CoreRoutingScreen(
     var expandedRuleId by rememberSaveable { mutableStateOf<String?>(null) }
     var previousRulesCount by remember { mutableIntStateOf(rules.size) }
     var actionsExpanded by remember { mutableStateOf(false) }
+    var helpVisible by rememberSaveable { mutableStateOf(false) }
     val ruleSpacingPx = remember(density) { with(density) { 16.dp.toPx() } }
     val ruleCenters = remember { mutableStateMapOf<String, Float>() }
     val ruleHeights = remember { mutableStateMapOf<String, Float>() }
@@ -165,6 +168,12 @@ fun CoreRoutingScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { helpVisible = true }) {
+                        Icon(
+                            imageVector = Icons.Outlined.HelpOutline,
+                            contentDescription = textResource(R.string.coreRoutingHelp),
+                        )
+                    }
                     Box {
                         IconButton(onClick = { actionsExpanded = true }) {
                             Icon(
@@ -215,14 +224,6 @@ fun CoreRoutingScreen(
             verticalArrangement = Arrangement.spacedBy(spacing.md),
             contentPadding = PaddingValues(bottom = spacing.xl + reservedBottomInset),
         ) {
-            item {
-                Text(
-                    text = textResource(R.string.coreRoutingLead),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = YaxcTheme.extendedColors.textMuted,
-                )
-            }
-
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -396,6 +397,31 @@ fun CoreRoutingScreen(
                     )
                 }
             }
+        }
+
+        if (helpVisible) {
+            AlertDialog(
+                onDismissRequest = { helpVisible = false },
+                title = {
+                    Text(text = textResource(R.string.coreRouting))
+                },
+                text = {
+                    Text(
+                        text = textResource(R.string.coreRoutingLead),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    Text(
+                        text = textResource(R.string.ok),
+                        modifier = Modifier
+                            .clickable { helpVisible = false }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                },
+            )
         }
     }
 }
