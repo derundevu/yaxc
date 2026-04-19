@@ -1,0 +1,5 @@
+- Fixed loading geo resources - now can do it concurrently
+- Fixed animation of ping icon
+- Added auto-restart proxy when something changed (routing or another settings)
+- [EXPERIMENTAL] Added tun0 defense using Android API 10+ connectivity manager and blocking tcp conns
+- Removed liquid glass
