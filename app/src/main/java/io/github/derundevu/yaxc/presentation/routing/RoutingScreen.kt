@@ -58,7 +58,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -72,7 +71,7 @@ import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.CoreRoutingTransport
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditorSurface
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -446,8 +445,6 @@ private fun CoreRoutingControls(
 private fun CoreRoutingJsonCard(
     onEditorReady: (TextProcessor) -> Unit,
 ) {
-    val context = LocalContext.current
-
     YaxcCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -461,34 +458,12 @@ private fun CoreRoutingJsonCard(
                 modifier = Modifier.padding(bottom = 12.dp),
             )
 
-            Box(
+            YaxcJsonEditorSurface(
+                onEditorReady = onEditorReady,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.16f),
-                        shape = RoundedCornerShape(20.dp),
-                    ),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(10.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
-                            shape = RoundedCornerShape(16.dp),
-                        )
-                        .clickable(enabled = false, onClick = {}),
-                ) {
-                    YaxcJsonEditor(
-                        context = context,
-                        onEditorReady = onEditorReady,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(8.dp),
-                    )
-                }
-            }
+            )
         }
     }
 }

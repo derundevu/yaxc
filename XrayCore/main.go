@@ -33,6 +33,14 @@ func Json(link string) string {
 	return response.EncodeToBase64(xrayJson, err)
 }
 
+func Share(config string) string {
+	links, err := share.ConvertXrayJsonToShareLinks([]byte(config))
+	if err != nil {
+		return ""
+	}
+	return links
+}
+
 func Ping(dir string, config string, timeout int, url string, proxy string) string {
 	var response nodep.CallResponse[int64]
 	delay, err := xray.Ping(dir, config, timeout, url, proxy)

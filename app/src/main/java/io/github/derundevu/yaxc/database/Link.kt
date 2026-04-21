@@ -27,6 +27,8 @@ data class Link(
     var isActive: Boolean = true,
     @ColumnInfo(name = "user_agent")
     var userAgent: String? = null,
+    @ColumnInfo(name = "custom_headers")
+    var customHeaders: String? = null,
 ) : Parcelable {
     enum class Type(
         val value: Int,

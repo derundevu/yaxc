@@ -14,6 +14,7 @@ sealed interface MainEffect {
     data object RefreshLinks : MainEffect
     data class RefreshSelectedSource(val linkId: Long) : MainEffect
     data object OpenNewProfile : MainEffect
+    data object OpenNewSource : MainEffect
     data object RequestQrCodeScanner : MainEffect
     data object ImportFromClipboard : MainEffect
     data object OpenAssets : MainEffect

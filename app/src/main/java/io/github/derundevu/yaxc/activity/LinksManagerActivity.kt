@@ -89,6 +89,20 @@ class LinksManagerActivity : AppCompatActivity() {
 
         LinkFormFragment(link) {
             lifecycleScope.launch {
+                if (link.address.isBlank()) {
+                    if (link.name.isBlank()) {
+                        link.name = getString(R.string.newSource)
+                    }
+                    if (link.id == 0L) {
+                        link.id = linkViewModel.insertAndGetId(link)
+                    } else {
+                        linkViewModel.updateNow(link)
+                    }
+                    setResult(RESULT_OK)
+                    finish()
+                    return@launch
+                }
+
                 val loadingDialog = loadingDialog()
                 loadingDialog.show()
                 val detected = resolveProfiles(link)
@@ -155,6 +169,7 @@ class LinksManagerActivity : AppCompatActivity() {
         loadingDialog.show()
         lifecycleScope.launch {
             val links = linkViewModel.activeLinks()
+                .filter { it.address.isNotBlank() }
                 .filter { linkId == null || it.id == linkId }
             links.forEach { link ->
                 resolveProfiles(link).getOrNull()?.let { detected ->
@@ -247,9 +262,11 @@ class LinksManagerActivity : AppCompatActivity() {
     private suspend fun resolveProfiles(link: Link): Result<ParsedLinkSource> {
         return withContext(Dispatchers.IO) {
             runCatching {
+                val customHeaders = HttpHelper.parseHeaders(link.customHeaders)
                 val response = HttpHelper.fetch(
                     link = link.address,
                     userAgent = link.userAgent?.takeIf { it.isNotBlank() } ?: settings.userAgent,
+                    headers = customHeaders,
                 )
                 val detected = detectProfiles(link, response.body.trim())
                 ParsedLinkSource(

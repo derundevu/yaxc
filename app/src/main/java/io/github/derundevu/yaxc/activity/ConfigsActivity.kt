@@ -1,7 +1,10 @@
 package io.github.derundevu.yaxc.activity
 
-import android.os.Bundle
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Typeface
+import android.os.Bundle
+import android.util.TypedValue
 import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -18,10 +21,12 @@ import com.blacksquircle.ui.editorkit.plugin.linenumbers.lineNumbers
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import com.blacksquircle.ui.language.json.JsonLanguage
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.configs.ConfigSection
 import io.github.derundevu.yaxc.presentation.configs.ConfigsScreen
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -29,6 +34,7 @@ import org.json.JSONObject
 
 class ConfigsActivity : AppCompatActivity() {
 
+    private val settings by lazy { Settings(applicationContext) }
     private val configViewModel: ConfigViewModel by viewModels()
     private val indentSpaces = 4
 
@@ -103,10 +109,14 @@ class ConfigsActivity : AppCompatActivity() {
             language = JsonLanguage()
             plugins(pluginSupplier)
             setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(android.graphics.Color.parseColor("#F2F6FC"))
-            setHintTextColor(android.graphics.Color.parseColor("#738399"))
+            setTextColor(editorTextColor())
+            setHintTextColor(editorHintColor())
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setLineSpacing(0f, 1.08f)
             setPadding(contentPadding, contentPadding, contentPadding, contentPadding)
             isVerticalScrollBarEnabled = true
+            isHorizontalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             val content = textBySection[selectedSection].orEmpty()
             if (text.toString() != content) setTextContent(content)
@@ -168,6 +178,33 @@ class ConfigsActivity : AppCompatActivity() {
             finish()
         }.onFailure {
             Toast.makeText(this, getString(R.string.invalidConfig), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun editorTextColor(): Int {
+        return if (usesLightEditorPalette()) {
+            android.graphics.Color.parseColor("#18212B")
+        } else {
+            android.graphics.Color.parseColor("#F2F6FC")
+        }
+    }
+
+    private fun editorHintColor(): Int {
+        return if (usesLightEditorPalette()) {
+            android.graphics.Color.parseColor("#647180")
+        } else {
+            android.graphics.Color.parseColor("#738399")
+        }
+    }
+
+    private fun usesLightEditorPalette(): Boolean {
+        return when (settings.themeStyle) {
+            YaxcThemeStyle.LightSlate -> true
+            YaxcThemeStyle.System -> {
+                val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                nightMode != Configuration.UI_MODE_NIGHT_YES
+            }
+            else -> false
         }
     }
 }

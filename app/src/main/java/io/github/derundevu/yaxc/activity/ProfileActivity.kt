@@ -1,11 +1,14 @@
 package io.github.derundevu.yaxc.activity
 
 import XrayCore.XrayCore
-import android.graphics.Color
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.View
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -23,15 +26,20 @@ import com.blacksquircle.ui.language.json.JsonLanguage
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Config
+import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.helper.ConfigHelper
 import io.github.derundevu.yaxc.helper.FileHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.profile.ProfileSourceOption
 import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
 import io.github.derundevu.yaxc.viewmodel.ProfileViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -43,9 +51,14 @@ class ProfileActivity : AppCompatActivity() {
         private const val PROFILE_ID = "id"
         private const val PROFILE_NAME = "name"
         private const val PROFILE_CONFIG = "config"
+        private const val PROFILE_LINK_ID = "link_id"
 
         fun getIntent(
-            context: Context, id: Long = 0L, name: String = "", config: String = ""
+            context: Context,
+            id: Long = 0L,
+            name: String = "",
+            config: String = "",
+            linkId: Long? = null,
         ) = Intent(context, ProfileActivity::class.java).also {
             it.putExtra(PROFILE_ID, id)
             if (name.isNotEmpty()) it.putExtra(PROFILE_NAME, name)
@@ -53,10 +66,12 @@ class ProfileActivity : AppCompatActivity() {
                 PROFILE_CONFIG,
                 config.replace("\\/", "/")
             )
+            linkId?.let { value -> it.putExtra(PROFILE_LINK_ID, value) }
         }
     }
 
     private val settings by lazy { Settings(applicationContext) }
+    private val linkRepository by lazy { (application as Yaxc).linkRepository }
     private val configViewModel: ConfigViewModel by viewModels()
     private val profileViewModel: ProfileViewModel by viewModels()
 
@@ -66,6 +81,8 @@ class ProfileActivity : AppCompatActivity() {
     private var isLoading by mutableStateOf(true)
     private var profileName by mutableStateOf("")
     private var profileConfigText by mutableStateOf("")
+    private var availableSources by mutableStateOf<List<ProfileSourceOption>>(emptyList())
+    private var selectedSourceId by mutableStateOf<Long?>(null)
     private var editor: TextProcessor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,10 +95,13 @@ class ProfileActivity : AppCompatActivity() {
                 ProfileScreen(
                     title = if (isNew()) getString(R.string.newProfile) else getString(R.string.editProfile),
                     name = profileName,
+                    selectedSourceId = selectedSourceId,
+                    availableSources = availableSources,
                     isLoading = isLoading,
                     onBack = ::finish,
                     onSave = ::save,
                     onNameChange = { profileName = it },
+                    onSourceChange = { selectedSourceId = it },
                     onEditorReady = ::bindEditor,
                 )
             }
@@ -89,35 +109,43 @@ class ProfileActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             config = configViewModel.get()
-            resolveInitialProfile()
+            val resolvedProfile = resolveInitialProfileModel()
+            val (sources, selectedGroupId) = prepareSourceOptions(resolvedProfile)
+
+            withContext(Dispatchers.Main) {
+                profile = resolvedProfile
+                profileName = profile.name
+                profileConfigText = profile.config
+                availableSources = sources
+                selectedSourceId = selectedGroupId
+                editor?.setTextContent(profile.config)
+                isLoading = false
+            }
         }
     }
 
     private fun isNew() = id == 0L
 
-    private suspend fun resolveInitialProfile() {
+    private suspend fun resolveInitialProfileModel(): Profile {
+        val requestedLinkId = intent.getLongExtra(PROFILE_LINK_ID, 0L).takeIf { it != 0L }
         val jsonUri = intent.data
-        val resolvedProfile = when {
+        return when {
             Intent.ACTION_VIEW == intent.action && jsonUri != null -> {
-                Profile().also { it.config = readJsonFile(jsonUri) }
+                Profile().also {
+                    it.linkId = requestedLinkId
+                    it.config = readJsonFile(jsonUri)
+                }
             }
 
             isNew() -> {
                 Profile().also {
+                    it.linkId = requestedLinkId
                     it.name = intent.getStringExtra(PROFILE_NAME) ?: ""
                     it.config = intent.getStringExtra(PROFILE_CONFIG) ?: ""
                 }
             }
 
             else -> profileViewModel.find(id)
-        }
-
-        withContext(Dispatchers.Main) {
-            profile = resolvedProfile
-            profileName = profile.name
-            profileConfigText = profile.config
-            editor?.setTextContent(profile.config)
-            isLoading = false
         }
     }
 
@@ -153,10 +181,14 @@ class ProfileActivity : AppCompatActivity() {
             language = JsonLanguage()
             plugins(pluginSupplier)
             setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(android.graphics.Color.parseColor("#F2F6FC"))
-            setHintTextColor(android.graphics.Color.parseColor("#738399"))
+            setTextColor(editorTextColor())
+            setHintTextColor(editorHintColor())
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setLineSpacing(0f, 1.08f)
             setPadding(contentPadding, contentPadding, contentPadding, contentPadding)
             isVerticalScrollBarEnabled = true
+            isHorizontalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             if (text.toString() != profileConfigText) {
                 setTextContent(profileConfigText)
@@ -167,6 +199,7 @@ class ProfileActivity : AppCompatActivity() {
     private fun save(check: Boolean = true) {
         if (isLoading || !::config.isInitialized) return
 
+        profile.linkId = selectedSourceId
         profile.name = profileName
         profile.config = editor?.text?.toString() ?: profileConfigText
 
@@ -194,6 +227,54 @@ class ProfileActivity : AppCompatActivity() {
         }
     }
 
+    private suspend fun loadSources(): List<Link> {
+        return withContext(Dispatchers.IO) {
+            linkRepository.all.first()
+        }
+    }
+
+    private suspend fun prepareSourceOptions(profile: Profile): Pair<List<ProfileSourceOption>, Long?> {
+        var links = loadSources()
+        var manualLinks = links.filter { it.address.isBlank() }
+
+        if (manualLinks.isEmpty()) {
+            val defaultGroup = Link(
+                name = getString(R.string.defaultManualGroupName),
+                address = "",
+                type = Link.Type.Json,
+                isActive = true,
+            )
+            defaultGroup.id = linkRepository.insertAndGetId(defaultGroup)
+            links = links + defaultGroup
+            manualLinks = listOf(defaultGroup)
+        }
+
+        val currentLink = links.firstOrNull { it.id == profile.linkId }
+        val optionLinks = buildList {
+            addAll(manualLinks)
+            if (
+                !isNew() &&
+                currentLink != null &&
+                currentLink.address.isNotBlank() &&
+                none { it.id == currentLink.id }
+            ) {
+                add(currentLink)
+            }
+        }
+
+        val selectedGroupId = when {
+            currentLink != null && optionLinks.any { it.id == currentLink.id } -> currentLink.id
+            else -> optionLinks.firstOrNull()?.id
+        }
+
+        return optionLinks.map { link ->
+            ProfileSourceOption(
+                linkId = link.id,
+                name = link.name.ifBlank { getString(R.string.defaultManualGroupName) },
+            )
+        } to selectedGroupId
+    }
+
     private suspend fun isValid(json: String): String {
         return withContext(Dispatchers.IO) {
             val pwd = filesDir.absolutePath
@@ -210,5 +291,32 @@ class ProfileActivity : AppCompatActivity() {
             .setNegativeButton(getString(R.string.cancel)) { _, _ -> }
             .setPositiveButton(getString(R.string.ignore)) { _, _ -> save(false) }
             .show()
+    }
+
+    private fun editorTextColor(): Int {
+        return if (usesLightEditorPalette()) {
+            android.graphics.Color.parseColor("#18212B")
+        } else {
+            android.graphics.Color.parseColor("#F2F6FC")
+        }
+    }
+
+    private fun editorHintColor(): Int {
+        return if (usesLightEditorPalette()) {
+            android.graphics.Color.parseColor("#647180")
+        } else {
+            android.graphics.Color.parseColor("#738399")
+        }
+    }
+
+    private fun usesLightEditorPalette(): Boolean {
+        return when (settings.themeStyle) {
+            YaxcThemeStyle.LightSlate -> true
+            YaxcThemeStyle.System -> {
+                val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                nightMode != Configuration.UI_MODE_NIGHT_YES
+            }
+            else -> false
+        }
     }
 }

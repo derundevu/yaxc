@@ -26,6 +26,7 @@ sealed interface MainAction {
     data object PingAllProfilesClicked : MainAction
     data object RefreshLinksClicked : MainAction
     data object NewProfileClicked : MainAction
+    data object NewSourceClicked : MainAction
     data object ScanQrCodeClicked : MainAction
     data object ImportFromClipboardClicked : MainAction
     data object OpenAssetsClicked : MainAction

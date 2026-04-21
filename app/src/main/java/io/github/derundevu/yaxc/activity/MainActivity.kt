@@ -265,7 +265,15 @@ class MainActivity : AppCompatActivity() {
             MainEffect.RefreshLinks -> refreshLinks()
             is MainEffect.RefreshSelectedSource -> refreshSource(effect.linkId)
             MainEffect.OpenNewProfile -> {
-                startActivity(ProfileActivity.getIntent(applicationContext))
+                startActivity(
+                    ProfileActivity.getIntent(
+                        context = applicationContext,
+                        linkId = mainViewModel.uiState.value.selectedTabId.takeIf { it != 0L },
+                    )
+                )
+            }
+            MainEffect.OpenNewSource -> {
+                linksManager.launch(LinksManagerActivity.openLink(applicationContext))
             }
             MainEffect.RequestQrCodeScanner -> {
                 cameraPermission.launch(android.Manifest.permission.CAMERA)
@@ -348,7 +356,14 @@ class MainActivity : AppCompatActivity() {
         }
         val json = linkHelper.json()
         val name = linkHelper.remark()
-        startActivity(ProfileActivity.getIntent(applicationContext, name = name, config = json))
+        startActivity(
+            ProfileActivity.getIntent(
+                context = applicationContext,
+                name = name,
+                config = json,
+                linkId = mainViewModel.uiState.value.selectedTabId.takeIf { it != 0L },
+            )
+        )
     }
 
     private fun importFromClipboard() {

@@ -1,11 +1,14 @@
 package io.github.derundevu.yaxc.activity
 
-import android.graphics.Color
-import android.os.Bundle
-import android.view.View
-import android.widget.Toast
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Typeface
+import android.os.Bundle
+import android.util.TypedValue
+import android.view.View
+import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -28,6 +31,7 @@ import io.github.derundevu.yaxc.helper.CoreRoutingHelper
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.presentation.routing.CoreRoutingScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.ConfigViewModel
@@ -140,10 +144,14 @@ class CoreRoutingActivity : AppCompatActivity() {
             language = JsonLanguage()
             plugins(pluginSupplier)
             setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(android.graphics.Color.parseColor("#F2F6FC"))
-            setHintTextColor(android.graphics.Color.parseColor("#738399"))
+            setTextColor(editorTextColor())
+            setHintTextColor(editorHintColor())
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setLineSpacing(0f, 1.08f)
             setPadding(contentPadding, contentPadding, contentPadding, contentPadding)
             isVerticalScrollBarEnabled = true
+            isHorizontalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             val content = coreRoutingJson
             if (text.toString() != content) setTextContent(content)
@@ -379,5 +387,32 @@ class CoreRoutingActivity : AppCompatActivity() {
     private fun normalizeRoutingJson(rawJson: String): String {
         if (rawJson.isBlank()) return "{}"
         return runCatching { JSONObject(rawJson).toString(4) }.getOrElse { "{}" }
+    }
+
+    private fun editorTextColor(): Int {
+        return if (usesLightEditorPalette()) {
+            android.graphics.Color.parseColor("#18212B")
+        } else {
+            android.graphics.Color.parseColor("#F2F6FC")
+        }
+    }
+
+    private fun editorHintColor(): Int {
+        return if (usesLightEditorPalette()) {
+            android.graphics.Color.parseColor("#647180")
+        } else {
+            android.graphics.Color.parseColor("#738399")
+        }
+    }
+
+    private fun usesLightEditorPalette(): Boolean {
+        return when (settings.themeStyle) {
+            YaxcThemeStyle.LightSlate -> true
+            YaxcThemeStyle.System -> {
+                val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                nightMode != Configuration.UI_MODE_NIGHT_YES
+            }
+            else -> false
+        }
     }
 }

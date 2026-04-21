@@ -1,9 +1,6 @@
 package io.github.derundevu.yaxc.presentation.configs
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,17 +18,14 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditorSurface
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 
@@ -59,7 +53,6 @@ fun ConfigsScreen(
     onEditorReady: (TextProcessor) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
-    val context = LocalContext.current
 
     YaxcScaffold(
         topBar = {
@@ -158,40 +151,12 @@ fun ConfigsScreen(
                             color = YaxcTheme.extendedColors.textMuted,
                         )
                     } else {
-                        Box(
+                        YaxcJsonEditorSurface(
+                            onEditorReady = onEditorReady,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.16f),
-                                    shape = RoundedCornerShape(20.dp),
-                                ),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(10.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
-                                        shape = RoundedCornerShape(16.dp),
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = YaxcTheme.extendedColors.cardBorder.copy(alpha = 0.7f),
-                                        shape = RoundedCornerShape(16.dp),
-                                    ),
-                            ) {
-                                YaxcJsonEditor(
-                                    context = context,
-                                    onEditorReady = onEditorReady,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(8.dp),
-                                )
-                            }
-                        }
+                        )
                     }
                 }
             }

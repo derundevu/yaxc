@@ -1,5 +1,10 @@
 package io.github.derundevu.yaxc.presentation.main
 
+import XrayCore.XrayCore
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
@@ -96,6 +101,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.graphicsLayer
@@ -119,6 +125,7 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
+import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
@@ -130,6 +137,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidD
 import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
 import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetAddress
@@ -289,6 +297,7 @@ fun MainScreen(
 
                 MainTopChrome(
                     onNewProfile = { onAction(MainAction.NewProfileClicked) },
+                    onNewSource = { onAction(MainAction.NewSourceClicked) },
                     onScanQr = { onAction(MainAction.ScanQrCodeClicked) },
                     onImportClipboard = { onAction(MainAction.ImportFromClipboardClicked) },
                     isConnectTab = rootTab == MainRootTab.Connect,
@@ -780,58 +789,57 @@ private fun ConnectionTopCard(
         borderColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isRunning) 0.24f else 0.16f),
         shadowElevation = shadowElevation,
     ) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ConnectionInfoChip(
-                    onClick = { showConnectionInfo = true },
-                    modifier = Modifier,
-                )
-
-                Text(
-                    text = selectedSourceName,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                ConnectionStatusChip(isRunning = isRunning)
 
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                    ConnectionInfoChip(
+                        onClick = { showConnectionInfo = true },
+                        modifier = Modifier,
                     )
-                    PingStateBadge(pingState = pingState)
+                    ActionBubble(
+                        icon = Icons.Outlined.WifiTethering,
+                        onClick = onPingAll,
+                        loading = activeBatchPingSourceId != null,
+                    )
+                    ActionBubble(
+                        icon = Icons.Outlined.Refresh,
+                        onClick = onRefreshSource,
+                    )
                 }
             }
 
+            Text(
+                text = selectedSourceName,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ActionBubble(
-                    icon = Icons.Outlined.WifiTethering,
-                    onClick = onPingAll,
-                    loading = activeBatchPingSourceId != null,
+                Text(
+                    text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                ActionBubble(
-                    icon = Icons.Outlined.Refresh,
-                    onClick = onRefreshSource,
-                )
+                PingStateBadge(pingState = pingState)
             }
         }
     }
@@ -846,6 +854,58 @@ private fun ConnectionTopCard(
             pingAddress = pingAddress,
             onDismiss = { showConnectionInfo = false },
         )
+    }
+}
+
+@Composable
+private fun ConnectionStatusChip(
+    isRunning: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val containerColor = if (isRunning) {
+        YaxcTheme.extendedColors.success.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f)
+    }
+    val borderColor = if (isRunning) {
+        YaxcTheme.extendedColors.success.copy(alpha = 0.38f)
+    } else {
+        YaxcTheme.extendedColors.cardBorder
+    }
+    val dotColor = if (isRunning) {
+        YaxcTheme.extendedColors.success
+    } else {
+        YaxcTheme.extendedColors.textMuted
+    }
+
+    Surface(
+        modifier = modifier,
+        color = containerColor,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, borderColor),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(dotColor, CircleShape),
+            )
+            Text(
+                text = if (isRunning) {
+                    textResource(R.string.mainConnectionRunningShort)
+                } else {
+                    textResource(R.string.mainConnectionStoppedShort)
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
     }
 }
 
@@ -865,21 +925,15 @@ private fun ConnectionInfoChip(
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Outlined.Info,
-                contentDescription = null,
+                contentDescription = textResource(R.string.mainConnectionInfo),
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(14.dp),
-            )
-            Text(
-                text = textResource(R.string.mainConnectionInfo),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(16.dp),
             )
         }
     }
@@ -917,6 +971,29 @@ private fun ConnectionInfoDialog(
             }
         }
     }
+    val exitIpValue by produceState(
+        initialValue = noValue,
+        socksAddress,
+        socksPort,
+        socksUsername,
+        socksPassword,
+    ) {
+        val address = socksAddress.trim()
+        val port = socksPort.trim()
+        value = when {
+            address.isBlank() || port.isBlank() -> noValue
+            else -> withContext(Dispatchers.IO) {
+                runCatching {
+                    HttpHelper.resolveExitIpViaSocks(
+                        socksAddress = address,
+                        socksPort = port,
+                        socksUsername = socksUsername.trim(),
+                        socksPassword = socksPassword,
+                    )
+                }.getOrElse { resolveFailed }
+            }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -948,6 +1025,10 @@ private fun ConnectionInfoDialog(
                 ConnectionInfoRow(
                     label = textResource(R.string.mainResolvedAddress),
                     value = resolvedServerValue,
+                )
+                ConnectionInfoRow(
+                    label = textResource(R.string.mainExitAddress),
+                    value = exitIpValue,
                 )
                 ConnectionInfoRow(
                     label = textResource(R.string.socksAddress),
@@ -1180,6 +1261,7 @@ private fun MainLiquidTabBar(
 @Composable
 private fun MainTopChrome(
     onNewProfile: () -> Unit,
+    onNewSource: () -> Unit,
     onScanQr: () -> Unit,
     onImportClipboard: () -> Unit,
     isConnectTab: Boolean,
@@ -1257,6 +1339,13 @@ private fun MainTopChrome(
                     onClick = {
                         actionsExpanded = false
                         onNewProfile()
+                    },
+                )
+                YaxcLiquidDropdownMenuItem(
+                    text = textResource(R.string.newSource),
+                    onClick = {
+                        actionsExpanded = false
+                        onNewSource()
                     },
                 )
                 YaxcLiquidDropdownMenuItem(
@@ -1656,6 +1745,8 @@ private fun ProfileCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
@@ -1755,6 +1846,27 @@ private fun ProfileCard(
                         onClick = {
                             actionsExpanded = false
                             onEdit()
+                        },
+                    )
+                    YaxcLiquidDropdownMenuItem(
+                        text = textResource(R.string.copyProfileJson),
+                        onClick = {
+                            actionsExpanded = false
+                            copyProfileJson(
+                                context = context,
+                                config = profile.profile.config,
+                            )
+                        },
+                    )
+                    YaxcLiquidDropdownMenuItem(
+                        text = textResource(R.string.copyProfileDeepLink),
+                        onClick = {
+                            actionsExpanded = false
+                            copyProfileDeepLink(
+                                context = context,
+                                scope = scope,
+                                config = profile.profile.config,
+                            )
                         },
                     )
                     YaxcLiquidDropdownMenuItem(
@@ -1893,6 +2005,50 @@ private fun VersionRow(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+private fun copyProfileJson(
+    context: Context,
+    config: String,
+) {
+    val clipboardManager = context.getSystemService(ClipboardManager::class.java)
+    clipboardManager?.setPrimaryClip(
+        ClipData.newPlainText("profile-json", config),
+    )
+    Toast.makeText(
+        context,
+        context.getString(R.string.profileJsonCopied),
+        Toast.LENGTH_SHORT,
+    ).show()
+}
+
+private fun copyProfileDeepLink(
+    context: Context,
+    scope: CoroutineScope,
+    config: String,
+) {
+    scope.launch {
+        val shareLink = withContext(Dispatchers.Default) {
+            XrayCore.share(config).trim()
+        }
+        if (shareLink.isBlank()) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.profileDeepLinkUnavailable),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return@launch
+        }
+        val clipboardManager = context.getSystemService(ClipboardManager::class.java)
+        clipboardManager?.setPrimaryClip(
+            ClipData.newPlainText("profile-deep-link", shareLink),
+        )
+        Toast.makeText(
+            context,
+            context.getString(R.string.profileDeepLinkCopied),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 }
 

@@ -355,6 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             MainAction.RefreshLinksClicked -> _effects.tryEmit(MainEffect.RefreshLinks)
             MainAction.NewProfileClicked -> _effects.tryEmit(MainEffect.OpenNewProfile)
+            MainAction.NewSourceClicked -> _effects.tryEmit(MainEffect.OpenNewSource)
             MainAction.ScanQrCodeClicked -> _effects.tryEmit(MainEffect.RequestQrCodeScanner)
             MainAction.ImportFromClipboardClicked -> _effects.tryEmit(MainEffect.ImportFromClipboard)
             MainAction.OpenAssetsClicked -> _effects.tryEmit(MainEffect.OpenAssets)

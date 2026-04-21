@@ -36,6 +36,7 @@ class HttpHelper(
             proxy: Proxy? = null,
             timeout: Int = 5000,
             userAgent: String? = null,
+            headers: Map<String, String> = emptyMap(),
         ): HttpURLConnection {
             val url = URL(link)
             val connection = if (proxy == null) {
@@ -47,14 +48,25 @@ class HttpHelper(
             connection.connectTimeout = timeout
             connection.readTimeout = timeout
             userAgent?.let { connection.setRequestProperty("User-Agent", it) }
+            headers.forEach { (key, value) ->
+                connection.setRequestProperty(key, value)
+            }
             connection.setRequestProperty("Connection", "close")
             return connection
         }
 
-        suspend fun fetch(link: String, userAgent: String? = null): HttpResponse {
+        suspend fun fetch(
+            link: String,
+            userAgent: String? = null,
+            headers: Map<String, String> = emptyMap(),
+        ): HttpResponse {
             return withContext(Dispatchers.IO) {
                 val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
-                val connection = getConnection(link, userAgent = userAgent ?: defaultUserAgent)
+                val connection = getConnection(
+                    link = link,
+                    userAgent = userAgent ?: defaultUserAgent,
+                    headers = headers,
+                )
                 var responseCode = 0
                 val responseBody = try {
                     connection.connect()
@@ -77,8 +89,91 @@ class HttpHelper(
             }
         }
 
-        suspend fun get(link: String, userAgent: String? = null): String {
-            return fetch(link, userAgent).body
+        suspend fun get(
+            link: String,
+            userAgent: String? = null,
+            headers: Map<String, String> = emptyMap(),
+        ): String {
+            return fetch(link, userAgent, headers).body
+        }
+
+        fun parseHeaders(rawHeaders: String?): Map<String, String> {
+            if (rawHeaders.isNullOrBlank()) return emptyMap()
+            return buildMap {
+                rawHeaders.lineSequence()
+                    .map(String::trim)
+                    .filter { it.isNotEmpty() }
+                    .forEach { line ->
+                        val separatorIndex = line.indexOf(':')
+                        if (separatorIndex <= 0 || separatorIndex >= line.lastIndex) return@forEach
+                        val key = line.substring(0, separatorIndex).trim()
+                        val value = line.substring(separatorIndex + 1).trim()
+                        if (key.isNotEmpty() && value.isNotEmpty()) {
+                            put(key, value)
+                        }
+                    }
+            }
+        }
+
+        suspend fun resolveExitIpViaSocks(
+            socksAddress: String,
+            socksPort: String,
+            socksUsername: String,
+            socksPassword: String,
+            timeout: Int = 5000,
+        ): String {
+            return withContext(Dispatchers.IO) {
+                val port = socksPort.toIntOrNull() ?: throw IllegalArgumentException("Invalid SOCKS port")
+                val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksAddress, port))
+                val auth = if (socksUsername.isBlank() || socksPassword.isBlank()) {
+                    null
+                } else {
+                    object : Authenticator() {
+                        override fun getPasswordAuthentication(): PasswordAuthentication {
+                            return PasswordAuthentication(
+                                socksUsername,
+                                socksPassword.toCharArray(),
+                            )
+                        }
+                    }
+                }
+                val services = listOf(
+                    "https://api64.ipify.org",
+                    "https://api.ipify.org",
+                )
+                val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
+                var lastError: Throwable? = null
+
+                services.forEach { service ->
+                    try {
+                        Authenticator.setDefault(auth)
+                        val connection = getConnection(
+                            link = service,
+                            method = "GET",
+                            proxy = proxy,
+                            timeout = timeout,
+                            userAgent = defaultUserAgent,
+                        )
+                        try {
+                            connection.connect()
+                            val responseCode = connection.responseCode
+                            val responseBody = connection.readResponseText()?.trim().orEmpty()
+                            if (responseCode == HttpURLConnection.HTTP_OK && responseBody.isNotEmpty()) {
+                                return@withContext responseBody
+                            }
+                            lastError = IllegalStateException("HTTP Error: $responseCode")
+                        } finally {
+                            connection.disconnect()
+                        }
+                    } catch (error: Throwable) {
+                        lastError = error
+                    } finally {
+                        Authenticator.setDefault(null)
+                    }
+                }
+
+                throw lastError ?: IllegalStateException("Exit IP unavailable")
+            }
         }
 
         fun extractSubscriptionTitle(headers: Map<String, List<String>>): String? {
