@@ -1,0 +1,9 @@
+## What's new in 1.2.1
+
+- [EXPERIMENTAL] Added custom headers for subscriptions: you can now set `User-Agent` and any extra headers such as `x-hwid` and `x-device-os`.
+- Reworked the source creation dialog: it is now a Compose popup with explicit `Subscription` and `Manual Group` modes.
+- Improved manual profile and group flow: manual profiles are now stored inside manual groups, and a default group is created automatically when needed.
+- Updated the profile screen: added a help action and simplified the group selection flow.
+- Added `Copy JSON` and `Copy deep link` actions for profiles.
+- Expanded the `Connection Info` popup, including `Exit IP`.
+- Refined the JSON editor appearance across profiles, configs, and routing screens.
