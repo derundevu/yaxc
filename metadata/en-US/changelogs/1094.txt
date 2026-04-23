@@ -1,0 +1,7 @@
+## What's new in 1.2.2
+
+- added subscription metadata parsing and display
+- added off mode for app routing
+- stabilize source group drag reorder animation
+- save source order atomically
+- update launcher icon
