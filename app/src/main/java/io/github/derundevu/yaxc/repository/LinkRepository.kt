@@ -35,8 +35,6 @@ class LinkRepository(private val linkDao: LinkDao) {
     }
 
     suspend fun reorder(ids: List<Long>) {
-        ids.forEachIndexed { index, id ->
-            linkDao.updatePosition(id, index)
-        }
+        linkDao.updatePositions(ids)
     }
 }

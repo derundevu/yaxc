@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.helper
 
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -177,20 +178,15 @@ class HttpHelper(
         }
 
         fun extractSubscriptionTitle(headers: Map<String, List<String>>): String? {
-            val normalizedHeaders = headers.entries.associate { (key, value) ->
-                key.lowercase() to value.filter { it.isNotBlank() }
-            }
+            val normalizedHeaders = normalizeHeaders(headers)
 
-            val profileTitle = normalizedHeaders["profile-title"]
-                ?.firstNotNullOfOrNull(::decodeHeaderValue)
+            val profileTitle = firstDecodedHeaderValue(
+                normalizedHeaders,
+                "profile-title",
+                "x-profile-title",
+            )
             if (!profileTitle.isNullOrBlank()) {
                 return profileTitle
-            }
-
-            val xProfileTitle = normalizedHeaders["x-profile-title"]
-                ?.firstNotNullOfOrNull(::decodeHeaderValue)
-            if (!xProfileTitle.isNullOrBlank()) {
-                return xProfileTitle
             }
 
             val contentDisposition = normalizedHeaders["content-disposition"]
@@ -200,6 +196,40 @@ class HttpHelper(
             }
 
             return null
+        }
+
+        fun extractSubscriptionMetadata(headers: Map<String, List<String>>): SubscriptionMetadata? {
+            val normalizedHeaders = normalizeHeaders(headers)
+            val userInfo = parseSubscriptionUserInfo(
+                firstDecodedHeaderValue(
+                    normalizedHeaders,
+                    "subscription-userinfo",
+                    "x-subscription-userinfo",
+                )
+            )
+
+            return SubscriptionMetadata(
+                profileTitle = extractSubscriptionTitle(headers),
+                updateIntervalHours = firstDecodedHeaderValue(
+                    normalizedHeaders,
+                    "profile-update-interval",
+                    "x-profile-update-interval",
+                )?.toIntOrNull()?.takeIf { it > 0 },
+                supportUrl = firstDecodedHeaderValue(
+                    normalizedHeaders,
+                    "support-url",
+                    "x-support-url",
+                ),
+                profileWebPageUrl = firstDecodedHeaderValue(
+                    normalizedHeaders,
+                    "profile-web-page-url",
+                    "x-profile-web-page-url",
+                ),
+                uploadBytes = userInfo?.uploadBytes,
+                downloadBytes = userInfo?.downloadBytes,
+                totalBytes = userInfo?.totalBytes,
+                expireAtEpochSeconds = userInfo?.expireAtEpochSeconds,
+            ).takeUnless(SubscriptionMetadata::isEmpty)
         }
 
         private fun HttpURLConnection.readResponseText(): String? {
@@ -228,6 +258,67 @@ class HttpHelper(
                 ?.groupValues
                 ?.getOrNull(1)
                 ?.let(::decodeHeaderValue)
+        }
+
+        private fun normalizeHeaders(headers: Map<String, List<String>>): Map<String, List<String>> {
+            return headers.entries.associate { (key, value) ->
+                key.lowercase() to value.filter { it.isNotBlank() }
+            }
+        }
+
+        private fun firstDecodedHeaderValue(
+            headers: Map<String, List<String>>,
+            vararg keys: String,
+        ): String? {
+            return keys.asSequence()
+                .mapNotNull(headers::get)
+                .flatten()
+                .mapNotNull(::decodeHeaderValue)
+                .firstOrNull()
+        }
+
+        private data class ParsedSubscriptionUserInfo(
+            val uploadBytes: Long? = null,
+            val downloadBytes: Long? = null,
+            val totalBytes: Long? = null,
+            val expireAtEpochSeconds: Long? = null,
+        )
+
+        private fun parseSubscriptionUserInfo(value: String?): ParsedSubscriptionUserInfo? {
+            if (value.isNullOrBlank()) return null
+            var uploadBytes: Long? = null
+            var downloadBytes: Long? = null
+            var totalBytes: Long? = null
+            var expireAtEpochSeconds: Long? = null
+
+            value.split(';')
+                .map(String::trim)
+                .filter { it.isNotEmpty() }
+                .forEach { segment ->
+                    val separatorIndex = segment.indexOf('=')
+                    if (separatorIndex <= 0 || separatorIndex >= segment.lastIndex) return@forEach
+                    val key = segment.substring(0, separatorIndex).trim().lowercase()
+                    val rawValue = segment.substring(separatorIndex + 1).trim()
+                    val parsedValue = rawValue.toLongOrNull() ?: return@forEach
+                    when (key) {
+                        "upload" -> uploadBytes = parsedValue
+                        "download" -> downloadBytes = parsedValue
+                        "total" -> totalBytes = parsedValue
+                        "expire" -> expireAtEpochSeconds = parsedValue
+                    }
+                }
+
+            return ParsedSubscriptionUserInfo(
+                uploadBytes = uploadBytes,
+                downloadBytes = downloadBytes,
+                totalBytes = totalBytes,
+                expireAtEpochSeconds = expireAtEpochSeconds,
+            ).takeIf {
+                it.uploadBytes != null ||
+                    it.downloadBytes != null ||
+                    it.totalBytes != null ||
+                    it.expireAtEpochSeconds != null
+            }
         }
 
         private fun decodeHeaderValue(value: String): String? {

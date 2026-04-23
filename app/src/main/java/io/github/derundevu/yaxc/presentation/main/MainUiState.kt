@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.presentation.main
 
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
 
 sealed interface MainPingState {
@@ -21,6 +22,7 @@ data class MainUiState(
     val selectedTabId: Long = 0L,
     val selectedSourceId: Long = 0L,
     val selectedSourceName: String = "",
+    val selectedSourceMetadata: SubscriptionMetadata? = null,
     val filteredProfiles: List<MainProfileItem> = emptyList(),
     val selectedProfileId: Long = 0L,
     val selectedProfileName: String = "",

@@ -15,6 +15,7 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
+import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.fragment.LinkFormFragment
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.helper.IntentHelper
@@ -35,6 +36,7 @@ class LinksManagerActivity : AppCompatActivity() {
         val type: Link.Type,
         val profiles: List<Profile>,
         val title: String? = null,
+        val metadata: SubscriptionMetadata? = null,
     )
 
     companion object {
@@ -93,6 +95,7 @@ class LinksManagerActivity : AppCompatActivity() {
                     if (link.name.isBlank()) {
                         link.name = getString(R.string.newSource)
                     }
+                    link.subscriptionMetadata = null
                     if (link.id == 0L) {
                         link.id = linkViewModel.insertAndGetId(link)
                     } else {
@@ -119,6 +122,7 @@ class LinksManagerActivity : AppCompatActivity() {
                     }
                     link.type = parsed.type
                     parsed.title?.let { link.name = it }
+                    link.subscriptionMetadata = parsed.metadata?.toJsonString()
                     link.id = linkViewModel.insertAndGetId(link)
                     manageProfiles(link, emptyList(), parsed.profiles)
                 } else {
@@ -131,6 +135,11 @@ class LinksManagerActivity : AppCompatActivity() {
                         }
                         if (!parsed.title.isNullOrBlank() && link.name != parsed.title) {
                             link.name = parsed.title
+                            linkChanged = true
+                        }
+                        val nextMetadata = parsed.metadata?.toJsonString()
+                        if (link.subscriptionMetadata != nextMetadata) {
+                            link.subscriptionMetadata = nextMetadata
                             linkChanged = true
                         }
                         if (linkChanged) linkViewModel.updateNow(link)
@@ -181,6 +190,11 @@ class LinksManagerActivity : AppCompatActivity() {
                     }
                     if (!detected.title.isNullOrBlank() && link.name != detected.title) {
                         link.name = detected.title
+                        linkChanged = true
+                    }
+                    val nextMetadata = detected.metadata?.toJsonString()
+                    if (link.subscriptionMetadata != nextMetadata) {
+                        link.subscriptionMetadata = nextMetadata
                         linkChanged = true
                     }
                     if (linkChanged) linkViewModel.update(link)
@@ -269,10 +283,12 @@ class LinksManagerActivity : AppCompatActivity() {
                     headers = customHeaders,
                 )
                 val detected = detectProfiles(link, response.body.trim())
+                val metadata = HttpHelper.extractSubscriptionMetadata(response.headers)
                 ParsedLinkSource(
                     type = detected.first,
                     profiles = detected.second,
-                    title = HttpHelper.extractSubscriptionTitle(response.headers),
+                    title = metadata?.profileTitle ?: HttpHelper.extractSubscriptionTitle(response.headers),
+                    metadata = metadata,
                 )
             }.mapCatching { detected ->
                 if (detected.profiles.isEmpty()) {

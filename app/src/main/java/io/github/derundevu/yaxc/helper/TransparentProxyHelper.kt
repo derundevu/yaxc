@@ -4,6 +4,7 @@ import android.content.Context
 import com.topjohnwu.superuser.Shell
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.Settings.AppsRoutingMode
 import io.github.derundevu.yaxc.service.TProxyService
 import java.io.FileOutputStream
 
@@ -117,12 +118,16 @@ class TransparentProxyHelper(
             "  method: tproxy",
             "  tproxyPort: ${settings.tproxyPort}",
             "  enableIPv6: ${settings.enableIpV6}",
-            "  mode: ${if (settings.appsRoutingMode) "blacklist" else "whitelist"}",
+            "  mode: ${settings.appsRoutingMode.xrayHelperMode()}",
         )
 
-        val appsList = settings.appsRouting.split("\n")
-            .map { it.trim() }
-            .filter { it.trim().isNotBlank() }
+        val appsList = if (settings.appsRoutingMode == AppsRoutingMode.Disabled) {
+            emptyList()
+        } else {
+            settings.appsRouting.split("\n")
+                .map { it.trim() }
+                .filter { it.trim().isNotBlank() }
+        }
         if (appsList.isNotEmpty()) {
             yml.add("  pkgList:")
             appsList.forEach { yml.add("    - $it") }
@@ -148,5 +153,14 @@ class TransparentProxyHelper(
             settings.xrayHelperConfig(),
             yml.joinToString("\n")
         )
+    }
+
+    private fun AppsRoutingMode.xrayHelperMode(): String {
+        return when (this) {
+            AppsRoutingMode.Disabled,
+            AppsRoutingMode.Exclude,
+            -> "blacklist"
+            AppsRoutingMode.Include -> "whitelist"
+        }
     }
 }

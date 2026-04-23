@@ -60,7 +60,21 @@ class Settings(private val context: Context) {
         }
     }
 
+    enum class AppsRoutingMode(val value: String) {
+        Disabled("disabled"),
+        Exclude("exclude"),
+        Include("include");
+
+        companion object {
+            fun fromValue(value: String?): AppsRoutingMode {
+                return entries.firstOrNull { it.value == value?.trim()?.lowercase() } ?: Exclude
+            }
+        }
+    }
+
     companion object {
+        private const val LEGACY_APPS_ROUTING_MODE_KEY = "appsRoutingMode"
+        private const val APPS_ROUTING_MODE_KEY = "appsRoutingModeV2"
         private const val LEGACY_DEFAULT_USER_AGENT = "${BuildConfig.APPLICATION_ID}/${BuildConfig.VERSION_NAME}"
         private const val DEFAULT_USER_AGENT = "yaxc/${BuildConfig.VERSION_NAME}"
         private const val PREVIOUS_DEFAULT_PING_ADDRESS = "https://www.google.com"
@@ -116,14 +130,19 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getInt("xrayHelperVersionCode", 0)
         set(value) = sharedPreferences.edit { putInt("xrayHelperVersionCode", value) }
 
-    /**
-     * Apps Routing
-     * Mode: true -> exclude, false -> include
-     * Default: exclude
-     */
-    var appsRoutingMode: Boolean
-        get() = sharedPreferences.getBoolean("appsRoutingMode", true)
-        set(value) = sharedPreferences.edit { putBoolean("appsRoutingMode", value) }
+    /** Apps Routing */
+    var appsRoutingMode: AppsRoutingMode
+        get() {
+            val storedMode = sharedPreferences.getString(APPS_ROUTING_MODE_KEY, null)
+            if (storedMode != null) return AppsRoutingMode.fromValue(storedMode)
+
+            return if (sharedPreferences.getBoolean(LEGACY_APPS_ROUTING_MODE_KEY, true)) {
+                AppsRoutingMode.Exclude
+            } else {
+                AppsRoutingMode.Include
+            }
+        }
+        set(value) = sharedPreferences.edit { putString(APPS_ROUTING_MODE_KEY, value.value) }
     var appsRouting: String
         get() = sharedPreferences.getString("excludedApps", "")!!
         set(value) = sharedPreferences.edit { putString("excludedApps", value) }

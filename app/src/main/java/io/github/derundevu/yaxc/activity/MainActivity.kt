@@ -137,6 +137,7 @@ class MainActivity : AppCompatActivity() {
                     selectedSourceId = uiState.selectedSourceId,
                     isRunning = uiState.isRunning,
                     selectedSourceName = uiState.selectedSourceName,
+                    selectedSourceMetadata = uiState.selectedSourceMetadata,
                     selectedProfileName = uiState.selectedProfileName,
                     selectedServerLabel = uiState.selectedServerLabel,
                     socksAddress = uiState.socksAddress,

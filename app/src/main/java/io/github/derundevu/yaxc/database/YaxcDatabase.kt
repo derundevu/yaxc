@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Link::class,
         Profile::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(
@@ -113,6 +113,12 @@ abstract class YaxcDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE links ADD COLUMN subscription_metadata TEXT")
+            }
+        }
+
         @Volatile
         private var db: YaxcDatabase? = null
 
@@ -126,6 +132,7 @@ abstract class YaxcDatabase : RoomDatabase() {
                             MIGRATION_3_4,
                             MIGRATION_4_5,
                             MIGRATION_5_6,
+                            MIGRATION_6_7,
                         )
                         db = Room.databaseBuilder(
                             context.applicationContext,

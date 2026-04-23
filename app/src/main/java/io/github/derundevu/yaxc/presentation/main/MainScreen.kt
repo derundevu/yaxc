@@ -9,6 +9,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -45,7 +46,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -91,6 +91,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -124,6 +125,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -141,7 +143,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetAddress
-import kotlin.math.abs
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 private enum class MainRootTab {
     Connect,
@@ -157,6 +164,7 @@ fun MainScreen(
     selectedSourceId: Long,
     isRunning: Boolean,
     selectedSourceName: String,
+    selectedSourceMetadata: SubscriptionMetadata?,
     selectedProfileName: String,
     selectedServerLabel: String,
     socksAddress: String,
@@ -246,6 +254,7 @@ fun MainScreen(
                                     selectedSourceId = selectedSourceId,
                                     isRunning = isRunning,
                                     selectedSourceName = selectedSourceName,
+                                    selectedSourceMetadata = selectedSourceMetadata,
                                     selectedProfileName = selectedProfileName,
                                     selectedServerLabel = selectedServerLabel,
                                     socksAddress = socksAddress,
@@ -359,6 +368,71 @@ fun MainScreen(
     }
 }
 
+private fun reorderedSourceIds(
+    startOrder: List<Long>,
+    draggedSourceId: Long,
+    targetIndex: Int,
+): List<Long> {
+    if (startOrder.size < 2 || draggedSourceId !in startOrder) return startOrder
+    val remainingIds = startOrder.filter { it != draggedSourceId }
+    return remainingIds.toMutableList().apply {
+        add(targetIndex.coerceIn(0, remainingIds.size), draggedSourceId)
+    }
+}
+
+private fun draggedTargetIndex(
+    startOrder: List<Long>,
+    draggedSourceId: Long,
+    currentTargetIndex: Int,
+    draggedCenterY: Float,
+    sourceCenters: Map<Long, Float>,
+    hysteresisPx: Float,
+): Int {
+    val remainingIds = startOrder.filter { it != draggedSourceId }
+    if (remainingIds.isEmpty()) return 0
+    var targetIndex = currentTargetIndex.coerceIn(0, remainingIds.size)
+
+    while (targetIndex > 0) {
+        val previousCenter = sourceCenters[remainingIds[targetIndex - 1]] ?: break
+        if (draggedCenterY >= previousCenter - hysteresisPx) break
+        targetIndex -= 1
+    }
+    while (targetIndex < remainingIds.size) {
+        val nextCenter = sourceCenters[remainingIds[targetIndex]] ?: break
+        if (draggedCenterY <= nextCenter + hysteresisPx) break
+        targetIndex += 1
+    }
+
+    return targetIndex
+}
+
+private fun draggedSlotCenterY(
+    startOrder: List<Long>,
+    draggedSourceId: Long,
+    targetIndex: Int,
+    sourceCenters: Map<Long, Float>,
+    sourceHeights: Map<Long, Float>,
+    sourceSpacingPx: Float,
+): Float? {
+    val firstId = startOrder.firstOrNull() ?: return sourceCenters[draggedSourceId]
+    val firstCenter = sourceCenters[firstId] ?: return sourceCenters[draggedSourceId]
+    val firstHeight = sourceHeights[firstId] ?: return sourceCenters[draggedSourceId]
+    val finalOrder = reorderedSourceIds(
+        startOrder = startOrder,
+        draggedSourceId = draggedSourceId,
+        targetIndex = targetIndex,
+    )
+    var slotTop = firstCenter - firstHeight / 2f
+    finalOrder.forEach { sourceId ->
+        val sourceHeight = sourceHeights[sourceId] ?: return sourceCenters[draggedSourceId]
+        if (sourceId == draggedSourceId) {
+            return slotTop + sourceHeight / 2f
+        }
+        slotTop += sourceHeight + sourceSpacingPx
+    }
+    return sourceCenters[draggedSourceId]
+}
+
 @Composable
 private fun ConnectContent(
     tabs: List<Link>,
@@ -366,6 +440,7 @@ private fun ConnectContent(
     selectedSourceId: Long,
     isRunning: Boolean,
     selectedSourceName: String,
+    selectedSourceMetadata: SubscriptionMetadata?,
     selectedProfileName: String,
     selectedServerLabel: String,
     socksAddress: String,
@@ -389,19 +464,61 @@ private fun ConnectContent(
     val sourceSpacingPx = remember(density, spacing.md) {
         with(density) { spacing.md.toPx() }
     }
+    val dragHysteresisPx = remember(density) {
+        with(density) { 16.dp.toPx() }
+    }
     val sourceCenters = remember { mutableStateMapOf<Long, Float>() }
     val sourceHeights = remember { mutableStateMapOf<Long, Float>() }
+    val tabIds = remember(tabs) { tabs.map { it.id } }
+    val tabsById = remember(tabs) { tabs.associateBy { it.id } }
+    var localSourceOrder by remember { mutableStateOf<List<Long>?>(null) }
     var draggingSourceId by remember { mutableStateOf<Long?>(null) }
-    var draggingOffsetY by remember { mutableFloatStateOf(0f) }
-    var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(tabs) {
-        val knownIds = tabs.mapTo(mutableSetOf()) { it.id }
+    var draggedCenterY by remember { mutableFloatStateOf(0f) }
+    var draggedSlotCenterY by remember { mutableFloatStateOf(0f) }
+    var draggingTargetIndex by remember { mutableIntStateOf(-1) }
+    var dragStartOrder by remember { mutableStateOf(emptyList<Long>()) }
+    var dragStartCenters by remember { mutableStateOf(emptyMap<Long, Float>()) }
+    var dragStartHeights by remember { mutableStateOf(emptyMap<Long, Float>()) }
+    val orderedTabs = remember(tabs, tabsById, localSourceOrder) {
+        val sourceOrder = localSourceOrder ?: return@remember tabs
+        val usedIds = mutableSetOf<Long>()
+        buildList {
+            sourceOrder.forEach { sourceId ->
+                val tab = tabsById[sourceId]
+                if (tab != null && usedIds.add(sourceId)) add(tab)
+            }
+            tabs.forEach { tab ->
+                if (usedIds.add(tab.id)) add(tab)
+            }
+        }
+    }
+    val orderedTabIds = remember(orderedTabs) { orderedTabs.map { it.id } }
+    val currentTabIds = rememberUpdatedState(tabIds)
+    val currentOrderedTabIds = rememberUpdatedState(orderedTabIds)
+
+    LaunchedEffect(tabIds) {
+        val knownIds = tabIds.toSet()
         sourceCenters.keys.toList().filterNot(knownIds::contains).forEach(sourceCenters::remove)
         sourceHeights.keys.toList().filterNot(knownIds::contains).forEach(sourceHeights::remove)
         if (draggingSourceId != null && draggingSourceId !in knownIds) {
             draggingSourceId = null
-            draggingOffsetY = 0f
-            draggingTargetIndex = null
+            draggedCenterY = 0f
+            draggedSlotCenterY = 0f
+            draggingTargetIndex = -1
+            dragStartOrder = emptyList()
+            dragStartCenters = emptyMap()
+            dragStartHeights = emptyMap()
+            localSourceOrder = null
+        } else {
+            localSourceOrder = localSourceOrder?.let { sourceOrder ->
+                val normalizedOrder = sourceOrder.filter(knownIds::contains) +
+                    tabIds.filterNot(sourceOrder::contains)
+                when {
+                    normalizedOrder.isEmpty() -> null
+                    draggingSourceId == null && normalizedOrder == tabIds -> null
+                    else -> normalizedOrder
+                }
+            }
         }
     }
 
@@ -420,6 +537,7 @@ private fun ConnectContent(
             ConnectionTopCard(
                 isRunning = isRunning,
                 selectedSourceName = selectedSourceName,
+                selectedSourceMetadata = selectedSourceMetadata,
                 selectedProfileName = selectedProfileName,
                 selectedServerLabel = selectedServerLabel,
                 socksAddress = socksAddress,
@@ -439,77 +557,113 @@ private fun ConnectContent(
             )
         }
 
-        itemsIndexed(
-            items = tabs,
-            key = { _, item -> item.id },
-        ) { index, source ->
+        items(
+            items = orderedTabs,
+            key = { item -> item.id },
+        ) { source ->
             val isDragging = draggingSourceId == source.id
             val isExpanded = source.id == selectedTabId
-            val draggedIndex = draggingSourceId?.let { activeId ->
-                tabs.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
+            val dragOffsetTarget = if (isDragging) {
+                draggedCenterY - draggedSlotCenterY
+            } else {
+                0f
             }
-            val draggedHeight = draggingSourceId?.let { sourceHeights[it] } ?: 0f
-            val displacedOffsetTarget = when {
-                isDragging -> draggingOffsetY
-                draggedIndex == null || draggingTargetIndex == null -> 0f
-                draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
-                    -(draggedHeight + sourceSpacingPx)
-                draggedIndex > draggingTargetIndex!! && index in draggingTargetIndex!! until draggedIndex ->
-                    draggedHeight + sourceSpacingPx
-                else -> 0f
-            }
-            val displacedOffset by animateFloatAsState(
-                targetValue = displacedOffsetTarget,
-                animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
-                label = "main_source_displacement",
+            val dragOffset by animateFloatAsState(
+                targetValue = dragOffsetTarget,
+                animationSpec = if (isDragging) {
+                    snap()
+                } else {
+                    spring(dampingRatio = 0.86f, stiffness = 520f)
+                },
+                label = "main_source_drag_offset",
             )
-            val dragModifier = if (isExpanded) {
+            val placementModifier = if (isDragging) {
                 Modifier
             } else {
-                Modifier.pointerInput(source.id, tabs) {
+                Modifier.animateItem(
+                    placementSpec = spring(dampingRatio = 0.86f, stiffness = 520f),
+                )
+            }
+            val dragModifier = Modifier.pointerInput(source.id) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = {
+                        val sourceOrder = currentOrderedTabIds.value
+                        val centerSnapshot = sourceCenters.toMap()
+                        val heightSnapshot = sourceHeights.toMap()
+                        val initialTargetIndex = sourceOrder.indexOf(source.id)
+                            .takeIf { it >= 0 }
+                            ?: 0
+                        localSourceOrder = sourceOrder
                         draggingSourceId = source.id
-                        draggingOffsetY = 0f
-                        draggingTargetIndex = index
+                        draggingTargetIndex = initialTargetIndex
+                        dragStartOrder = sourceOrder
+                        dragStartCenters = centerSnapshot
+                        dragStartHeights = heightSnapshot
+                        draggedCenterY = centerSnapshot[source.id] ?: 0f
+                        draggedSlotCenterY = centerSnapshot[source.id] ?: 0f
                     },
                     onDragCancel = {
                         draggingSourceId = null
-                        draggingOffsetY = 0f
-                        draggingTargetIndex = null
+                        draggedCenterY = 0f
+                        draggedSlotCenterY = 0f
+                        draggingTargetIndex = -1
+                        dragStartOrder = emptyList()
+                        dragStartCenters = emptyMap()
+                        dragStartHeights = emptyMap()
+                        localSourceOrder = null
                     },
                     onDragEnd = {
                         val sourceId = draggingSourceId
-                        val fromIndex = sourceId?.let { activeId ->
-                            tabs.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
-                        }
-                        val toIndex = draggingTargetIndex
-                        if (fromIndex != null && toIndex != null && fromIndex != toIndex) {
-                            val orderedIds = tabs.map { it.id }.toMutableList().apply {
-                                add(toIndex, removeAt(fromIndex))
-                            }
+                        val orderedIds = localSourceOrder ?: currentOrderedTabIds.value
+                        val originalIds = currentTabIds.value
+                        if (sourceId != null && orderedIds != originalIds) {
                             onAction(MainAction.CommitSourceOrder(orderedIds))
+                        } else {
+                            localSourceOrder = null
                         }
                         draggingSourceId = null
-                        draggingOffsetY = 0f
-                        draggingTargetIndex = null
+                        draggedCenterY = 0f
+                        draggedSlotCenterY = 0f
+                        draggingTargetIndex = -1
+                        dragStartOrder = emptyList()
+                        dragStartCenters = emptyMap()
+                        dragStartHeights = emptyMap()
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
-                        draggingOffsetY += dragAmount.y
-                        val sourceCenter = sourceCenters[source.id] ?: return@detectDragGesturesAfterLongPress
-                        val finalCenter = sourceCenter + draggingOffsetY
-                        val targetId = tabs
-                            .map { it.id }
-                            .minByOrNull { candidateId ->
-                                abs((sourceCenters[candidateId] ?: sourceCenter) - finalCenter)
-                            }
-                        draggingTargetIndex = tabs.indexOfFirst { it.id == targetId }
-                            .takeIf { it >= 0 }
-                            ?: index
+                        val sourceId = draggingSourceId ?: source.id
+                        val nextCenterY = draggedCenterY + dragAmount.y
+                        draggedCenterY = nextCenterY
+                        val startOrder = dragStartOrder.ifEmpty { currentOrderedTabIds.value }
+                        val startCenters = dragStartCenters.ifEmpty { sourceCenters.toMap() }
+                        val startHeights = dragStartHeights.ifEmpty { sourceHeights.toMap() }
+                        val nextTargetIndex = draggedTargetIndex(
+                            startOrder = startOrder,
+                            draggedSourceId = sourceId,
+                            draggedCenterY = nextCenterY,
+                            currentTargetIndex = draggingTargetIndex,
+                            sourceCenters = startCenters,
+                            hysteresisPx = dragHysteresisPx,
+                        )
+                        if (nextTargetIndex != draggingTargetIndex) {
+                            val nextOrder = reorderedSourceIds(
+                                startOrder = startOrder,
+                                draggedSourceId = sourceId,
+                                targetIndex = nextTargetIndex,
+                            )
+                            draggedSlotCenterY = draggedSlotCenterY(
+                                startOrder = startOrder,
+                                draggedSourceId = sourceId,
+                                targetIndex = nextTargetIndex,
+                                sourceCenters = startCenters,
+                                sourceHeights = startHeights,
+                                sourceSpacingPx = sourceSpacingPx,
+                            ) ?: draggedSlotCenterY
+                            draggingTargetIndex = nextTargetIndex
+                            localSourceOrder = nextOrder
+                        }
                     },
                 )
-            }
             }
             SourceGroupCard(
                 source = source,
@@ -527,8 +681,9 @@ private fun ConnectContent(
                 onDeleteProfile = { onAction(MainAction.RequestDeleteProfile(it.profile)) },
                 dragModifier = dragModifier,
                 modifier = Modifier
+                    .then(placementModifier)
                     .graphicsLayer {
-                        translationY = displacedOffset
+                        translationY = dragOffset
                         scaleX = if (isDragging) 1.01f else 1f
                         scaleY = if (isDragging) 1.01f else 1f
                     }
@@ -748,6 +903,7 @@ private fun SettingsContent(
 private fun ConnectionTopCard(
     isRunning: Boolean,
     selectedSourceName: String,
+    selectedSourceMetadata: SubscriptionMetadata?,
     selectedProfileName: String,
     selectedServerLabel: String,
     socksAddress: String,
@@ -766,6 +922,7 @@ private fun ConnectionTopCard(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     var showConnectionInfo by remember { mutableStateOf(false) }
+    val subscriptionSummary = subscriptionCardSummary(selectedSourceMetadata)
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.992f else 1f,
         animationSpec = spring(dampingRatio = 0.82f, stiffness = 720f),
@@ -780,7 +937,7 @@ private fun ConnectionTopCard(
             scaleY = pressScale
         }.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onPingCurrent),
         shape = MaterialTheme.shapes.extraLarge,
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
         accentColor = if (isRunning) {
             MaterialTheme.colorScheme.primary
         } else {
@@ -791,7 +948,7 @@ private fun ConnectionTopCard(
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -831,14 +988,27 @@ private fun ConnectionTopCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = YaxcTheme.extendedColors.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier.weight(1f),
-                )
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (!subscriptionSummary.isNullOrBlank()) {
+                        Text(
+                            text = subscriptionSummary,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = YaxcTheme.extendedColors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 PingStateBadge(pingState = pingState)
             }
         }
@@ -846,6 +1016,7 @@ private fun ConnectionTopCard(
 
     if (showConnectionInfo) {
         ConnectionInfoDialog(
+            selectedSourceMetadata = selectedSourceMetadata,
             selectedServerLabel = selectedServerLabel,
             socksAddress = socksAddress,
             socksPort = socksPort,
@@ -941,6 +1112,7 @@ private fun ConnectionInfoChip(
 
 @Composable
 private fun ConnectionInfoDialog(
+    selectedSourceMetadata: SubscriptionMetadata?,
     selectedServerLabel: String,
     socksAddress: String,
     socksPort: String,
@@ -952,6 +1124,34 @@ private fun ConnectionInfoDialog(
     var showPassword by remember { mutableStateOf(false) }
     val noValue = textResource(R.string.noValue)
     val resolveFailed = textResource(R.string.mainConnectionResolveFailed)
+    val trafficUsedValue = selectedSourceMetadata
+        ?.usedBytes
+        ?.let(::formatBytesCompact)
+        ?: noValue
+    val trafficLimitValue = selectedSourceMetadata
+        ?.totalBytes
+        ?.let { totalBytes ->
+            if (totalBytes == 0L) {
+                textResource(R.string.mainSubscriptionUnlimited)
+            } else {
+                formatBytesCompact(totalBytes)
+            }
+        }
+        ?: noValue
+    val expiresAtValue = selectedSourceMetadata
+        ?.expireAtEpochSeconds
+        ?.takeIf { it > 0L }
+        ?.let(::formatExpiryDateTime)
+        ?: noValue
+    val daysLeftValue = selectedSourceMetadata
+        ?.expireAtEpochSeconds
+        ?.takeIf { it > 0L }
+        ?.let { formatDaysLeftFull(it) }
+        ?: noValue
+    val autoUpdateValue = selectedSourceMetadata
+        ?.updateIntervalHours
+        ?.let { formatAutoUpdateFull(it) }
+        ?: noValue
     val resolvedServerValue by produceState(
         initialValue = noValue,
         selectedServerLabel,
@@ -1030,6 +1230,40 @@ private fun ConnectionInfoDialog(
                     label = textResource(R.string.mainExitAddress),
                     value = exitIpValue,
                 )
+                if (selectedSourceMetadata != null) {
+                    ConnectionInfoRow(
+                        label = textResource(R.string.mainSubscriptionTrafficUsed),
+                        value = trafficUsedValue,
+                    )
+                    ConnectionInfoRow(
+                        label = textResource(R.string.mainSubscriptionTrafficLimit),
+                        value = trafficLimitValue,
+                    )
+                    ConnectionInfoRow(
+                        label = textResource(R.string.mainSubscriptionDaysLeft),
+                        value = daysLeftValue,
+                    )
+                    ConnectionInfoRow(
+                        label = textResource(R.string.mainSubscriptionExpiresAt),
+                        value = expiresAtValue,
+                    )
+                    ConnectionInfoRow(
+                        label = textResource(R.string.mainSubscriptionAutoUpdate),
+                        value = autoUpdateValue,
+                    )
+                    selectedSourceMetadata.supportUrl?.takeIf { it.isNotBlank() }?.let {
+                        ConnectionInfoRow(
+                            label = textResource(R.string.mainSubscriptionSupportUrl),
+                            value = it,
+                        )
+                    }
+                    selectedSourceMetadata.profileWebPageUrl?.takeIf { it.isNotBlank() }?.let {
+                        ConnectionInfoRow(
+                            label = textResource(R.string.mainSubscriptionWebPage),
+                            value = it,
+                        )
+                    }
+                }
                 ConnectionInfoRow(
                     label = textResource(R.string.socksAddress),
                     value = socksAddress.ifBlank { textResource(R.string.noValue) },
@@ -1104,6 +1338,109 @@ private fun ConnectionInfoRow(
             trailing?.invoke()
         }
     }
+}
+
+@Composable
+private fun subscriptionCardSummary(metadata: SubscriptionMetadata?): String? {
+    if (metadata == null) return null
+    val parts = buildList {
+        formatTrafficSummaryShort(metadata)?.let(::add)
+        formatDaysLeftShort(metadata.expireAtEpochSeconds)?.let(::add)
+        metadata.updateIntervalHours?.let { interval ->
+            add(formatAutoUpdateShort(interval))
+        }
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" • ")
+}
+
+@Composable
+private fun formatTrafficSummaryShort(metadata: SubscriptionMetadata): String? {
+    val usedBytes = metadata.usedBytes ?: return null
+    val totalBytes = metadata.totalBytes
+    return when {
+        totalBytes == 0L && usedBytes == 0L -> stringResource(R.string.mainSubscriptionUnlimited)
+        totalBytes == null -> stringResource(
+            R.string.mainSubscriptionUsedShort,
+            formatBytesCompact(usedBytes),
+        )
+        totalBytes == 0L -> stringResource(
+            R.string.mainSubscriptionUsedShort,
+            formatBytesCompact(usedBytes),
+        )
+        else -> stringResource(
+            R.string.mainSubscriptionUsageShort,
+            formatBytesCompact(usedBytes),
+            formatBytesCompact(totalBytes),
+        )
+    }
+}
+
+@Composable
+private fun formatDaysLeftShort(expireAtEpochSeconds: Long?): String? {
+    val expireAt = expireAtEpochSeconds?.takeIf { it > 0L } ?: return null
+    val zone = ZoneId.systemDefault()
+    val now = Instant.now()
+    if (expireAt <= now.epochSecond) {
+        return stringResource(R.string.mainSubscriptionExpired)
+    }
+    val expireDate = Instant.ofEpochSecond(expireAt).atZone(zone).toLocalDate()
+    val daysLeft = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(zone), expireDate)
+    return when {
+        daysLeft <= 0L -> stringResource(R.string.mainSubscriptionToday)
+        else -> stringResource(R.string.mainSubscriptionDaysShort, daysLeft)
+    }
+}
+
+@Composable
+private fun formatDaysLeftFull(expireAtEpochSeconds: Long): String {
+    val zone = ZoneId.systemDefault()
+    val now = Instant.now()
+    if (expireAtEpochSeconds <= now.epochSecond) {
+        return stringResource(R.string.mainSubscriptionExpired)
+    }
+    val expireDate = Instant.ofEpochSecond(expireAtEpochSeconds).atZone(zone).toLocalDate()
+    val daysLeft = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(zone), expireDate)
+    return when {
+        daysLeft <= 0L -> stringResource(R.string.mainSubscriptionToday)
+        else -> stringResource(R.string.mainSubscriptionDaysFull, daysLeft)
+    }
+}
+
+@Composable
+private fun formatAutoUpdateShort(hours: Int): String {
+    return stringResource(R.string.mainSubscriptionAutoUpdateShort, hours)
+}
+
+@Composable
+private fun formatAutoUpdateFull(hours: Int): String {
+    return stringResource(R.string.mainSubscriptionAutoUpdateFull, hours)
+}
+
+private fun formatExpiryDateTime(expireAtEpochSeconds: Long): String {
+    return Instant.ofEpochSecond(expireAtEpochSeconds)
+        .atZone(ZoneId.systemDefault())
+        .format(
+            DateTimeFormatter
+                .ofLocalizedDateTime(FormatStyle.MEDIUM)
+                .withLocale(Locale.getDefault())
+        )
+}
+
+private fun formatBytesCompact(bytes: Long): String {
+    val units = arrayOf("B", "KB", "MB", "GB", "TB", "PB")
+    val locale = Locale.getDefault()
+    var value = bytes.toDouble().coerceAtLeast(0.0)
+    var unitIndex = 0
+    while (value >= 1024.0 && unitIndex < units.lastIndex) {
+        value /= 1024.0
+        unitIndex += 1
+    }
+    val formatted = when {
+        value >= 100 || unitIndex == 0 -> value.toLong().toString()
+        value >= 10 -> String.format(locale, "%.1f", value)
+        else -> String.format(locale, "%.2f", value)
+    }
+    return "$formatted ${units[unitIndex]}"
 }
 
 @Composable

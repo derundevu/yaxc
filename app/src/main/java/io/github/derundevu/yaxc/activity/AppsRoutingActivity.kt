@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.Settings.AppsRoutingMode
 import io.github.derundevu.yaxc.dto.AppList
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.routing.AppsRoutingScreen
@@ -26,7 +27,7 @@ class AppsRoutingActivity : AppCompatActivity() {
 
     private var apps by mutableStateOf<List<AppList>>(emptyList())
     private var selectedPackages by mutableStateOf<Set<String>>(emptySet())
-    private var appsRoutingMode by mutableStateOf(true)
+    private var appsRoutingMode by mutableStateOf(AppsRoutingMode.Exclude)
     private var isLoading by mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {

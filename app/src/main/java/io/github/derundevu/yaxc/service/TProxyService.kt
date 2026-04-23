@@ -25,6 +25,7 @@ import androidx.core.app.NotificationCompat
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.Settings.AppsRoutingMode
 import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.activity.MainActivity
 import io.github.derundevu.yaxc.database.Config
@@ -392,14 +393,26 @@ class TProxyService : VpnService() {
             .filter { it != applicationContext.packageName }
             .toSet()
 
-        if (settings.appsRoutingMode) {
-            tun.addDisallowedApplication(applicationContext.packageName)
+        when (settings.appsRoutingMode) {
+            AppsRoutingMode.Disabled -> {
+                tun.addDisallowedApplication(applicationContext.packageName)
+                return
+            }
+
+            AppsRoutingMode.Exclude -> {
+                tun.addDisallowedApplication(applicationContext.packageName)
+            }
+
+            AppsRoutingMode.Include -> Unit
         }
 
         selectedPackages.forEach { packageName ->
             val result = runCatching {
-                if (settings.appsRoutingMode) tun.addDisallowedApplication(packageName)
-                else tun.addAllowedApplication(packageName)
+                when (settings.appsRoutingMode) {
+                    AppsRoutingMode.Disabled -> Unit
+                    AppsRoutingMode.Exclude -> tun.addDisallowedApplication(packageName)
+                    AppsRoutingMode.Include -> tun.addAllowedApplication(packageName)
+                }
             }
             result.exceptionOrNull()?.let { error ->
                 Log.w("TProxyService", "Skip apps routing package: $packageName", error)
@@ -494,10 +507,12 @@ class TProxyService : VpnService() {
             .filter { it != applicationContext.packageName }
             .toSet()
 
-        val isAllowed = if (settings.appsRoutingMode) {
-            packages.none { it == applicationContext.packageName || it in allowedPackages }
-        } else {
-            packages.any { it in allowedPackages }
+        val isAllowed = when (settings.appsRoutingMode) {
+            AppsRoutingMode.Disabled -> true
+            AppsRoutingMode.Exclude -> packages.none {
+                it == applicationContext.packageName || it in allowedPackages
+            }
+            AppsRoutingMode.Include -> packages.any { it in allowedPackages }
         }
 
         synchronized(tunOwnerPolicyCache) {

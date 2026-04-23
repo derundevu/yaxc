@@ -7,6 +7,7 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
@@ -90,8 +91,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selected == 0L || tabs.any { it.id == selected }
         } ?: 0L
         val cardSourceId = if (selectedSourceId != 0L) selectedSourceId else resolvedTabId
-        val selectedSourceName = tabs.firstOrNull { it.id == cardSourceId }?.name
+        val selectedSource = tabs.firstOrNull { it.id == cardSourceId }
+        val selectedSourceName = selectedSource?.name
             ?: application.getString(R.string.mainNoSourceSelected)
+        val selectedSourceMetadata = SubscriptionMetadata.fromJsonString(
+            selectedSource?.subscriptionMetadata
+        )
         val filteredProfiles = profiles
             .filter { resolvedTabId == 0L || it.link == resolvedTabId }
             .map { profile ->
@@ -119,6 +124,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedTabId = resolvedTabId,
             selectedSourceId = cardSourceId,
             selectedSourceName = selectedSourceName,
+            selectedSourceMetadata = selectedSourceMetadata,
             filteredProfiles = filteredProfiles,
             selectedProfileId = selection.selectedProfileId,
             selectedProfileName = selectedProfileName,

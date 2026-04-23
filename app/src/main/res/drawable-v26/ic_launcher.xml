@@ -4,9 +4,9 @@
   <foreground>
     <inset
         android:drawable="@drawable/yaxc_logo"
-        android:insetBottom="16dp"
-        android:insetLeft="16dp"
-        android:insetRight="16dp"
-        android:insetTop="16dp" />
+        android:insetBottom="8dp"
+        android:insetLeft="8dp"
+        android:insetRight="8dp"
+        android:insetTop="8dp" />
   </foreground>
 </adaptive-icon>

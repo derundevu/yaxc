@@ -53,6 +53,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.Settings.AppsRoutingMode
 import io.github.derundevu.yaxc.dto.AppList
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
@@ -63,9 +64,9 @@ fun AppsRoutingScreen(
     apps: List<AppList>,
     isLoading: Boolean,
     selectedPackages: Set<String>,
-    appsRoutingMode: Boolean,
+    appsRoutingMode: AppsRoutingMode,
     onBack: () -> Unit,
-    onModeChange: (Boolean) -> Unit,
+    onModeChange: (AppsRoutingMode) -> Unit,
     onTogglePackage: (String) -> Unit,
     onSave: () -> Unit,
 ) {
@@ -154,25 +155,18 @@ fun AppsRoutingScreen(
                     }
                 }
 
-                TabRow(selectedTabIndex = if (appsRoutingMode) 0 else 1) {
-                    Tab(
-                        selected = appsRoutingMode,
-                        onClick = { onModeChange(true) },
-                        text = { Text(text = textResource(R.string.appsRoutingModeExcludeShort)) },
-                    )
-                    Tab(
-                        selected = !appsRoutingMode,
-                        onClick = { onModeChange(false) },
-                        text = { Text(text = textResource(R.string.appsRoutingModeIncludeShort)) },
-                    )
+                TabRow(selectedTabIndex = appsRoutingMode.tabIndex()) {
+                    AppsRoutingMode.entries.forEach { mode ->
+                        Tab(
+                            selected = appsRoutingMode == mode,
+                            onClick = { onModeChange(mode) },
+                            text = { Text(text = textResource(mode.shortTitleRes())) },
+                        )
+                    }
                 }
 
                 Text(
-                    text = if (appsRoutingMode) {
-                        textResource(R.string.appsRoutingExcludeMode)
-                    } else {
-                        textResource(R.string.appsRoutingIncludeMode)
-                    },
+                    text = textResource(appsRoutingMode.descriptionRes()),
                     style = MaterialTheme.typography.bodyMedium,
                     color = YaxcTheme.extendedColors.textMuted,
                     modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
@@ -335,4 +329,22 @@ private fun textResource(id: Int): String {
 @Composable
 private fun textResource(id: Int, arg: Int): String {
     return androidx.compose.ui.res.stringResource(id, arg)
+}
+
+private fun AppsRoutingMode.tabIndex(): Int = when (this) {
+    AppsRoutingMode.Disabled -> 0
+    AppsRoutingMode.Exclude -> 1
+    AppsRoutingMode.Include -> 2
+}
+
+private fun AppsRoutingMode.shortTitleRes(): Int = when (this) {
+    AppsRoutingMode.Disabled -> R.string.appsRoutingModeDisabledShort
+    AppsRoutingMode.Exclude -> R.string.appsRoutingModeExcludeShort
+    AppsRoutingMode.Include -> R.string.appsRoutingModeIncludeShort
+}
+
+private fun AppsRoutingMode.descriptionRes(): Int = when (this) {
+    AppsRoutingMode.Disabled -> R.string.appsRoutingDisabledMode
+    AppsRoutingMode.Exclude -> R.string.appsRoutingExcludeMode
+    AppsRoutingMode.Include -> R.string.appsRoutingIncludeMode
 }
