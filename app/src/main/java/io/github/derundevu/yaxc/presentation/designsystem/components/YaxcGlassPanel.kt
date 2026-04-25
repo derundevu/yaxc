@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -20,20 +19,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 
 @Composable
 fun YaxcGlassPanel(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(28.dp),
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+    shape: Shape? = null,
+    contentPadding: PaddingValues? = null,
     accentColor: Color = MaterialTheme.colorScheme.primary,
     accentAlpha: Float = 0.10f,
     borderColor: Color = Color.Unspecified,
     shadowElevation: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val resolvedShape = shape ?: YaxcTheme.shapes.extraLarge
+    val resolvedContentPadding = contentPadding ?: YaxcTheme.paddings.card
     val isLightTheme = yaxcIsLightTheme()
     val resolvedBorderColor = if (borderColor == Color.Unspecified) {
         yaxcSoftStroke(darkAlpha = 0.12f, lightAlpha = 0.72f)
@@ -67,7 +69,7 @@ fun YaxcGlassPanel(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = shape,
+        shape = resolvedShape,
         color = Color.Transparent,
         tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
@@ -77,7 +79,7 @@ fun YaxcGlassPanel(
             modifier = Modifier
                 .background(
                     brush = Brush.verticalGradient(baseGradient),
-                    shape = shape,
+                    shape = resolvedShape,
                 )
         ) {
             Box(
@@ -91,7 +93,7 @@ fun YaxcGlassPanel(
                             ),
                             radius = 820f,
                         ),
-                        shape = shape,
+                        shape = resolvedShape,
                     )
             )
             Box(
@@ -105,7 +107,7 @@ fun YaxcGlassPanel(
                             ),
                             radius = 900f,
                         ),
-                        shape = shape,
+                        shape = resolvedShape,
                     )
             )
             Box(
@@ -118,13 +120,13 @@ fun YaxcGlassPanel(
                                 Color.Transparent,
                             )
                         ),
-                        shape = shape,
+                        shape = resolvedShape,
                     )
             )
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(contentPadding),
+                    .padding(resolvedContentPadding),
                 content = content,
             )
         }

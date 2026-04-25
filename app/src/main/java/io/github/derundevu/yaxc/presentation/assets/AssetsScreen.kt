@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 
 @Immutable
@@ -147,17 +149,12 @@ private fun AssetRow(
     onDelete: () -> Unit,
     primaryIcon: ImageVector = Icons.Outlined.Download,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
-    ) {
+    val spacing = YaxcTheme.spacing
+
+    AssetsCard {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(spacing.sm),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -165,7 +162,7 @@ private fun AssetRow(
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(spacing.xs),
                 ) {
                     Text(
                         text = state.title,
@@ -196,7 +193,7 @@ private fun AssetRow(
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.xs),
                 ) {
                     ActionIcon(
                         icon = primaryIcon,
@@ -237,17 +234,12 @@ private fun GeoResourcesProviderSelector(
     onCustomGeoSiteUrlChange: (String) -> Unit,
     onApplyCustomGeoUrls: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
-    ) {
+    val spacing = YaxcTheme.spacing
+
+    AssetsCard {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(spacing.sm),
         ) {
             Text(
                 text = textResource(R.string.assetsGeoProviderTitle),
@@ -261,7 +253,7 @@ private fun GeoResourcesProviderSelector(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacing.sm),
             ) {
                 Box(modifier = Modifier.weight(1f)) {
                     GeoProviderButton(
@@ -309,7 +301,7 @@ private fun CustomGeoUrlsEditor(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.sm),
     ) {
         Text(
             text = textResource(R.string.assetsGeoCustomLead),
@@ -337,6 +329,18 @@ private fun CustomGeoUrlsEditor(
             Text(text = textResource(R.string.assetsApplyCustomGeoUrls))
         }
     }
+}
+
+@Composable
+private fun AssetsCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    YaxcCard(
+        modifier = modifier,
+        contentPadding = YaxcTheme.paddings.section,
+        content = content,
+    )
 }
 
 @Composable

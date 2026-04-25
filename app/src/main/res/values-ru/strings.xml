@@ -69,6 +69,7 @@
     <string name="noLinksYetHint">Создайте новый источник или обновите существующие подписки отсюда.</string>
     <string name="logs">Логи</string>
     <string name="logsScreenLead">Живой вывод Xray, VPN и вспомогательных процессов.</string>
+    <string name="preferences">Параметры</string>
     <string name="noLogsYet">Логи появятся здесь, когда runtime начнет что-то писать.</string>
     <string name="logsCopied">Логи скопированы</string>
     <string name="appsRouting">Маршрутизация приложений</string>

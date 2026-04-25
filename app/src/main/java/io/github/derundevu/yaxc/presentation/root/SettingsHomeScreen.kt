@@ -104,18 +104,18 @@ fun SettingsHomeScreen(
                 }
                 item {
                     RootSectionCard(
-                        icon = Icons.Outlined.Terminal,
-                        title = textResource(R.string.logs),
-                        description = textResource(R.string.logsScreenLead),
-                        onClick = onOpenLogs,
+                        icon = Icons.Outlined.Settings,
+                        title = textResource(R.string.preferences),
+                        description = textResource(R.string.settingsScreenLead),
+                        onClick = onOpenSettings,
                     )
                 }
                 item {
                     RootSectionCard(
-                        icon = Icons.Outlined.Settings,
-                        title = textResource(R.string.settings),
-                        description = textResource(R.string.settingsScreenLead),
-                        onClick = onOpenSettings,
+                        icon = Icons.Outlined.Terminal,
+                        title = textResource(R.string.logs),
+                        description = textResource(R.string.logsScreenLead),
+                        onClick = onOpenLogs,
                     )
                 }
                 item {

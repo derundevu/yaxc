@@ -69,6 +69,7 @@
     <string name="noLinksYetHint">Create a new source or refresh existing subscriptions from here.</string>
     <string name="logs">Logs</string>
     <string name="logsScreenLead">Live runtime output for Xray, VPN and helper processes.</string>
+    <string name="preferences">Preferences</string>
     <string name="noLogsYet">Logs will appear here once the runtime starts writing output.</string>
     <string name="logsCopied">Logs copied</string>
     <string name="appsRouting">Apps Routing</string>

@@ -1,7 +1,11 @@
 package io.github.derundevu.yaxc.presentation.designsystem
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Typography
@@ -17,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +66,62 @@ data class YaxcSpacing(
     val xxl: androidx.compose.ui.unit.Dp,
 )
 
+@Immutable
+data class YaxcShapes(
+    val small: Shape,
+    val medium: Shape,
+    val large: Shape,
+    val extraLarge: Shape,
+    val pill: Shape,
+    val circle: Shape,
+)
+
+@Immutable
+data class YaxcContentPaddings(
+    val dense: PaddingValues,
+    val regular: PaddingValues,
+    val section: PaddingValues,
+    val card: PaddingValues,
+    val panel: PaddingValues,
+    val none: PaddingValues,
+)
+
+object YaxcShapeDefaults {
+    val extraSmall = RoundedCornerShape(8.dp)
+    val small = RoundedCornerShape(12.dp)
+    val medium = RoundedCornerShape(16.dp)
+    val large = RoundedCornerShape(18.dp)
+    val extraLarge = RoundedCornerShape(22.dp)
+    val pill = RoundedCornerShape(percent = 50)
+    val circle: Shape = CircleShape
+}
+
+private val DefaultYaxcShapes = YaxcShapes(
+    small = YaxcShapeDefaults.small,
+    medium = YaxcShapeDefaults.medium,
+    large = YaxcShapeDefaults.large,
+    extraLarge = YaxcShapeDefaults.extraLarge,
+    pill = YaxcShapeDefaults.pill,
+    circle = YaxcShapeDefaults.circle,
+)
+
+private val DefaultMaterialShapes = Shapes(
+    extraSmall = YaxcShapeDefaults.extraSmall,
+    small = YaxcShapeDefaults.small,
+    medium = YaxcShapeDefaults.medium,
+    large = YaxcShapeDefaults.large,
+    extraLarge = YaxcShapeDefaults.extraLarge,
+)
+
+private val DefaultYaxcContentPaddings = YaxcContentPaddings(
+    dense = PaddingValues(8.dp),
+    regular = PaddingValues(10.dp),
+    section = PaddingValues(12.dp),
+    card = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+    panel = PaddingValues(16.dp),
+    none = PaddingValues(0.dp),
+)
+
 private val LocalYaxcExtendedColors = staticCompositionLocalOf {
     midnightBlueExtendedColors()
 }
@@ -76,6 +137,14 @@ private val LocalYaxcSpacing = staticCompositionLocalOf {
     )
 }
 
+private val LocalYaxcShapes = staticCompositionLocalOf {
+    DefaultYaxcShapes
+}
+
+private val LocalYaxcContentPaddings = staticCompositionLocalOf {
+    DefaultYaxcContentPaddings
+}
+
 object YaxcTheme {
     val extendedColors: YaxcExtendedColors
         @Composable
@@ -86,6 +155,16 @@ object YaxcTheme {
         @Composable
         @ReadOnlyComposable
         get() = LocalYaxcSpacing.current
+
+    val shapes: YaxcShapes
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalYaxcShapes.current
+
+    val paddings: YaxcContentPaddings
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalYaxcContentPaddings.current
 
     val backgroundBrush: Brush
         @Composable
@@ -164,11 +243,14 @@ fun YaxcTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        shapes = DefaultMaterialShapes,
         typography = yaxcTypography(),
     ) {
         androidx.compose.runtime.CompositionLocalProvider(
             LocalYaxcExtendedColors provides extendedColors,
             LocalYaxcSpacing provides spacing,
+            LocalYaxcShapes provides DefaultYaxcShapes,
+            LocalYaxcContentPaddings provides DefaultYaxcContentPaddings,
             content = content,
         )
     }

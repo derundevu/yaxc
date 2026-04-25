@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -35,7 +34,7 @@ fun YaxcSettingsRow(
     trailing: @Composable (() -> Unit)? = null,
 ) {
     val clickableModifier = if (enabled && onClick != null) {
-        modifier.yaxcClickable(shape = RoundedCornerShape(18.dp), onClick = onClick)
+        modifier.yaxcClickable(shape = MaterialTheme.shapes.medium, onClick = onClick)
     } else {
         modifier
     }
@@ -43,8 +42,8 @@ fun YaxcSettingsRow(
     Row(
         modifier = clickableModifier
             .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .padding(vertical = 7.dp),
+            .padding(vertical = YaxcTheme.spacing.xs)
+            .heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -54,7 +53,7 @@ fun YaxcSettingsRow(
                     .size(40.dp)
                     .background(
                         color = YaxcTheme.extendedColors.accentSoft,
-                        shape = RoundedCornerShape(14.dp),
+                        shape = MaterialTheme.shapes.small,
                     ),
                 contentAlignment = Alignment.Center,
             ) {

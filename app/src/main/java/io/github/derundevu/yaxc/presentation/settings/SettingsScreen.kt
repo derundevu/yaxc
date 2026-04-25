@@ -24,8 +24,8 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -383,7 +383,7 @@ fun SettingsScreen(
     YaxcScaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = textResource(R.string.settings)) },
+                title = { Text(text = textResource(R.string.preferences)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -527,7 +527,7 @@ private fun BasicSettingsTab(
 
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
         SettingsSection(title = textResource(R.string.settingsLanguageSection))
-        YaxcCard {
+        SettingsCard {
             YaxcSettingsRow(
                 title = textResource(R.string.settingsLanguageTitle),
                 subtitle = textResource(R.string.settingsLanguageLead),
@@ -561,7 +561,7 @@ private fun BasicSettingsTab(
         }
 
         SettingsSection(title = textResource(R.string.settingsSectionConnection))
-        YaxcCard {
+        SettingsCard {
             SettingsTextField(
                 label = textResource(R.string.socksAddress),
                 value = formState.socksAddress,
@@ -631,7 +631,7 @@ private fun BasicSettingsTab(
         }
 
         SettingsSection(title = textResource(R.string.settingsSectionResources))
-        YaxcCard {
+        SettingsCard {
             SettingsTextField(
                 label = textResource(R.string.settingsUserAgent),
                 value = formState.userAgent,
@@ -676,7 +676,7 @@ private fun BasicSettingsTab(
         }
 
         SettingsSection(title = textResource(R.string.settingsSectionBehavior))
-        YaxcCard {
+        SettingsCard {
             YaxcSwitchRow(
                 title = textResource(R.string.bypassLan),
                 checked = formState.bypassLan,
@@ -747,7 +747,7 @@ private fun PingTypeOption(
             text = title,
             style = MaterialTheme.typography.bodyLarge,
             color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.padding(YaxcTheme.paddings.section),
         )
     }
 }
@@ -761,7 +761,7 @@ private fun AdvancedSettingsTab(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
         SettingsSection(title = textResource(R.string.settingsSectionDns))
-        YaxcCard {
+        SettingsCard {
             SettingsTextField(
                 label = textResource(R.string.primaryDns),
                 value = formState.primaryDns,
@@ -788,7 +788,7 @@ private fun AdvancedSettingsTab(
         }
 
         SettingsSection(title = textResource(R.string.settingsSectionTunnel))
-        YaxcCard {
+        SettingsCard {
             SettingsTextField(
                 label = textResource(R.string.tunName),
                 value = formState.tunName,
@@ -845,7 +845,7 @@ private fun AdvancedSettingsTab(
         }
 
         SettingsSection(title = textResource(R.string.settingsSectionInterfaces))
-        YaxcCard {
+        SettingsCard {
             SettingsTextField(
                 label = textResource(R.string.hotspotInterface),
                 value = formState.hotspotInterface,
@@ -863,7 +863,7 @@ private fun AdvancedSettingsTab(
             title = textResource(R.string.settingsSectionTransparentProxy),
             description = textResource(R.string.settingsSectionTransparentProxyLead),
         )
-        YaxcCard {
+        SettingsCard {
             SettingsTextField(
                 label = textResource(R.string.tproxyAddress),
                 value = formState.tproxyAddress,
@@ -926,7 +926,7 @@ private fun AdvancedSettingsTab(
         }
 
         SettingsSection(title = textResource(R.string.settingsSectionRoutes))
-        YaxcCard {
+        SettingsCard {
             YaxcSettingsRow(
                 title = textResource(R.string.tunRoutes),
                 subtitle = if (tunRoutes.isEmpty()) {
@@ -943,12 +943,24 @@ private fun AdvancedSettingsTab(
 }
 
 @Composable
+private fun SettingsCard(
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    YaxcCard(
+        modifier = modifier,
+        contentPadding = YaxcTheme.paddings.section,
+        content = content,
+    )
+}
+
+@Composable
 private fun SettingsSection(
     title: String,
     description: String? = null,
 ) {
     Column(
-        modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+        modifier = Modifier.padding(horizontal = YaxcTheme.spacing.xs),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
@@ -980,8 +992,8 @@ private fun SettingsTextField(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(vertical = YaxcTheme.spacing.xs),
+        verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.xs),
     ) {
         OutlinedTextField(
             value = value,
@@ -998,7 +1010,6 @@ private fun SettingsTextField(
                 text = it,
                 style = MaterialTheme.typography.bodySmall,
                 color = YaxcTheme.extendedColors.textMuted,
-                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
@@ -1006,8 +1017,7 @@ private fun SettingsTextField(
 
 @Composable
 private fun SettingsDivider() {
-    Divider(
-        modifier = Modifier.padding(vertical = 2.dp),
+    HorizontalDivider(
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
     )
 }

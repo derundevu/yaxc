@@ -118,7 +118,6 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -690,7 +689,7 @@ private fun ConnectContent(
                     .zIndex(if (isDragging) 3f else 0f)
                     .shadow(
                         elevation = if (isDragging) 24.dp else 0.dp,
-                        shape = RoundedCornerShape(30.dp),
+                        shape = MaterialTheme.shapes.extraLarge,
                         clip = false,
                     )
                     .onGloballyPositioned { coordinates ->
@@ -733,70 +732,22 @@ private fun RoutingContent(
         verticalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
         item {
-            YaxcGlassPanel {
-                Text(
-                    text = textResource(R.string.appsRouting),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = textResource(R.string.appsRoutingLead),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = YaxcTheme.extendedColors.textMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = textResource(R.string.appsRoutingModeTitle),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    ActionBubble(
-                        icon = Icons.AutoMirrored.Outlined.ArrowForwardIos,
-                        onClick = onOpenAppsRouting,
-                    )
-                }
-            }
+            SettingsActionCard(
+                icon = Icons.AutoMirrored.Outlined.AltRoute,
+                title = textResource(R.string.appsRouting),
+                description = textResource(R.string.appsRoutingLead),
+                onClick = onOpenAppsRouting,
+                showChevron = false,
+            )
         }
         item {
-            YaxcGlassPanel {
-                Text(
-                    text = textResource(R.string.coreRouting),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = textResource(R.string.coreRoutingLead),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = YaxcTheme.extendedColors.textMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = textResource(R.string.coreRouting),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    ActionBubble(
-                        icon = Icons.AutoMirrored.Outlined.ArrowForwardIos,
-                        onClick = onOpenCoreRouting,
-                    )
-                }
-            }
+            SettingsActionCard(
+                icon = Icons.AutoMirrored.Outlined.Subject,
+                title = textResource(R.string.coreRouting),
+                description = textResource(R.string.coreRoutingLead),
+                onClick = onOpenCoreRouting,
+                showChevron = false,
+            )
         }
     }
 }
@@ -845,18 +796,18 @@ private fun SettingsContent(
         }
         item {
             SettingsActionCard(
-                icon = Icons.Outlined.Terminal,
-                title = textResource(R.string.logs),
-                description = textResource(R.string.logsScreenLead),
-                onClick = onOpenLogs,
+                icon = Icons.Outlined.Settings,
+                title = textResource(R.string.preferences),
+                description = textResource(R.string.settingsScreenLead),
+                onClick = onOpenSettings,
             )
         }
         item {
             SettingsActionCard(
-                icon = Icons.Outlined.Settings,
-                title = textResource(R.string.settings),
-                description = textResource(R.string.settingsScreenLead),
-                onClick = onOpenSettings,
+                icon = Icons.Outlined.Terminal,
+                title = textResource(R.string.logs),
+                description = textResource(R.string.logsScreenLead),
+                onClick = onOpenLogs,
             )
         }
         item {
@@ -937,7 +888,7 @@ private fun ConnectionTopCard(
             scaleY = pressScale
         }.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onPingCurrent),
         shape = MaterialTheme.shapes.extraLarge,
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+        contentPadding = YaxcTheme.paddings.panel,
         accentColor = if (isRunning) {
             MaterialTheme.colorScheme.primary
         } else {
@@ -1052,13 +1003,13 @@ private fun ConnectionStatusChip(
     Surface(
         modifier = modifier,
         color = containerColor,
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, borderColor),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(YaxcTheme.paddings.dense),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
@@ -1087,17 +1038,17 @@ private fun ConnectionInfoChip(
 ) {
     Surface(
         modifier = modifier.yaxcClickable(
-            shape = RoundedCornerShape(18.dp),
+            shape = MaterialTheme.shapes.medium,
             onClick = onClick,
         ),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
         Box(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp),
+            modifier = Modifier.padding(YaxcTheme.paddings.dense),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -1208,7 +1159,7 @@ private fun ConnectionInfoDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                    .padding(YaxcTheme.paddings.panel),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
@@ -1498,7 +1449,7 @@ private fun FloatingConnectButton(
                     onClick = onClick,
                 ),
             shape = CircleShape,
-            contentPadding = PaddingValues(0.dp),
+            contentPadding = YaxcTheme.paddings.none,
             containerColor = containerColor,
             borderColor = borderColor,
             shadowElevation = 0.dp,
@@ -1533,8 +1484,8 @@ private fun MainLiquidTabBar(
 
     MainFloatingSurface(
         modifier = modifier.fillMaxWidth(0.94f),
-        shape = RoundedCornerShape(36.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        shape = YaxcTheme.shapes.pill,
+        contentPadding = YaxcTheme.paddings.dense,
         shadowElevation = 14.dp,
     ) {
         BoxWithConstraints(
@@ -1560,7 +1511,7 @@ private fun MainLiquidTabBar(
                         .fillMaxWidth()
                         .height(58.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = YaxcTheme.shapes.pill,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
                 ) {}
             }
@@ -1620,8 +1571,8 @@ private fun MainTopChrome(
         verticalAlignment = Alignment.Top,
     ) {
         MainFloatingSurface(
-            shape = MaterialTheme.shapes.extraLarge,
-            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp),
+            shape = YaxcTheme.shapes.pill,
+            contentPadding = YaxcTheme.paddings.regular,
         ) {
             Text(
                 text = textResource(R.string.appName),
@@ -1648,11 +1599,11 @@ private fun MainTopChrome(
         Box {
             MainFloatingSurface(
                 modifier = Modifier.yaxcClickable(
-                    shape = MaterialTheme.shapes.extraLarge,
+                    shape = YaxcTheme.shapes.pill,
                     onClick = { actionsExpanded = true },
                 ),
-                shape = MaterialTheme.shapes.extraLarge,
-                contentPadding = PaddingValues(0.dp),
+                shape = YaxcTheme.shapes.pill,
+                contentPadding = YaxcTheme.paddings.none,
             ) {
                 Box(
                     modifier = Modifier.size(40.dp),
@@ -1743,8 +1694,8 @@ private fun MiniControlBar(
             indication = null,
             onClick = onPingCurrent,
         ),
-        shape = RoundedCornerShape(26.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 7.dp),
+        shape = YaxcTheme.shapes.pill,
+        contentPadding = YaxcTheme.paddings.dense,
         containerColor = containerColor,
         shadowElevation = 10.dp,
     ) {
@@ -1820,7 +1771,7 @@ private fun MainBottomTabItem(
                 onClick = onClick,
             ),
         color = Color.Transparent,
-        shape = RoundedCornerShape(28.dp),
+        shape = YaxcTheme.shapes.pill,
         border = null,
     ) {
         Column(
@@ -1856,23 +1807,25 @@ private fun MainBottomTabItem(
 @Composable
 private fun MainFloatingSurface(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(30.dp),
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+    shape: Shape? = null,
+    contentPadding: PaddingValues? = null,
     containerColor: Color = mainFloatingContainerColor(),
     borderColor: Color = mainFloatingBorderColor(),
     shadowElevation: androidx.compose.ui.unit.Dp = 16.dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val resolvedShape = shape ?: YaxcTheme.shapes.pill
+    val resolvedContentPadding = contentPadding ?: YaxcTheme.paddings.regular
     Surface(
         modifier = modifier,
-        shape = shape,
+        shape = resolvedShape,
         color = containerColor,
         tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
         border = BorderStroke(1.dp, borderColor),
     ) {
         Box(
-            modifier = Modifier.padding(contentPadding),
+            modifier = Modifier.padding(resolvedContentPadding),
             content = content,
         )
     }
@@ -1910,9 +1863,10 @@ private fun SettingsActionCard(
     title: String,
     description: String,
     onClick: () -> Unit,
+    showChevron: Boolean = true,
 ) {
     YaxcGlassPanel(
-        modifier = Modifier.yaxcClickable(shape = RoundedCornerShape(28.dp), onClick = onClick),
+        modifier = Modifier.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onClick),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1947,12 +1901,14 @@ private fun SettingsActionCard(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            Icon(
-                imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
-                contentDescription = null,
-                tint = YaxcTheme.extendedColors.textMuted,
-                modifier = Modifier.size(18.dp),
-            )
+            if (showChevron) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                    contentDescription = null,
+                    tint = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }
@@ -1977,12 +1933,15 @@ private fun SourceGroupCard(
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
 
-    YaxcGlassPanel(modifier = modifier) {
+    YaxcGlassPanel(
+        modifier = modifier,
+        contentPadding = YaxcTheme.paddings.regular,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .yaxcClickable(shape = RoundedCornerShape(22.dp), onClick = onToggleExpanded)
-                .padding(vertical = 6.dp),
+                .yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onToggleExpanded)
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -2050,8 +2009,8 @@ private fun SourceGroupCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 profiles.forEach { profile ->
                     ProfileCard(
@@ -2127,9 +2086,9 @@ private fun ProfileCard(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onSelect,
-            ),
+        ),
         shape = MaterialTheme.shapes.large,
-        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 10.dp),
+        contentPadding = YaxcTheme.paddings.regular,
         accentColor = accentColor,
         accentAlpha = accentAlpha,
         borderColor = borderColor,

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.outlined.Settings
@@ -51,7 +50,7 @@ fun RootBottomBar(
     Surface(
         modifier = modifier.fillMaxWidth(0.94f),
         color = yaxcSoftFill(darkAlpha = 0.10f, lightAlpha = 0.86f),
-        shape = RoundedCornerShape(36.dp),
+        shape = YaxcTheme.shapes.pill,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         border = BorderStroke(1.dp, yaxcSoftStroke(darkAlpha = 0.10f, lightAlpha = 0.92f)),
@@ -59,7 +58,7 @@ fun RootBottomBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(YaxcTheme.paddings.dense),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             RootBottomTabItem(
@@ -96,7 +95,7 @@ fun RootSectionCard(
     modifier: Modifier = Modifier,
 ) {
     YaxcGlassPanel(
-        modifier = modifier.yaxcClickable(shape = RoundedCornerShape(28.dp), onClick = onClick),
+        modifier = modifier.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onClick),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -147,13 +146,13 @@ private fun RootBottomTabItem(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.yaxcClickable(shape = RoundedCornerShape(28.dp), onClick = onClick),
+        modifier = modifier.yaxcClickable(shape = YaxcTheme.shapes.pill, onClick = onClick),
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f)
         } else {
             Color.Transparent
         },
-        shape = RoundedCornerShape(28.dp),
+        shape = YaxcTheme.shapes.pill,
     ) {
         Column(
             modifier = Modifier

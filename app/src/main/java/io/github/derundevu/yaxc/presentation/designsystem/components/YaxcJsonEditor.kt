@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,7 +52,7 @@ fun YaxcJsonEditorSurface(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val shape = RoundedCornerShape(18.dp)
+    val shape = MaterialTheme.shapes.medium
 
     Box(
         modifier = modifier
