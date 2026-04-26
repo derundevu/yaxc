@@ -289,6 +289,9 @@ class MainActivity : AppCompatActivity() {
             MainEffect.OpenLogs -> {
                 startActivity(Intent(applicationContext, LogsActivity::class.java))
             }
+            MainEffect.OpenConnectionInfo -> {
+                openConnectionInfo()
+            }
             MainEffect.OpenAppsRouting -> {
                 startActivity(Intent(applicationContext, AppsRoutingActivity::class.java))
             }
@@ -312,6 +315,24 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, effect.message, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun openConnectionInfo() {
+        val uiState = mainViewModel.uiState.value
+        startActivity(
+            ConnectionInfoActivity.getIntent(
+                context = applicationContext,
+                selectedSourceName = uiState.selectedSourceName,
+                selectedProfileName = uiState.selectedProfileName,
+                selectedSourceMetadataJson = uiState.selectedSourceMetadata?.toJsonString(),
+                selectedServerLabel = uiState.selectedServerLabel,
+                socksAddress = uiState.socksAddress,
+                socksPort = uiState.socksPort,
+                socksUsername = uiState.socksUsername,
+                socksPassword = uiState.socksPassword,
+                pingAddress = uiState.pingAddress,
+            )
+        )
     }
 
     private fun toggleVpnService() {

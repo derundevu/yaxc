@@ -367,6 +367,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MainAction.OpenAssetsClicked -> _effects.tryEmit(MainEffect.OpenAssets)
             MainAction.OpenLinksClicked -> _effects.tryEmit(MainEffect.OpenLinks)
             MainAction.OpenLogsClicked -> _effects.tryEmit(MainEffect.OpenLogs)
+            MainAction.OpenConnectionInfoClicked -> _effects.tryEmit(MainEffect.OpenConnectionInfo)
             MainAction.OpenAppsRoutingClicked -> _effects.tryEmit(MainEffect.OpenAppsRouting)
             MainAction.OpenCoreRoutingClicked -> _effects.tryEmit(MainEffect.OpenCoreRouting)
             MainAction.OpenConfigsClicked -> _effects.tryEmit(MainEffect.OpenConfigs)

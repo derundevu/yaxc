@@ -49,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
             YaxcAppTheme {
                 SettingsScreen(
                     formState = formState,
+                    generatedXHwid = settings.generatedXHwid,
                     tunRoutes = tunRoutes,
                     onFormStateChange = { formState = it },
                     onTunRoutesSave = { routes ->
@@ -121,6 +122,7 @@ class SettingsActivity : AppCompatActivity() {
         val newSocksUsername = formState.socksUsername.trim()
         val newSocksPassword = formState.socksPassword
         val newUserAgent = formState.userAgent.trim()
+        val newXHwid = formState.xHwid.trim().ifBlank { settings.generatedXHwid }
         val newPingAddress = formState.pingAddress.trim()
         val newPingType = Settings.PingType.fromValue(formState.pingType)
         val newPrimaryDns = formState.primaryDns.trim()
@@ -191,6 +193,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.socksUsername = newSocksUsername
             settings.socksPassword = newSocksPassword
             settings.userAgent = newUserAgent
+            settings.xHwid = newXHwid
             settings.pingAddress = newPingAddress
             settings.pingType = newPingType
             settings.pingTimeout = pingTimeout

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.DialogFragment
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -82,6 +83,7 @@ class LinkFormFragment(
                                     link.name = updated.name
                                     link.address = updated.address
                                     link.userAgent = updated.userAgent
+                                    link.xHwid = updated.xHwid
                                     link.customHeaders = updated.customHeaders
                                     if (link.id == 0L) {
                                         link.isActive = true
@@ -117,6 +119,7 @@ class LinkFormFragment(
         onConfirm: (UpdatedLinkForm) -> Unit,
     ) {
         val context = requireContext()
+        val settings = remember { Settings(context.applicationContext) }
         val defaultLinkName = textResource(R.string.newSource)
         val subscriptionAddressRequiredText = textResource(R.string.subscriptionAddressRequired)
         val invalidLinkText = textResource(R.string.invalidLink)
@@ -133,6 +136,7 @@ class LinkFormFragment(
         var name by rememberSaveable(link.id) { mutableStateOf(link.name) }
         var address by rememberSaveable(link.id) { mutableStateOf(link.address) }
         var userAgent by rememberSaveable(link.id) { mutableStateOf(link.userAgent.orEmpty()) }
+        var xHwid by rememberSaveable(link.id) { mutableStateOf(link.xHwid.orEmpty()) }
         var customHeaders by rememberSaveable(link.id) {
             mutableStateOf(link.customHeaders.orEmpty())
         }
@@ -142,7 +146,7 @@ class LinkFormFragment(
             return trimmed.isEmpty() || trimmed == defaultLinkName
         }
 
-        LaunchedEffect(sourceMode, address, userAgent, customHeaders) {
+        LaunchedEffect(sourceMode, address, userAgent, xHwid, customHeaders) {
             if (sourceMode != SourceMode.Subscription || !shouldAutofillName()) return@LaunchedEffect
 
             val trimmedAddress = address.trim()
@@ -152,11 +156,17 @@ class LinkFormFragment(
             delay(350)
             val title = withContext(Dispatchers.IO) {
                 runCatching {
-                    val parsedHeaders = HttpHelper.parseHeaders(customHeaders)
                     HttpHelper.fetch(
                         link = trimmedAddress,
-                        userAgent = userAgent.ifBlank { null },
-                        headers = parsedHeaders,
+                        userAgent = HttpHelper.resolveSubscriptionUserAgent(
+                            settings,
+                            userAgent.ifBlank { null },
+                        ),
+                        headers = HttpHelper.buildSubscriptionHeaders(
+                            settings = settings,
+                            customHeaders = customHeaders,
+                            overrideXHwid = xHwid.ifBlank { null },
+                        ),
                     ).let { response ->
                         HttpHelper.extractSubscriptionTitle(response.headers)
                     }
@@ -289,6 +299,17 @@ class LinkFormFragment(
                         )
 
                         OutlinedTextField(
+                            value = xHwid,
+                            onValueChange = { xHwid = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(text = textResource(R.string.linkXHwid)) },
+                            supportingText = {
+                                Text(text = textResource(R.string.sourceXHwidLead))
+                            },
+                            singleLine = true,
+                        )
+
+                        OutlinedTextField(
                             value = customHeaders,
                             onValueChange = { customHeaders = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -347,6 +368,8 @@ class LinkFormFragment(
                                         address = modeAddress,
                                         userAgent = userAgent.trim().ifBlank { null }
                                             .takeIf { sourceMode == SourceMode.Subscription },
+                                        xHwid = xHwid.trim().ifBlank { null }
+                                            .takeIf { sourceMode == SourceMode.Subscription },
                                         customHeaders = customHeaders.trim().ifBlank { null }
                                             .takeIf { sourceMode == SourceMode.Subscription },
                                     )
@@ -376,6 +399,7 @@ class LinkFormFragment(
         val name: String,
         val address: String,
         val userAgent: String?,
+        val xHwid: String?,
         val customHeaders: String?,
     )
 }

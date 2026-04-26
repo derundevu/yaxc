@@ -1,5 +1,6 @@
 package io.github.derundevu.yaxc.helper
 
+import android.os.Build
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
@@ -114,6 +115,39 @@ class HttpHelper(
                         }
                     }
             }
+        }
+
+        fun resolveSubscriptionUserAgent(
+            settings: Settings,
+            overrideUserAgent: String?,
+        ): String {
+            return overrideUserAgent?.trim()?.takeIf { it.isNotEmpty() } ?: settings.userAgent
+        }
+
+        fun buildSubscriptionHeaders(
+            settings: Settings,
+            customHeaders: String?,
+            overrideXHwid: String? = null,
+        ): Map<String, String> {
+            val headers = parseHeaders(customHeaders).toMutableMap()
+            val normalizedOverrideXHwid = overrideXHwid?.trim()?.takeIf { it.isNotEmpty() }
+
+            when {
+                normalizedOverrideXHwid != null -> putHeader(headers, "x-hwid", normalizedOverrideXHwid)
+                !hasHeader(headers, "x-hwid") -> putHeader(headers, "x-hwid", settings.xHwid)
+            }
+
+            if (hasHeader(headers, "x-hwid")) {
+                putHeaderIfMissing(headers, "x-device-os", "Android")
+                putHeaderIfMissing(
+                    headers,
+                    "x-ver-os",
+                    Build.VERSION.RELEASE.orEmpty().ifBlank { Build.VERSION.SDK_INT.toString() },
+                )
+                defaultDeviceModelHeader()?.let { putHeaderIfMissing(headers, "x-device-model", it) }
+            }
+
+            return headers
         }
 
         suspend fun resolveExitIpViaSocks(
@@ -263,6 +297,48 @@ class HttpHelper(
         private fun normalizeHeaders(headers: Map<String, List<String>>): Map<String, List<String>> {
             return headers.entries.associate { (key, value) ->
                 key.lowercase() to value.filter { it.isNotBlank() }
+            }
+        }
+
+        private fun hasHeader(
+            headers: Map<String, String>,
+            name: String,
+        ): Boolean {
+            return headers.keys.any { it.equals(name, ignoreCase = true) }
+        }
+
+        private fun putHeader(
+            headers: MutableMap<String, String>,
+            name: String,
+            value: String,
+        ) {
+            val existingKey = headers.keys.firstOrNull { it.equals(name, ignoreCase = true) }
+            if (existingKey != null) {
+                headers[existingKey] = value
+            } else {
+                headers[name] = value
+            }
+        }
+
+        private fun putHeaderIfMissing(
+            headers: MutableMap<String, String>,
+            name: String,
+            value: String,
+        ) {
+            if (!hasHeader(headers, name)) {
+                headers[name] = value
+            }
+        }
+
+        private fun defaultDeviceModelHeader(): String? {
+            val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
+            val model = Build.MODEL?.trim().orEmpty()
+            return when {
+                manufacturer.isEmpty() && model.isEmpty() -> null
+                manufacturer.isEmpty() -> model
+                model.isEmpty() -> manufacturer
+                model.startsWith(manufacturer, ignoreCase = true) -> model
+                else -> "$manufacturer $model"
             }
         }
 

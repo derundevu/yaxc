@@ -100,6 +100,7 @@ class Settings(private val context: Context) {
 
     init {
         initializeSocksCredentialsIfNeeded()
+        initializeXHwidIfNeeded()
     }
 
     /** Active Link ID */
@@ -243,6 +244,23 @@ class Settings(private val context: Context) {
             }
         }
         set(value) = sharedPreferences.edit { putString("userAgent", value) }
+    val generatedXHwid: String
+        get() {
+            val storedValue = sharedPreferences.getString("generatedXHwid", null)?.trim()
+            if (!storedValue.isNullOrEmpty()) return storedValue
+
+            val generatedValue = randomHexString(16)
+            sharedPreferences.edit { putString("generatedXHwid", generatedValue) }
+            return generatedValue
+        }
+    var xHwid: String
+        get() {
+            val storedValue = sharedPreferences.getString("xHwid", null)?.trim()
+            return storedValue?.takeIf { it.isNotEmpty() } ?: generatedXHwid
+        }
+        set(value) = sharedPreferences.edit {
+            putString("xHwid", value.trim().ifEmpty { generatedXHwid })
+        }
     var pingTimeout: Int
         get() = sharedPreferences.getInt("pingTimeout", 5)
         set(value) = sharedPreferences.edit { putInt("pingTimeout", value) }
@@ -411,10 +429,33 @@ class Settings(private val context: Context) {
         }
     }
 
+    private fun initializeXHwidIfNeeded() {
+        if (sharedPreferences.getBoolean("xHwidInitialized", false)) return
+
+        val generatedValue = generatedXHwid
+        val currentValue = sharedPreferences.getString("xHwid", null)?.trim().orEmpty()
+
+        sharedPreferences.edit {
+            putString("xHwid", currentValue.ifBlank { generatedValue })
+            putBoolean("xHwidInitialized", true)
+        }
+    }
+
     private fun randomString(length: Int, alphabet: CharArray): String {
         return buildString(length) {
             repeat(length) {
                 append(alphabet[random.nextInt(alphabet.size)])
+            }
+        }
+    }
+
+    private fun randomHexString(byteCount: Int): String {
+        val bytes = ByteArray(byteCount)
+        random.nextBytes(bytes)
+        return buildString(byteCount * 2) {
+            bytes.forEach { value ->
+                append(((value.toInt() ushr 4) and 0x0F).toString(16))
+                append((value.toInt() and 0x0F).toString(16))
             }
         }
     }

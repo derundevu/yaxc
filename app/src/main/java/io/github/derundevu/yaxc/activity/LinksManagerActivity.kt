@@ -246,6 +246,10 @@ class LinksManagerActivity : AppCompatActivity() {
     private fun subscriptionProfiles(link: Link, value: String): List<Profile> {
         val decoded = runCatching { LinkHelper.tryDecodeBase64(value).trim() }.getOrNull() ?: ""
         val candidate = if (decoded.isNotBlank()) decoded else value.trim()
+        val decodedJsonProfiles = jsonProfiles(link, candidate)
+        if (decodedJsonProfiles.isNotEmpty()) {
+            return decodedJsonProfiles
+        }
         return candidate.split("\n")
             .reversed()
             .map { LinkHelper(settings, it) }
@@ -276,11 +280,14 @@ class LinksManagerActivity : AppCompatActivity() {
     private suspend fun resolveProfiles(link: Link): Result<ParsedLinkSource> {
         return withContext(Dispatchers.IO) {
             runCatching {
-                val customHeaders = HttpHelper.parseHeaders(link.customHeaders)
                 val response = HttpHelper.fetch(
                     link = link.address,
-                    userAgent = link.userAgent?.takeIf { it.isNotBlank() } ?: settings.userAgent,
-                    headers = customHeaders,
+                    userAgent = HttpHelper.resolveSubscriptionUserAgent(settings, link.userAgent),
+                    headers = HttpHelper.buildSubscriptionHeaders(
+                        settings = settings,
+                        customHeaders = link.customHeaders,
+                        overrideXHwid = link.xHwid,
+                    ),
                 )
                 val detected = detectProfiles(link, response.body.trim())
                 val metadata = HttpHelper.extractSubscriptionMetadata(response.headers)

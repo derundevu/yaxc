@@ -83,6 +83,9 @@
             android:name=".activity.LogsActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity
+            android:name=".activity.ConnectionInfoActivity"
+            android:parentActivityName=".activity.MainActivity" />
+        <activity
             android:name=".activity.AppsRoutingActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity

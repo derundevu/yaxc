@@ -16,29 +16,58 @@ class LinkHelper(
     link: String
 ) {
 
+    private data class ParsedConfigResult(
+        val config: JSONObject,
+        val remark: String? = null,
+    )
+
+    private data class ParsedOutboundResult(
+        val success: Boolean,
+        val outbound: JSONObject?,
+    )
+
     private val success: Boolean
+    private val importedConfig: JSONObject?
     private val outbound: JSONObject?
     private var remark: String = defaultRemark()
 
     init {
-        val uri = runCatching { URI(link) }.getOrNull()
-        val parsedOutbound = uri?.let(::parseKnownOutbound)
-        if (parsedOutbound != null) {
+        val inlineConfig = parseInlineConfig(link)
+        if (inlineConfig != null) {
             success = true
-            outbound = parsedOutbound
-            remark = remark(uri, defaultRemark())
+            importedConfig = inlineConfig.config
+            outbound = inlineConfig.config.optJSONArray("outbounds")
+                ?.optJSONObject(0)
+                ?.let(::sanitizeObject)
+            inlineConfig.remark?.takeIf { it.isNotBlank() }?.let { remark = it }
         } else {
-            val base64: String = XrayCore.json(link)
-            val decoded = tryDecodeBase64(base64)
-            val response = try {
-                JSONObject(decoded)
-            } catch (_: JSONException) {
-                JSONObject()
+            val uri = runCatching { URI(link) }.getOrNull()
+            val parsedOutbound = uri?.let(::parseKnownOutbound)
+            if (parsedOutbound != null) {
+                success = true
+                importedConfig = null
+                outbound = parsedOutbound
+                remark = remark(uri, defaultRemark())
+            } else {
+                val parsedFromXray = parseOutboundFromXray(link)
+                val decodedInlineConfig = parseBase64InlineConfig(link)
+                if (parsedFromXray.success && parsedFromXray.outbound != null) {
+                    success = true
+                    importedConfig = null
+                    outbound = parsedFromXray.outbound
+                } else if (decodedInlineConfig != null) {
+                    success = true
+                    importedConfig = decodedInlineConfig.config
+                    outbound = decodedInlineConfig.config.optJSONArray("outbounds")
+                        ?.optJSONObject(0)
+                        ?.let(::sanitizeObject)
+                    decodedInlineConfig.remark?.takeIf { it.isNotBlank() }?.let { remark = it }
+                } else {
+                    success = parsedFromXray.success
+                    importedConfig = null
+                    outbound = parsedFromXray.outbound
+                }
             }
-            val data = response.optJSONObject("data") ?: JSONObject()
-            val outbounds = data.optJSONArray("outbounds") ?: JSONArray()
-            success = response.optBoolean("success", false)
-            outbound = if (outbounds.length() > 0) sanitizeObject(outbounds.getJSONObject(0)) else null
         }
     }
 
@@ -57,11 +86,11 @@ class LinkHelper(
     }
 
     fun isValid(): Boolean {
-        return success && outbound != null
+        return success && (importedConfig != null || outbound != null)
     }
 
     fun json(): String {
-        return config().toString(2) + "\n"
+        return (importedConfig ?: config()).toString(2) + "\n"
     }
 
     fun remark(): String {
@@ -219,6 +248,54 @@ class LinkHelper(
         config.put("outbounds", outbounds())
         config.put("routing", routing())
         return config
+    }
+
+    private fun parseInlineConfig(raw: String): ParsedConfigResult? {
+        val trimmed = raw.trim()
+        if (!trimmed.startsWith("{")) return null
+        val json = runCatching { JSONObject(trimmed) }.getOrNull() ?: return null
+        return sanitizeImportedConfig(json)
+    }
+
+    private fun parseBase64InlineConfig(raw: String): ParsedConfigResult? {
+        if (runCatching { URI(raw) }.getOrNull()?.scheme != null) return null
+        val decoded = tryDecodeBase64(raw)
+        if (decoded == raw) return null
+        return parseInlineConfig(decoded)
+    }
+
+    private fun parseOutboundFromXray(link: String): ParsedOutboundResult {
+        val base64 = XrayCore.json(link)
+        val decoded = tryDecodeBase64(base64)
+        val response = try {
+            JSONObject(decoded)
+        } catch (_: JSONException) {
+            JSONObject()
+        }
+        val data = response.optJSONObject("data") ?: JSONObject()
+        val outbounds = data.optJSONArray("outbounds") ?: JSONArray()
+        val outbound = if (outbounds.length() > 0) {
+            runCatching { sanitizeObject(outbounds.getJSONObject(0)) }.getOrNull()
+        } else {
+            null
+        }
+        return ParsedOutboundResult(
+            success = response.optBoolean("success", false),
+            outbound = outbound,
+        )
+    }
+
+    private fun sanitizeImportedConfig(source: JSONObject): ParsedConfigResult? {
+        val config = sanitizeObject(source)
+        val remark = config.optString("remarks")
+            .ifBlank { config.optString("remark") }
+            .trim()
+            .ifBlank { null }
+        config.remove("remarks")
+        config.remove("remark")
+        val outbounds = config.optJSONArray("outbounds") ?: return null
+        if (outbounds.length() == 0) return null
+        return ParsedConfigResult(config = config, remark = remark)
     }
 
     private fun defaultRemark(): String = settings.getString(R.string.newProfile)

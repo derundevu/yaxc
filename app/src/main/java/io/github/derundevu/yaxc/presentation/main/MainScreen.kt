@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -44,14 +45,13 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
@@ -68,13 +68,10 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.ToggleOn
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -88,7 +85,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -110,12 +106,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.shape.CircleShape
@@ -126,7 +120,6 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
-import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
@@ -141,12 +134,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.InetAddress
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import java.util.Locale
 
 private enum class MainRootTab {
@@ -154,6 +144,9 @@ private enum class MainRootTab {
     Routing,
     Settings,
 }
+
+private const val MAIN_FLOATING_BAR_WIDTH_FRACTION = 0.94f
+private val MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET = 92.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -308,11 +301,21 @@ fun MainScreen(
                     onNewSource = { onAction(MainAction.NewSourceClicked) },
                     onScanQr = { onAction(MainAction.ScanQrCodeClicked) },
                     onImportClipboard = { onAction(MainAction.ImportFromClipboardClicked) },
-                    isConnectTab = rootTab == MainRootTab.Connect,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(3f)
+                        .padding(horizontal = spacing.md, vertical = spacing.md),
+                )
+
+                MainBottomConnectRow(
+                    visible = rootTab == MainRootTab.Connect,
+                    showMiniBar = collapseProgress > 0f,
                     collapseProgress = collapseProgress,
+                    isRunning = isRunning,
                     selectedSourceName = selectedSourceName,
                     selectedProfileName = selectedProfileName,
                     pingState = pingState,
+                    onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
                     onPingCurrent = { onAction(MainAction.PingClicked) },
                     onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
                     onRefreshSource = {
@@ -320,33 +323,11 @@ fun MainScreen(
                         else onAction(MainAction.RefreshLinksClicked)
                     },
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
+                        .align(Alignment.BottomCenter)
                         .zIndex(3f)
-                        .padding(horizontal = spacing.md, vertical = spacing.md),
+                        .padding(horizontal = spacing.lg)
+                        .padding(bottom = spacing.lg + reservedBottomInset + MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET),
                 )
-
-                AnimatedVisibility(
-                    visible = rootTab == MainRootTab.Connect,
-                    enter = fadeIn(animationSpec = tween(220)) +
-                        scaleIn(initialScale = 0.82f, animationSpec = tween(220)) +
-                        slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(220)),
-                    exit = fadeOut(animationSpec = tween(180)) +
-                        scaleOut(targetScale = 0.82f, animationSpec = tween(180)) +
-                        slideOutVertically(targetOffsetY = { it / 2 }, animationSpec = tween(180)),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .zIndex(3f)
-                        .padding(
-                            end = spacing.lg + 12.dp,
-                            bottom = spacing.lg + reservedBottomInset + 94.dp,
-                        ),
-                ) {
-                    FloatingConnectButton(
-                        isRunning = isRunning,
-                        onClick = { onAction(MainAction.ToggleVpnClicked) },
-                        modifier = Modifier,
-                    )
-                }
 
                 MainLiquidTabBar(
                     selectedTab = rootTab,
@@ -538,12 +519,6 @@ private fun ConnectContent(
                 selectedSourceName = selectedSourceName,
                 selectedSourceMetadata = selectedSourceMetadata,
                 selectedProfileName = selectedProfileName,
-                selectedServerLabel = selectedServerLabel,
-                socksAddress = socksAddress,
-                socksPort = socksPort,
-                socksUsername = socksUsername,
-                socksPassword = socksPassword,
-                pingAddress = pingAddress,
                 pingState = pingState,
                 activeBatchPingSourceId = activeBatchPingSourceId,
                 collapseProgress = collapseProgress,
@@ -553,6 +528,7 @@ private fun ConnectContent(
                     if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
                     else onAction(MainAction.RefreshLinksClicked)
                 },
+                onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
             )
         }
 
@@ -856,23 +832,17 @@ private fun ConnectionTopCard(
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
     selectedProfileName: String,
-    selectedServerLabel: String,
-    socksAddress: String,
-    socksPort: String,
-    socksUsername: String,
-    socksPassword: String,
-    pingAddress: String,
     pingState: MainPingState,
     activeBatchPingSourceId: Long?,
     collapseProgress: Float,
     onPingCurrent: () -> Unit,
     onPingAll: () -> Unit,
     onRefreshSource: () -> Unit,
+    onOpenConnectionInfo: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    var showConnectionInfo by remember { mutableStateOf(false) }
     val subscriptionSummary = subscriptionCardSummary(selectedSourceMetadata)
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.992f else 1f,
@@ -888,7 +858,7 @@ private fun ConnectionTopCard(
             scaleY = pressScale
         }.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onPingCurrent),
         shape = MaterialTheme.shapes.extraLarge,
-        contentPadding = YaxcTheme.paddings.panel,
+        contentPadding = PaddingValues(16.dp),
         accentColor = if (isRunning) {
             MaterialTheme.colorScheme.primary
         } else {
@@ -897,24 +867,64 @@ private fun ConnectionTopCard(
         borderColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isRunning) 0.24f else 0.16f),
         shadowElevation = shadowElevation,
     ) {
-        Column(
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                ConnectionStatusChip(isRunning = isRunning)
+                Text(
+                    text = selectedSourceName,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                if (!subscriptionSummary.isNullOrBlank()) {
+                    Text(
+                        text = subscriptionSummary,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .height(20.dp)
+                        .widthIn(min = 44.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    PingStateBadge(pingState = pingState)
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ConnectionInfoChip(
-                        onClick = { showConnectionInfo = true },
-                        modifier = Modifier,
-                    )
                     ActionBubble(
                         icon = Icons.Outlined.WifiTethering,
                         onClick = onPingAll,
@@ -925,368 +935,12 @@ private fun ConnectionTopCard(
                         onClick = onRefreshSource,
                     )
                 }
-            }
-
-            Text(
-                text = selectedSourceName,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!subscriptionSummary.isNullOrBlank()) {
-                        Text(
-                            text = subscriptionSummary,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = YaxcTheme.extendedColors.textMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                PingStateBadge(pingState = pingState)
-            }
-        }
-    }
-
-    if (showConnectionInfo) {
-        ConnectionInfoDialog(
-            selectedSourceMetadata = selectedSourceMetadata,
-            selectedServerLabel = selectedServerLabel,
-            socksAddress = socksAddress,
-            socksPort = socksPort,
-            socksUsername = socksUsername,
-            socksPassword = socksPassword,
-            pingAddress = pingAddress,
-            onDismiss = { showConnectionInfo = false },
-        )
-    }
-}
-
-@Composable
-private fun ConnectionStatusChip(
-    isRunning: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val containerColor = if (isRunning) {
-        YaxcTheme.extendedColors.success.copy(alpha = 0.14f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f)
-    }
-    val borderColor = if (isRunning) {
-        YaxcTheme.extendedColors.success.copy(alpha = 0.38f)
-    } else {
-        YaxcTheme.extendedColors.cardBorder
-    }
-    val dotColor = if (isRunning) {
-        YaxcTheme.extendedColors.success
-    } else {
-        YaxcTheme.extendedColors.textMuted
-    }
-
-    Surface(
-        modifier = modifier,
-        color = containerColor,
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, borderColor),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(YaxcTheme.paddings.dense),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(dotColor, CircleShape),
-            )
-            Text(
-                text = if (isRunning) {
-                    textResource(R.string.mainConnectionRunningShort)
-                } else {
-                    textResource(R.string.mainConnectionStoppedShort)
-                },
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ConnectionInfoChip(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.yaxcClickable(
-            shape = MaterialTheme.shapes.medium,
-            onClick = onClick,
-        ),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.42f),
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-    ) {
-        Box(
-            modifier = Modifier.padding(YaxcTheme.paddings.dense),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Info,
-                contentDescription = textResource(R.string.mainConnectionInfo),
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ConnectionInfoDialog(
-    selectedSourceMetadata: SubscriptionMetadata?,
-    selectedServerLabel: String,
-    socksAddress: String,
-    socksPort: String,
-    socksUsername: String,
-    socksPassword: String,
-    pingAddress: String,
-    onDismiss: () -> Unit,
-) {
-    var showPassword by remember { mutableStateOf(false) }
-    val noValue = textResource(R.string.noValue)
-    val resolveFailed = textResource(R.string.mainConnectionResolveFailed)
-    val trafficUsedValue = selectedSourceMetadata
-        ?.usedBytes
-        ?.let(::formatBytesCompact)
-        ?: noValue
-    val trafficLimitValue = selectedSourceMetadata
-        ?.totalBytes
-        ?.let { totalBytes ->
-            if (totalBytes == 0L) {
-                textResource(R.string.mainSubscriptionUnlimited)
-            } else {
-                formatBytesCompact(totalBytes)
-            }
-        }
-        ?: noValue
-    val expiresAtValue = selectedSourceMetadata
-        ?.expireAtEpochSeconds
-        ?.takeIf { it > 0L }
-        ?.let(::formatExpiryDateTime)
-        ?: noValue
-    val daysLeftValue = selectedSourceMetadata
-        ?.expireAtEpochSeconds
-        ?.takeIf { it > 0L }
-        ?.let { formatDaysLeftFull(it) }
-        ?: noValue
-    val autoUpdateValue = selectedSourceMetadata
-        ?.updateIntervalHours
-        ?.let { formatAutoUpdateFull(it) }
-        ?: noValue
-    val resolvedServerValue by produceState(
-        initialValue = noValue,
-        selectedServerLabel,
-    ) {
-        val target = selectedServerLabel.trim()
-        value = when {
-            target.isBlank() || target == noValue -> noValue
-            else -> withContext(Dispatchers.IO) {
-                runCatching {
-                    InetAddress.getAllByName(target)
-                        .mapNotNull { it.hostAddress?.trim() }
-                        .filter { it.isNotEmpty() }
-                        .distinct()
-                        .joinToString(", ")
-                        .ifBlank { noValue }
-                }.getOrElse { resolveFailed }
-            }
-        }
-    }
-    val exitIpValue by produceState(
-        initialValue = noValue,
-        socksAddress,
-        socksPort,
-        socksUsername,
-        socksPassword,
-    ) {
-        val address = socksAddress.trim()
-        val port = socksPort.trim()
-        value = when {
-            address.isBlank() || port.isBlank() -> noValue
-            else -> withContext(Dispatchers.IO) {
-                runCatching {
-                    HttpHelper.resolveExitIpViaSocks(
-                        socksAddress = address,
-                        socksPort = port,
-                        socksUsername = socksUsername.trim(),
-                        socksPassword = socksPassword,
-                    )
-                }.getOrElse { resolveFailed }
-            }
-        }
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
-            shadowElevation = 24.dp,
-            border = BorderStroke(1.dp, YaxcTheme.extendedColors.cardBorder),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(YaxcTheme.paddings.panel),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text(
-                    text = textResource(R.string.mainConnectionInfo),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
-                )
-
-                ConnectionInfoRow(
-                    label = textResource(R.string.mainServerAddress),
-                    value = selectedServerLabel.ifBlank { textResource(R.string.noValue) },
-                )
-                ConnectionInfoRow(
-                    label = textResource(R.string.mainResolvedAddress),
-                    value = resolvedServerValue,
-                )
-                ConnectionInfoRow(
-                    label = textResource(R.string.mainExitAddress),
-                    value = exitIpValue,
-                )
-                if (selectedSourceMetadata != null) {
-                    ConnectionInfoRow(
-                        label = textResource(R.string.mainSubscriptionTrafficUsed),
-                        value = trafficUsedValue,
-                    )
-                    ConnectionInfoRow(
-                        label = textResource(R.string.mainSubscriptionTrafficLimit),
-                        value = trafficLimitValue,
-                    )
-                    ConnectionInfoRow(
-                        label = textResource(R.string.mainSubscriptionDaysLeft),
-                        value = daysLeftValue,
-                    )
-                    ConnectionInfoRow(
-                        label = textResource(R.string.mainSubscriptionExpiresAt),
-                        value = expiresAtValue,
-                    )
-                    ConnectionInfoRow(
-                        label = textResource(R.string.mainSubscriptionAutoUpdate),
-                        value = autoUpdateValue,
-                    )
-                    selectedSourceMetadata.supportUrl?.takeIf { it.isNotBlank() }?.let {
-                        ConnectionInfoRow(
-                            label = textResource(R.string.mainSubscriptionSupportUrl),
-                            value = it,
-                        )
-                    }
-                    selectedSourceMetadata.profileWebPageUrl?.takeIf { it.isNotBlank() }?.let {
-                        ConnectionInfoRow(
-                            label = textResource(R.string.mainSubscriptionWebPage),
-                            value = it,
-                        )
-                    }
-                }
-                ConnectionInfoRow(
-                    label = textResource(R.string.socksAddress),
-                    value = socksAddress.ifBlank { textResource(R.string.noValue) },
-                )
-                ConnectionInfoRow(
-                    label = textResource(R.string.socksPort),
-                    value = socksPort.ifBlank { textResource(R.string.noValue) },
-                )
-                ConnectionInfoRow(
-                    label = textResource(R.string.socksUsername),
-                    value = socksUsername.ifBlank { textResource(R.string.noValue) },
-                )
-                ConnectionInfoRow(
-                    label = textResource(R.string.socksPassword),
-                    value = if (showPassword) {
-                        socksPassword.ifBlank { textResource(R.string.noValue) }
-                    } else {
-                        if (socksPassword.isBlank()) textResource(R.string.noValue)
-                        else textResource(R.string.mainConnectionPasswordHidden)
-                    },
-                    trailing = {
-                        if (socksPassword.isNotBlank()) {
-                            IconButton(onClick = { showPassword = !showPassword }) {
-                                Icon(
-                                    imageVector = if (showPassword) {
-                                        Icons.Outlined.VisibilityOff
-                                    } else {
-                                        Icons.Outlined.Visibility
-                                    },
-                                    contentDescription = null,
-                                    tint = YaxcTheme.extendedColors.textMuted,
-                                )
-                            }
-                        }
-                    },
-                )
-                ConnectionInfoRow(
-                    label = textResource(R.string.pingAddress),
-                    value = pingAddress.ifBlank { textResource(R.string.noValue) },
+                ActionBubble(
+                    icon = Icons.Outlined.Info,
+                    onClick = onOpenConnectionInfo,
+                    contentDescription = textResource(R.string.mainConnectionInfo),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun ConnectionInfoRow(
-    label: String,
-    value: String,
-    trailing: (@Composable () -> Unit)? = null,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = YaxcTheme.extendedColors.textMuted,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            trailing?.invoke()
         }
     }
 }
@@ -1343,38 +997,8 @@ private fun formatDaysLeftShort(expireAtEpochSeconds: Long?): String? {
 }
 
 @Composable
-private fun formatDaysLeftFull(expireAtEpochSeconds: Long): String {
-    val zone = ZoneId.systemDefault()
-    val now = Instant.now()
-    if (expireAtEpochSeconds <= now.epochSecond) {
-        return stringResource(R.string.mainSubscriptionExpired)
-    }
-    val expireDate = Instant.ofEpochSecond(expireAtEpochSeconds).atZone(zone).toLocalDate()
-    val daysLeft = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(zone), expireDate)
-    return when {
-        daysLeft <= 0L -> stringResource(R.string.mainSubscriptionToday)
-        else -> stringResource(R.string.mainSubscriptionDaysFull, daysLeft)
-    }
-}
-
-@Composable
 private fun formatAutoUpdateShort(hours: Int): String {
     return stringResource(R.string.mainSubscriptionAutoUpdateShort, hours)
-}
-
-@Composable
-private fun formatAutoUpdateFull(hours: Int): String {
-    return stringResource(R.string.mainSubscriptionAutoUpdateFull, hours)
-}
-
-private fun formatExpiryDateTime(expireAtEpochSeconds: Long): String {
-    return Instant.ofEpochSecond(expireAtEpochSeconds)
-        .atZone(ZoneId.systemDefault())
-        .format(
-            DateTimeFormatter
-                .ofLocalizedDateTime(FormatStyle.MEDIUM)
-                .withLocale(Locale.getDefault())
-        )
 }
 
 private fun formatBytesCompact(bytes: Long): String {
@@ -1483,7 +1107,7 @@ private fun MainLiquidTabBar(
     val gap = 8.dp
 
     MainFloatingSurface(
-        modifier = modifier.fillMaxWidth(0.94f),
+        modifier = modifier.fillMaxWidth(MAIN_FLOATING_BAR_WIDTH_FRACTION),
         shape = YaxcTheme.shapes.pill,
         contentPadding = YaxcTheme.paddings.dense,
         shadowElevation = 14.dp,
@@ -1552,18 +1176,9 @@ private fun MainTopChrome(
     onNewSource: () -> Unit,
     onScanQr: () -> Unit,
     onImportClipboard: () -> Unit,
-    isConnectTab: Boolean,
-    collapseProgress: Float,
-    selectedSourceName: String,
-    selectedProfileName: String,
-    pingState: MainPingState,
-    onPingCurrent: () -> Unit,
-    onPingAll: () -> Unit,
-    onRefreshSource: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
-    val showMiniBar = isConnectTab && collapseProgress > 0f
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -1581,20 +1196,7 @@ private fun MainTopChrome(
             )
         }
 
-        if (showMiniBar) {
-            MiniControlBar(
-                progress = collapseProgress,
-                selectedSourceName = selectedSourceName,
-                selectedProfileName = selectedProfileName,
-                pingState = pingState,
-                onPingCurrent = onPingCurrent,
-                onPingAll = onPingAll,
-                onRefreshSource = onRefreshSource,
-                modifier = Modifier.weight(1f),
-            )
-        } else {
-            Spacer(modifier = Modifier.weight(1f))
-        }
+        Spacer(modifier = Modifier.weight(1f))
 
         Box {
             MainFloatingSurface(
@@ -1656,6 +1258,59 @@ private fun MainTopChrome(
 }
 
 @Composable
+private fun MainBottomConnectRow(
+    visible: Boolean,
+    showMiniBar: Boolean,
+    collapseProgress: Float,
+    isRunning: Boolean,
+    selectedSourceName: String,
+    selectedProfileName: String,
+    pingState: MainPingState,
+    onToggleVpn: () -> Unit,
+    onPingCurrent: () -> Unit,
+    onPingAll: () -> Unit,
+    onRefreshSource: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(220)) +
+            scaleIn(initialScale = 0.82f, animationSpec = tween(220)) +
+            slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(220)),
+        exit = fadeOut(animationSpec = tween(180)) +
+            scaleOut(targetScale = 0.82f, animationSpec = tween(180)) +
+            slideOutVertically(targetOffsetY = { it / 2 }, animationSpec = tween(180)),
+        modifier = modifier.fillMaxWidth(MAIN_FLOATING_BAR_WIDTH_FRACTION),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (showMiniBar) {
+                MiniControlBar(
+                    progress = collapseProgress,
+                    selectedSourceName = selectedSourceName,
+                    selectedProfileName = selectedProfileName,
+                    pingState = pingState,
+                    onPingCurrent = onPingCurrent,
+                    onPingAll = onPingAll,
+                    onRefreshSource = onRefreshSource,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+
+            FloatingConnectButton(
+                isRunning = isRunning,
+                onClick = onToggleVpn,
+            )
+        }
+    }
+}
+
+@Composable
 private fun MiniControlBar(
     progress: Float,
     selectedSourceName: String,
@@ -1667,6 +1322,7 @@ private fun MiniControlBar(
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    var actionsExpanded by remember { mutableStateOf(false) }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.985f else 1f,
@@ -1683,64 +1339,87 @@ private fun MiniControlBar(
         label = "mini_control_bar_color",
     )
 
-    MainFloatingSurface(
-        modifier = modifier.graphicsLayer {
-            alpha = progress
-            scaleX = (0.88f + progress * 0.12f) * pressScale
-            scaleY = (0.92f + progress * 0.08f) * pressScale
-            translationY = (1f - progress) * -20f
-        }.clickable(
-            interactionSource = interactionSource,
-            indication = null,
-            onClick = onPingCurrent,
-        ),
-        shape = YaxcTheme.shapes.pill,
-        contentPadding = YaxcTheme.paddings.dense,
-        containerColor = containerColor,
-        shadowElevation = 10.dp,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Box(modifier = modifier) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .graphicsLayer {
+                    alpha = progress
+                    scaleX = (0.92f + progress * 0.08f) * pressScale
+                    scaleY = (0.96f + progress * 0.04f) * pressScale
+                    translationX = (1f - progress) * 18f
+                }
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onPingCurrent,
+                    onLongClick = { actionsExpanded = true },
+                ),
+            shape = YaxcTheme.shapes.pill,
+            color = containerColor,
+            tonalElevation = 0.dp,
+            shadowElevation = 10.dp,
+            border = BorderStroke(1.dp, mainFloatingBorderColor()),
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    text = selectedSourceName,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YaxcTheme.extendedColors.textMuted,
+                        text = selectedSourceName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
                     )
-                    PingStateBadge(pingState = pingState)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YaxcTheme.extendedColors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(
+                            modifier = Modifier.widthIn(min = 40.dp),
+                            contentAlignment = Alignment.CenterEnd,
+                        ) {
+                            PingStateBadge(pingState = pingState)
+                        }
+                    }
                 }
             }
-            ActionBubble(
-                icon = Icons.Outlined.WifiTethering,
-                onClick = onPingAll,
-                containerSize = 32.dp,
-                iconSize = 15.dp,
+        }
+
+        YaxcLiquidDropdownMenu(
+            expanded = actionsExpanded,
+            onDismissRequest = { actionsExpanded = false },
+        ) {
+            YaxcLiquidDropdownMenuItem(
+                text = textResource(R.string.mainBatchPingAction),
+                onClick = {
+                    actionsExpanded = false
+                    onPingAll()
+                },
             )
-            ActionBubble(
-                icon = Icons.Outlined.Refresh,
-                onClick = onRefreshSource,
-                containerSize = 32.dp,
-                iconSize = 15.dp,
+            YaxcLiquidDropdownMenuItem(
+                text = textResource(R.string.updateSource),
+                onClick = {
+                    actionsExpanded = false
+                    onRefreshSource()
+                },
             )
         }
     }
@@ -2244,6 +1923,7 @@ private fun ActionBubble(
     containerSize: androidx.compose.ui.unit.Dp = 40.dp,
     iconSize: androidx.compose.ui.unit.Dp = 20.dp,
     loading: Boolean = false,
+    contentDescription: String? = null,
 ) {
     Surface(
         modifier = Modifier.yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onClick),
@@ -2266,7 +1946,7 @@ private fun ActionBubble(
             } else {
                 Icon(
                     imageVector = icon,
-                    contentDescription = null,
+                    contentDescription = contentDescription,
                     tint = yaxcSoftOnSurface(darkAlpha = 0.76f, lightAlpha = 0.74f),
                     modifier = Modifier.size(iconSize),
                 )

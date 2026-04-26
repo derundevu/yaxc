@@ -68,6 +68,7 @@ data class SettingsFormState(
     val socksUsername: String,
     val socksPassword: String,
     val userAgent: String,
+    val xHwid: String,
     val pingAddress: String,
     val pingType: String,
     val pingTimeout: String,
@@ -142,6 +143,7 @@ data class SettingsFormState(
                     it.transparentProxy,
                     it.languageTag,
                     it.themeStyle,
+                    it.xHwid,
                 )
             },
             restore = { values ->
@@ -151,6 +153,7 @@ data class SettingsFormState(
                     socksUsername = values[2] as String,
                     socksPassword = values[3] as String,
                     userAgent = values[4] as String,
+                    xHwid = values.getOrNull(37) as? String ?: "",
                     pingAddress = values[5] as String,
                     pingType = values.getOrNull(6) as? String ?: Settings.PingType.Get.value,
                     pingTimeout = values[7] as String,
@@ -193,6 +196,7 @@ data class SettingsFormState(
             socksUsername = settings.socksUsername,
             socksPassword = settings.socksPassword,
             userAgent = settings.userAgent,
+            xHwid = settings.xHwid,
             pingAddress = settings.pingAddress,
             pingType = settings.pingType.value,
             pingTimeout = settings.pingTimeout.toString(),
@@ -238,6 +242,7 @@ private enum class SettingsTab(val titleRes: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 fun SettingsScreen(
     formState: SettingsFormState,
+    generatedXHwid: String,
     tunRoutes: List<String>,
     onFormStateChange: (SettingsFormState) -> Unit,
     onTunRoutesSave: (List<String>) -> Unit,
@@ -444,6 +449,7 @@ fun SettingsScreen(
                 when (selectedTab) {
                     SettingsTab.Basic -> BasicSettingsTab(
                         formState = formState,
+                        generatedXHwid = generatedXHwid,
                         onFormStateChange = onFormStateChange,
                         onLanguageClick = { showLanguageDialog = true },
                         onThemeClick = { showThemeDialog = true },
@@ -508,6 +514,7 @@ fun SettingsScreen(
 @Composable
 private fun BasicSettingsTab(
     formState: SettingsFormState,
+    generatedXHwid: String,
     onFormStateChange: (SettingsFormState) -> Unit,
     onLanguageClick: () -> Unit,
     onThemeClick: () -> Unit,
@@ -637,6 +644,23 @@ private fun BasicSettingsTab(
                 value = formState.userAgent,
                 onValueChange = { onFormStateChange(formState.copy(userAgent = it)) },
                 helperText = textResource(R.string.settingsUserAgentLead),
+            )
+            SettingsDivider()
+            SettingsTextField(
+                label = textResource(R.string.settingsXHwid),
+                value = formState.xHwid,
+                onValueChange = { onFormStateChange(formState.copy(xHwid = it)) },
+                helperText = textResource(R.string.settingsXHwidLead),
+                trailingContent = {
+                    IconButton(
+                        onClick = { onFormStateChange(formState.copy(xHwid = generatedXHwid)) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Sync,
+                            contentDescription = textResource(R.string.settingsResetXHwid),
+                        )
+                    }
+                },
             )
             SettingsDivider()
             SettingsTextField(

@@ -11,16 +11,14 @@ class ConfigHelper(
     base: String,
 ) {
     private val base: JSONObject = JsonHelper.makeObject(base)
-    private val userRoutingConfig = config.routing
-    private val userRoutingMode = config.routingMode
 
     init {
-        applyManagedRuntimeConfig()
         process("log", config.log, config.logMode)
         process("dns", config.dns, config.dnsMode)
         process("inbounds", config.inbounds, config.inboundsMode)
         process("outbounds", config.outbounds, config.outboundsMode)
         process("routing", config.routing, config.routingMode)
+        applyManagedRuntimeConfig()
         if (settings.tproxyHotspot || settings.tproxyTethering) sharedInbounds()
     }
 
@@ -67,10 +65,12 @@ class ConfigHelper(
     }
 
     private fun applyManagedRuntimeConfig() {
-        base.put("log", runtimeLog())
-        base.put("dns", runtimeDns())
+        base.put("log", JsonHelper.mergeObjects(JsonHelper.getObject(base, "log"), runtimeLog()))
+        val outbounds = ensureManagedOutbounds(JsonHelper.getArray(base, "outbounds"))
+        base.put("outbounds", outbounds)
+        base.put("dns", mergeRuntimeDns(JsonHelper.getObject(base, "dns")))
         base.put("inbounds", runtimeInbounds())
-        base.put("routing", runtimeRouting())
+        base.put("routing", mergeRuntimeRouting(JsonHelper.getObject(base, "routing"), outbounds))
     }
 
     private fun runtimeLog(): JSONObject {
@@ -91,6 +91,14 @@ class ConfigHelper(
 
     private fun runtimeDns(): JSONObject {
         return JSONObject().put("servers", managedDnsServers())
+    }
+
+    private fun mergeRuntimeDns(currentDns: JSONObject): JSONObject {
+        return if (currentDns.length() == 0) {
+            runtimeDns()
+        } else {
+            JsonHelper.mergeObjects(currentDns, runtimeDns())
+        }
     }
 
     private fun runtimeInbounds(): JSONArray {
@@ -148,43 +156,192 @@ class ConfigHelper(
         return inbounds
     }
 
-    private fun runtimeRouting(): JSONObject {
-        val rules = JSONArray()
+    private fun mergeRuntimeRouting(
+        currentRouting: JSONObject,
+        outbounds: JSONArray,
+    ): JSONObject {
+        val routing = JSONObject(currentRouting.toString())
+        val rules = JSONArray(JsonHelper.getArray(routing, "rules").toString())
 
-        if (settings.transparentProxy) {
-            val proxyDns = JSONObject()
+        rules.put(runtimeProxyDnsRule(outbounds))
+        if (!hasPrivateRule(rules)) {
+            rules.put(runtimeDirectPrivateRule(outbounds))
+        }
+
+        normalizeRuleOutboundTags(rules, outbounds)
+
+        routing.put("rules", rules)
+        if (routing.optString("domainStrategy").isBlank()) {
+            routing.put("domainStrategy", "IPIfNonMatch")
+        }
+        return routing
+    }
+
+    private fun runtimeProxyDnsRule(outbounds: JSONArray): JSONObject {
+        return if (settings.transparentProxy) {
+            JSONObject()
                 .put("network", "udp")
                 .put("port", 53)
                 .put("inboundTag", JSONArray().put("all-in"))
-                .put("outboundTag", "dns-out")
-            rules.put(proxyDns)
+                .put("outboundTag", resolveRoutingOutboundTag("dns-out", outbounds))
         } else {
-            val proxyDns = JSONObject()
+            JSONObject()
                 .put("ip", managedDnsServers())
                 .put("port", 53)
-                .put("outboundTag", "proxy")
-            rules.put(proxyDns)
+                .put("outboundTag", resolveRoutingOutboundTag("proxy", outbounds))
         }
-
-        if (!hasCustomPrivateRule()) {
-            val directPrivate = JSONObject()
-                .put("ip", privateAddressRanges())
-                .put("outboundTag", "direct")
-            rules.put(directPrivate)
-        }
-
-        return JSONObject()
-            .put("domainStrategy", "IPIfNonMatch")
-            .put("rules", rules)
     }
 
-    private fun hasCustomPrivateRule(): Boolean {
-        if (userRoutingMode == Config.Mode.Disable) return false
+    private fun runtimeDirectPrivateRule(outbounds: JSONArray): JSONObject {
+        return JSONObject()
+            .put("ip", privateAddressRanges())
+            .put("outboundTag", resolveRoutingOutboundTag("direct", outbounds))
+    }
 
-        val rules = runCatching {
-            JsonHelper.makeObject(userRoutingConfig).optJSONArray("rules")
-        }.getOrNull() ?: return false
+    private fun ensureManagedOutbounds(currentOutbounds: JSONArray): JSONArray {
+        val outbounds = JSONArray(currentOutbounds.toString())
+        ensurePrimaryProxyTag(outbounds)
+        if (findOutboundTagByProtocol(outbounds, "freedom") == null &&
+            findCaseInsensitiveOutboundTag(outbounds, "direct") == null
+        ) {
+            outbounds.put(
+                JSONObject()
+                    .put("protocol", "freedom")
+                    .put("tag", "direct")
+            )
+        }
+        if (findOutboundTagByProtocol(outbounds, "blackhole") == null &&
+            findCaseInsensitiveOutboundTag(outbounds, "block") == null
+        ) {
+            outbounds.put(
+                JSONObject()
+                    .put("protocol", "blackhole")
+                    .put("tag", "block")
+            )
+        }
+        if (
+            settings.transparentProxy &&
+            findOutboundTagByProtocol(outbounds, "dns") == null &&
+            findCaseInsensitiveOutboundTag(outbounds, "dns-out") == null
+        ) {
+            outbounds.put(
+                JSONObject()
+                    .put("protocol", "dns")
+                    .put("tag", "dns-out")
+            )
+        }
+        return outbounds
+    }
 
+    private fun ensurePrimaryProxyTag(outbounds: JSONArray) {
+        if (findPrimaryProxyOutboundTag(outbounds) != null) return
+        for (index in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(index) ?: continue
+            val protocol = outbound.optString("protocol").trim().lowercase()
+            if (protocol in setOf("freedom", "blackhole", "dns")) continue
+            outbound.put("tag", "proxy")
+            return
+        }
+    }
+
+    private fun normalizeRuleOutboundTags(
+        rules: JSONArray,
+        outbounds: JSONArray,
+    ) {
+        for (index in 0 until rules.length()) {
+            val rule = rules.optJSONObject(index) ?: continue
+            val outboundTag = rule.optString("outboundTag").trim()
+            if (outboundTag.isEmpty()) continue
+            rule.put("outboundTag", resolveRoutingOutboundTag(outboundTag, outbounds))
+        }
+    }
+
+    private fun resolveRoutingOutboundTag(
+        outboundTag: String,
+        outbounds: JSONArray,
+    ): String {
+        val normalized = outboundTag.trim()
+        if (normalized.isEmpty()) return outboundTag
+        findExactOutboundTag(outbounds, normalized)?.let { return it }
+
+        return when (normalized.lowercase()) {
+            "proxy" -> {
+                findCaseInsensitiveOutboundTag(outbounds, normalized)
+                    ?: findPrimaryProxyOutboundTag(outbounds)
+                    ?: normalized
+            }
+
+            "direct" -> {
+                findCaseInsensitiveOutboundTag(outbounds, normalized)
+                    ?: findOutboundTagByProtocol(outbounds, "freedom")
+                    ?: normalized
+            }
+
+            "block" -> {
+                findCaseInsensitiveOutboundTag(outbounds, normalized)
+                    ?: findOutboundTagByProtocol(outbounds, "blackhole")
+                    ?: normalized
+            }
+
+            "dns-out" -> {
+                findCaseInsensitiveOutboundTag(outbounds, normalized)
+                    ?: findOutboundTagByProtocol(outbounds, "dns")
+                    ?: normalized
+            }
+
+            else -> normalized
+        }
+    }
+
+    private fun findExactOutboundTag(
+        outbounds: JSONArray,
+        tag: String,
+    ): String? {
+        for (index in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(index) ?: continue
+            val outboundTag = outbound.optString("tag").trim()
+            if (outboundTag == tag) return outboundTag
+        }
+        return null
+    }
+
+    private fun findCaseInsensitiveOutboundTag(
+        outbounds: JSONArray,
+        tag: String,
+    ): String? {
+        for (index in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(index) ?: continue
+            val outboundTag = outbound.optString("tag").trim()
+            if (outboundTag.equals(tag, ignoreCase = true)) return outboundTag
+        }
+        return null
+    }
+
+    private fun findOutboundTagByProtocol(
+        outbounds: JSONArray,
+        protocol: String,
+    ): String? {
+        for (index in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(index) ?: continue
+            if (!outbound.optString("protocol").trim().equals(protocol, ignoreCase = true)) continue
+            val outboundTag = outbound.optString("tag").trim()
+            if (outboundTag.isNotEmpty()) return outboundTag
+        }
+        return null
+    }
+
+    private fun findPrimaryProxyOutboundTag(outbounds: JSONArray): String? {
+        for (index in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(index) ?: continue
+            val protocol = outbound.optString("protocol").trim().lowercase()
+            if (protocol in setOf("freedom", "blackhole", "dns")) continue
+            val outboundTag = outbound.optString("tag").trim()
+            if (outboundTag.isNotEmpty()) return outboundTag
+        }
+        return null
+    }
+
+    private fun hasPrivateRule(rules: JSONArray): Boolean {
         val privateRanges = privateAddressRangesList().map(String::lowercase).toSet()
         for (index in 0 until rules.length()) {
             val rule = rules.optJSONObject(index) ?: continue

@@ -1,0 +1,7 @@
+## What's new in 1.2.3
+
+- Added default and per-source `x-hwid` support for subscription refresh requests, including automatic device headers.
+- Improved subscription compatibility with provider panels by preserving full JSON configs and routing rules from subscriptions.
+- Moved `Connection Info` from a popup to a dedicated screen with clearer connection, subscription and local proxy details.
+- Refined the main connection card and related settings UI for cleaner spacing and actions.
+- Updated bundled core components.

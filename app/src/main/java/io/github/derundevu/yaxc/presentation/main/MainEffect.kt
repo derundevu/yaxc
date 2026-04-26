@@ -20,6 +20,7 @@ sealed interface MainEffect {
     data object OpenAssets : MainEffect
     data object OpenLinks : MainEffect
     data object OpenLogs : MainEffect
+    data object OpenConnectionInfo : MainEffect
     data object OpenAppsRouting : MainEffect
     data object OpenCoreRouting : MainEffect
     data object OpenConfigs : MainEffect
