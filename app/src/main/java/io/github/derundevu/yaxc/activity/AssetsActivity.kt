@@ -13,10 +13,12 @@ import androidx.lifecycle.lifecycleScope
 import com.topjohnwu.superuser.Shell
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.helper.AntifilterHelper
 import io.github.derundevu.yaxc.helper.DownloadHelper
 import io.github.derundevu.yaxc.presentation.assets.AssetCardState
 import io.github.derundevu.yaxc.presentation.assets.AssetsScreen
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,6 +32,7 @@ class AssetsActivity : AppCompatActivity() {
     private enum class AssetKind {
         GeoIp,
         GeoSite,
+        Antifilter,
         XrayCore,
     }
 
@@ -37,6 +40,7 @@ class AssetsActivity : AppCompatActivity() {
 
     private var geoIpState by mutableStateOf(AssetCardState(title = ""))
     private var geoSiteState by mutableStateOf(AssetCardState(title = ""))
+    private var antifilterState by mutableStateOf(AssetCardState(title = ""))
     private var xrayCoreState by mutableStateOf(AssetCardState(title = ""))
     private var selectedGeoProvider by mutableStateOf(Settings.DEFAULT_GEO_PROVIDER)
     private var customGeoIpUrl by mutableStateOf("")
@@ -56,6 +60,9 @@ class AssetsActivity : AppCompatActivity() {
             setAssetStatus()
         }
     }
+    private val antifilterLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
+        installAntifilterFromUri(it)
+    }
     private val xrayCoreLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
         val file = settings.xrayCoreFile()
         writeToFile(it, file) {
@@ -66,6 +73,8 @@ class AssetsActivity : AppCompatActivity() {
 
     private fun geoIpFile(): File = File(applicationContext.filesDir, "geoip.dat")
     private fun geoSiteFile(): File = File(applicationContext.filesDir, "geosite.dat")
+    private fun antifilterFile(): File = settings.antifilterFile()
+    private fun antifilterTempFile(): File = File(applicationContext.filesDir, "antifilter.lst.tmp")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +88,7 @@ class AssetsActivity : AppCompatActivity() {
                 AssetsScreen(
                     geoIpState = geoIpState,
                     geoSiteState = geoSiteState,
+                    antifilterState = antifilterState,
                     xrayCoreState = xrayCoreState,
                     selectedGeoProvider = selectedGeoProvider,
                     customGeoIpUrl = customGeoIpUrl,
@@ -136,6 +146,22 @@ class AssetsActivity : AppCompatActivity() {
                         settings.installedGeoSiteSourceLabel = ""
                         settings.installedGeoSiteSourceUrl = ""
                         delete(geoSiteFile())
+                    },
+                    onAntifilterDownload = {
+                        download(
+                            AssetKind.Antifilter,
+                            settings.antifilterAddress.trim(),
+                            antifilterTempFile(),
+                        )
+                    },
+                    onAntifilterPick = { antifilterLauncher.launch(MIME_TYPE_TEXT) },
+                    onAntifilterDelete = {
+                        settings.installedAntifilterSourceLabel = ""
+                        settings.installedAntifilterSourceUrl = ""
+                        settings.installedAntifilterRouteCount = 0
+                        delete(antifilterFile()) {
+                            restartIfAntifilterEnabled()
+                        }
                     },
                     onXrayCorePick = { runAsRoot { xrayCoreLauncher.launch(MIME_TYPE_OCTET_STREAM) } },
                     onXrayCoreDelete = { delete(settings.xrayCoreFile()) },
@@ -219,6 +245,33 @@ class AssetsActivity : AppCompatActivity() {
             progress = if (geoSiteState.isLoading) geoSiteState.progress else 0,
         )
 
+        val antifilter = antifilterFile()
+        val antifilterExists = antifilter.exists()
+        val selectedAntifilterUrl = settings.antifilterAddress.trim()
+        val installedAntifilterLabel = if (antifilterExists) {
+            settings.installedAntifilterSourceLabel.ifBlank { getString(R.string.noValue) }
+        } else {
+            getString(R.string.noValue)
+        }
+        val installedAntifilterUrl = settings.installedAntifilterSourceUrl.trim()
+        val antifilterNeedsUpdate = antifilterExists &&
+            installedAntifilterUrl.isNotBlank() &&
+            installedAntifilterUrl != LOCAL_ASSET_SOURCE_URL &&
+            installedAntifilterUrl != selectedAntifilterUrl
+        antifilterState = antifilterState.copy(
+            title = getString(R.string.antifilter),
+            value = getString(R.string.assetsUpdatedAt, getFileDate(antifilter)),
+            details = getString(
+                R.string.assetsInstalledSourceWithRules,
+                installedAntifilterLabel,
+                if (antifilterExists) settings.installedAntifilterRouteCount else 0,
+            ),
+            note = if (antifilterNeedsUpdate) getString(R.string.assetsUpdateRequired) else null,
+            isInstalled = antifilterExists,
+            isLoading = antifilterState.isLoading,
+            progress = if (antifilterState.isLoading) antifilterState.progress else 0,
+        )
+
         val xrayCore = settings.xrayCoreFile()
         val xrayCoreExists = xrayCore.exists()
         xrayCoreState = xrayCoreState.copy(
@@ -258,6 +311,9 @@ class AssetsActivity : AppCompatActivity() {
 
             override fun onError(exception: Exception) {
                 setDownloadState(kind, isLoading = false, progress = 0)
+                if (kind == AssetKind.Antifilter) {
+                    antifilterTempFile().delete()
+                }
                 Toast.makeText(applicationContext, exception.message, Toast.LENGTH_SHORT).show()
                 setAssetStatus()
             }
@@ -275,6 +331,14 @@ class AssetsActivity : AppCompatActivity() {
                         settings.installedGeoSiteSourceUrl = url.trim()
                     }
 
+                    AssetKind.Antifilter -> {
+                        installAntifilterTemp(
+                            sourceLabel = getString(R.string.assetsAntifilterSource),
+                            sourceUrl = url.trim(),
+                        )
+                        return
+                    }
+
                     AssetKind.XrayCore -> Unit
                 }
                 setAssetStatus()
@@ -290,6 +354,7 @@ class AssetsActivity : AppCompatActivity() {
         when (kind) {
             AssetKind.GeoIp -> geoIpState = geoIpState.copy(isLoading = isLoading, progress = progress)
             AssetKind.GeoSite -> geoSiteState = geoSiteState.copy(isLoading = isLoading, progress = progress)
+            AssetKind.Antifilter -> antifilterState = antifilterState.copy(isLoading = isLoading, progress = progress)
             AssetKind.XrayCore -> Unit
         }
     }
@@ -298,6 +363,7 @@ class AssetsActivity : AppCompatActivity() {
         return when (kind) {
             AssetKind.GeoIp -> geoIpState.isLoading
             AssetKind.GeoSite -> geoSiteState.isLoading
+            AssetKind.Antifilter -> antifilterState.isLoading
             AssetKind.XrayCore -> xrayCoreState.isLoading
         }
     }
@@ -317,17 +383,78 @@ class AssetsActivity : AppCompatActivity() {
         }
     }
 
+    private fun installAntifilterFromUri(uri: Uri?) {
+        if (uri == null) return
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val tempFile = antifilterTempFile()
+                    contentResolver.openInputStream(uri).use { input ->
+                        FileOutputStream(tempFile).use { output ->
+                            (input ?: error("Could not open file")).copyTo(output)
+                        }
+                    }
+                    AntifilterHelper.installValidated(tempFile, antifilterFile()).also {
+                        tempFile.delete()
+                    }
+                }
+            }
+            handleAntifilterInstallResult(
+                result = result,
+                sourceLabel = getString(R.string.assetsSourceLocalFile),
+                sourceUrl = LOCAL_ASSET_SOURCE_URL,
+            )
+        }
+    }
+
+    private fun installAntifilterTemp(sourceLabel: String, sourceUrl: String) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    AntifilterHelper.installValidated(antifilterTempFile(), antifilterFile()).also {
+                        antifilterTempFile().delete()
+                    }
+                }
+            }
+            handleAntifilterInstallResult(result, sourceLabel, sourceUrl)
+        }
+    }
+
+    private fun handleAntifilterInstallResult(
+        result: Result<Int>,
+        sourceLabel: String,
+        sourceUrl: String,
+    ) {
+        result.onSuccess { count ->
+            settings.installedAntifilterSourceLabel = sourceLabel
+            settings.installedAntifilterSourceUrl = sourceUrl
+            settings.installedAntifilterRouteCount = count
+            restartIfAntifilterEnabled()
+        }.onFailure { error ->
+            antifilterTempFile().delete()
+            Toast.makeText(applicationContext, error.message, Toast.LENGTH_SHORT).show()
+        }
+        setAssetStatus()
+    }
+
     private fun makeExeFile(file: File) {
         Shell.cmd("chown root:root ${file.absolutePath}").exec()
         Shell.cmd("chmod +x ${file.absolutePath}").exec()
     }
 
-    private fun delete(file: File) {
+    private fun delete(file: File, cb: (() -> Unit)? = null) {
         lifecycleScope.launch {
             file.delete()
+            cb?.invoke()
             withContext(Dispatchers.Main) {
                 setAssetStatus()
             }
+        }
+    }
+
+    private fun restartIfAntifilterEnabled() {
+        if (settings.antifilterEnabled && TProxyService.isActive()) {
+            TProxyService.restart(this)
         }
     }
 
@@ -350,6 +477,7 @@ class AssetsActivity : AppCompatActivity() {
 
     companion object {
         private const val MIME_TYPE_OCTET_STREAM = "application/octet-stream"
+        private const val MIME_TYPE_TEXT = "text/*"
         private const val LOCAL_ASSET_SOURCE_URL = "file://local"
     }
 }

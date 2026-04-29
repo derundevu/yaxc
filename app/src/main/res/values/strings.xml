@@ -56,6 +56,9 @@
     <string name="assetsApplyCustomGeoUrls">Apply links</string>
     <string name="assetsGeoIpUrlLabel">GeoIP URL</string>
     <string name="assetsGeoSiteUrlLabel">GeoSite URL</string>
+    <string name="antifilter">Antifilter</string>
+    <string name="assetsAntifilterSource">antifilter.download</string>
+    <string name="assetsInstalledSourceWithRules">Installed base: %1$s, rules: %2$d</string>
     <string name="assetsUpdatedAt">Updated: %1$s</string>
     <string name="assetsInstalledSource">Installed base: %1$s</string>
     <string name="assetsUpdateRequired">Selected provider differs from the installed base. Re-download to switch.</string>
@@ -82,6 +85,9 @@
     <string name="routingModeVisual">Visual</string>
     <string name="routingModeJson">JSON</string>
     <string name="coreRoutingUnsupportedRules">%1$d rule(s) use fields that are only preserved in JSON mode. Visual mode will keep them, but it cannot edit them directly.</string>
+    <string name="routingAntifilterTitle">Antifilter direct networks</string>
+    <string name="routingAntifilterEnabledLead">Adds %1$d downloaded Antifilter networks to the generated Xray routing config as DIRECT. User rules stay higher priority.</string>
+    <string name="routingAntifilterMissingLead">Download the Antifilter list in Assets before enabling this managed routing rule.</string>
     <string name="routingAddRule">Add Rule</string>
     <string name="coreRoutingNoRules">No core routing rules yet.</string>
     <string name="coreRoutingJsonTitle">Routing JSON</string>

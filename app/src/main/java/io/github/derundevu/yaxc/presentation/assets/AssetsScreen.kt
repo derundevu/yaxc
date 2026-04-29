@@ -59,6 +59,7 @@ data class AssetCardState(
 fun AssetsScreen(
     geoIpState: AssetCardState,
     geoSiteState: AssetCardState,
+    antifilterState: AssetCardState,
     xrayCoreState: AssetCardState,
     selectedGeoProvider: Settings.GeoResourcesProvider,
     customGeoIpUrl: String,
@@ -74,6 +75,9 @@ fun AssetsScreen(
     onGeoSiteDownload: () -> Unit,
     onGeoSitePick: () -> Unit,
     onGeoSiteDelete: () -> Unit,
+    onAntifilterDownload: () -> Unit,
+    onAntifilterPick: () -> Unit,
+    onAntifilterDelete: () -> Unit,
     onXrayCorePick: () -> Unit,
     onXrayCoreDelete: () -> Unit,
 ) {
@@ -129,6 +133,12 @@ fun AssetsScreen(
                 onPrimaryAction = onGeoSiteDownload,
                 onSecondaryAction = onGeoSitePick,
                 onDelete = onGeoSiteDelete,
+            )
+            AssetRow(
+                state = antifilterState,
+                onPrimaryAction = onAntifilterDownload,
+                onSecondaryAction = onAntifilterPick,
+                onDelete = onAntifilterDelete,
             )
             AssetRow(
                 state = xrayCoreState,

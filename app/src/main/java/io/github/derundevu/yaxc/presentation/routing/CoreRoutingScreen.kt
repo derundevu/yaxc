@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.AlertDialog
@@ -90,6 +91,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditorSurface
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchRow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -102,8 +104,12 @@ fun CoreRoutingScreen(
     rules: List<CoreRoutingRule>,
     unsupportedRuleCount: Int,
     isLoading: Boolean,
+    antifilterEnabled: Boolean,
+    antifilterInstalled: Boolean,
+    antifilterRouteCount: Int,
     onBack: () -> Unit,
     onSave: () -> Boolean,
+    onAntifilterEnabledChange: (Boolean) -> Unit,
     onImportFromClipboard: () -> Unit,
     onExportJson: () -> Unit,
     onEditorModeChange: (CoreRoutingEditorMode) -> Unit,
@@ -275,6 +281,22 @@ fun CoreRoutingScreen(
                             color = YaxcTheme.extendedColors.textMuted,
                         )
                     }
+                }
+            }
+
+            item {
+                YaxcCard {
+                    YaxcSwitchRow(
+                        title = textResource(R.string.routingAntifilterTitle),
+                        subtitle = if (antifilterInstalled) {
+                            textResource(R.string.routingAntifilterEnabledLead, antifilterRouteCount)
+                        } else {
+                            textResource(R.string.routingAntifilterMissingLead)
+                        },
+                        checked = antifilterEnabled,
+                        onCheckedChange = onAntifilterEnabledChange,
+                        icon = Icons.Outlined.Public,
+                    )
                 }
             }
 

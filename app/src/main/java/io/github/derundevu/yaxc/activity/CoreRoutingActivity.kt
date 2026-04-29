@@ -51,6 +51,9 @@ class CoreRoutingActivity : AppCompatActivity() {
     private var coreRules by mutableStateOf<List<CoreRoutingRule>>(emptyList())
     private var coreUnsupportedRuleCount by mutableStateOf(0)
     private var isCoreLoading by mutableStateOf(true)
+    private var antifilterEnabled by mutableStateOf(false)
+    private var antifilterInstalled by mutableStateOf(false)
+    private var antifilterRouteCount by mutableStateOf(0)
 
     private var coreRoutingJson = "{}"
     private var preservedRoutingRules: List<JSONObject> = emptyList()
@@ -67,6 +70,7 @@ class CoreRoutingActivity : AppCompatActivity() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }
+        syncAntifilterState()
 
         setContent {
             YaxcAppTheme {
@@ -76,8 +80,12 @@ class CoreRoutingActivity : AppCompatActivity() {
                     rules = coreRules,
                     unsupportedRuleCount = coreUnsupportedRuleCount,
                     isLoading = isCoreLoading,
+                    antifilterEnabled = antifilterEnabled,
+                    antifilterInstalled = antifilterInstalled,
+                    antifilterRouteCount = antifilterRouteCount,
                     onBack = ::finish,
                     onSave = ::saveCoreRouting,
+                    onAntifilterEnabledChange = ::updateAntifilterEnabled,
                     onImportFromClipboard = ::importRulesFromClipboard,
                     onExportJson = ::exportRulesJson,
                     onEditorModeChange = ::switchCoreEditorMode,
@@ -92,6 +100,11 @@ class CoreRoutingActivity : AppCompatActivity() {
         }
 
         getCoreRouting()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncAntifilterState()
     }
 
     private fun getCoreRouting() {
@@ -202,6 +215,27 @@ class CoreRoutingActivity : AppCompatActivity() {
 
     private fun deleteCoreRule(ruleId: String) {
         coreRules = coreRules.filterNot { it.id == ruleId }
+    }
+
+    private fun updateAntifilterEnabled(enabled: Boolean) {
+        if (enabled && !settings.antifilterFile().exists()) {
+            Toast.makeText(this, getString(R.string.installAssetsFirst), Toast.LENGTH_SHORT).show()
+            syncAntifilterState()
+            return
+        }
+
+        val changed = settings.antifilterEnabled != enabled
+        settings.antifilterEnabled = enabled
+        syncAntifilterState()
+        if (changed && TProxyService.isActive()) {
+            TProxyService.restart(this@CoreRoutingActivity)
+        }
+    }
+
+    private fun syncAntifilterState() {
+        antifilterEnabled = settings.antifilterEnabled
+        antifilterInstalled = settings.antifilterFile().exists()
+        antifilterRouteCount = if (antifilterInstalled) settings.installedAntifilterRouteCount else 0
     }
 
     private fun moveCoreRule(fromIndex: Int, toIndex: Int) {

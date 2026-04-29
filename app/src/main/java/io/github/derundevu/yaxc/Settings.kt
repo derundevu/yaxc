@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.core.os.LocaleListCompat
 import io.github.derundevu.yaxc.BuildConfig
+import io.github.derundevu.yaxc.helper.AntifilterHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import java.io.File
 import java.security.SecureRandom
@@ -90,6 +91,7 @@ class Settings(private val context: Context) {
         val DEFAULT_GEO_PROVIDER = GeoResourcesProvider.RunetFreedom
         val DEFAULT_GEO_IP_ADDRESS = GeoResourcesProvider.RunetFreedom.geoIpAddress
         val DEFAULT_GEO_SITE_ADDRESS = GeoResourcesProvider.RunetFreedom.geoSiteAddress
+        const val DEFAULT_ANTIFILTER_ADDRESS = AntifilterHelper.DEFAULT_URL
         val USERNAME_ALPHABET: CharArray = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
         val PASSWORD_ALPHABET: CharArray =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray()
@@ -211,6 +213,21 @@ class Settings(private val context: Context) {
     var installedGeoSiteSourceUrl: String
         get() = sharedPreferences.getString("installedGeoSiteSourceUrl", "")!!
         set(value) = sharedPreferences.edit { putString("installedGeoSiteSourceUrl", value) }
+    var antifilterAddress: String
+        get() = sharedPreferences.getString("antifilterAddress", DEFAULT_ANTIFILTER_ADDRESS)!!
+        set(value) = sharedPreferences.edit { putString("antifilterAddress", value) }
+    var antifilterEnabled: Boolean
+        get() = sharedPreferences.getBoolean("antifilterEnabled", false)
+        set(value) = sharedPreferences.edit { putBoolean("antifilterEnabled", value) }
+    var installedAntifilterSourceLabel: String
+        get() = sharedPreferences.getString("installedAntifilterSourceLabel", "")!!
+        set(value) = sharedPreferences.edit { putString("installedAntifilterSourceLabel", value) }
+    var installedAntifilterSourceUrl: String
+        get() = sharedPreferences.getString("installedAntifilterSourceUrl", "")!!
+        set(value) = sharedPreferences.edit { putString("installedAntifilterSourceUrl", value) }
+    var installedAntifilterRouteCount: Int
+        get() = sharedPreferences.getInt("installedAntifilterRouteCount", 0)
+        set(value) = sharedPreferences.edit { putInt("installedAntifilterRouteCount", value) }
     var pingAddress: String
         get() {
             val storedValue = sharedPreferences.getString("pingAddress", null)?.trim()
@@ -363,6 +380,7 @@ class Settings(private val context: Context) {
     fun xrayConfig(): File = File(baseDir(), "config.json")
     fun tun2socksConfig(): File = File(baseDir(), "tun2socks.yml")
     fun xrayHelperConfig(): File = File(baseDir(), "config.yml")
+    fun antifilterFile(): File = File(baseDir(), "antifilter.lst")
     fun xrayCorePid(): File = File(baseDir(), "core.pid")
     fun networkMonitorPid(): File = File(baseDir(), "monitor.pid")
     fun networkMonitorScript(): File = File(baseDir(), "monitor.sh")
