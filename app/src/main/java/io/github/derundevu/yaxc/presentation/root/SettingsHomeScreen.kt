@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -42,6 +43,7 @@ fun SettingsHomeScreen(
     onOpenLinks: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenSettings: () -> Unit,
+    onCheckAppUpdate: () -> Unit,
     onDownloadAppUpdate: () -> Unit,
     onInstallAppUpdate: () -> Unit,
     onSelectDestination: (RootDestination) -> Unit,
@@ -120,27 +122,38 @@ fun SettingsHomeScreen(
                 }
                 item {
                     YaxcGlassPanel {
-                        androidx.compose.foundation.layout.Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            VersionRow(textResource(R.string.appFullName), appVersion)
-                            AppUpdatePanel(
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            AppUpdateCheckButton(
                                 state = appUpdateState,
-                                onDownload = onDownloadAppUpdate,
-                                onInstall = onInstallAppUpdate,
+                                onClick = onCheckAppUpdate,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 12.dp, y = (-12).dp),
                             )
-                            VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
-                            VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
-                            Text(
-                                text = textResource(R.string.madeWithPeople),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = YaxcTheme.extendedColors.textMuted,
-                                textAlign = TextAlign.Center,
+                            androidx.compose.foundation.layout.Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 16.dp),
-                            )
+                                    .padding(horizontal = 42.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                VersionRow(textResource(R.string.appFullName), appVersion)
+                                AppUpdatePanel(
+                                    state = appUpdateState,
+                                    onDownload = onDownloadAppUpdate,
+                                    onInstall = onInstallAppUpdate,
+                                )
+                                VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
+                                VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
+                                Text(
+                                    text = textResource(R.string.madeWithPeople),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = YaxcTheme.extendedColors.textMuted,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 16.dp),
+                                )
+                            }
                         }
                     }
                 }

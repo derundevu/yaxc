@@ -1,11 +1,17 @@
 package io.github.derundevu.yaxc.presentation.root
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,20 +65,6 @@ fun AppUpdatePanel(
     )
 
     when {
-        state.isChecking -> {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.padding(2.dp),
-                )
-            }
-        }
-
         state.isReadyToInstall -> {
             Row(
                 modifier = Modifier
@@ -98,6 +90,37 @@ fun AppUpdatePanel(
                 FilledTonalButton(onClick = onDownload) {
                     Text(text = textResource(R.string.appUpdateDownload))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AppUpdateCheckButton(
+    state: AppUpdateUiState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.size(48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (state.isChecking) {
+            CircularProgressIndicator(
+                color = YaxcTheme.extendedColors.textMuted,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp),
+            )
+        } else {
+            IconButton(
+                onClick = onClick,
+                enabled = !state.isDownloading,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Refresh,
+                    contentDescription = textResource(R.string.appUpdateCheck),
+                    tint = YaxcTheme.extendedColors.textMuted,
+                )
             }
         }
     }

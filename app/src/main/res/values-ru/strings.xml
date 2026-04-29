@@ -27,6 +27,7 @@
     <string name="appUpdateInstall">Установить обновление</string>
     <string name="appUpdateCheckFailed">Не удалось проверить обновления</string>
     <string name="appUpdateInstallUnavailable">Не удалось открыть установщик</string>
+    <string name="appUpdateCheck">Проверить обновления</string>
     <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">XTLS/Xray-core</string>
     <string name="tun2socksLabel">heiher/hev-socks5-tunnel</string>

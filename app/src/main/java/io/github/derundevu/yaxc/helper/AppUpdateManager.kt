@@ -83,6 +83,12 @@ class AppUpdateManager(
 
     fun startDownload(): Boolean {
         val release = uiState.availableRelease ?: return false
+        syncPendingDownloadState()
+        if (settings.appUpdatePendingVersion == release.versionName) {
+            if (uiState.isDownloading || uiState.isReadyToInstall) return true
+        }
+
+        clearPendingDownload(removeFromDownloadManager = true)
         val request = DownloadManager.Request(Uri.parse(release.asset.downloadUrl))
             .setTitle("yaxc ${release.versionName}")
             .setDescription(release.asset.name)
@@ -110,12 +116,9 @@ class AppUpdateManager(
 
     fun syncPendingDownloadState() {
         val pendingVersion = settings.appUpdatePendingVersion.takeIf { it.isNotBlank() }
-        if (pendingVersion != null && !isVersionNewer(pendingVersion, BuildConfig.VERSION_NAME)) {
-            clearPendingDownload()
-        }
-
         val downloadId = settings.appUpdateDownloadId
-        if (downloadId == 0L) {
+        if (pendingVersion != null && !isVersionNewer(pendingVersion, BuildConfig.VERSION_NAME)) {
+            clearPendingDownload(removeFromDownloadManager = true)
             uiState = uiState.copy(
                 pendingVersion = null,
                 isDownloading = false,
@@ -124,10 +127,21 @@ class AppUpdateManager(
             return
         }
 
-        when (queryDownloadState(downloadId)) {
+        if (downloadId == 0L || pendingVersion == null) {
+            if (downloadId != 0L) clearPendingDownload(removeFromDownloadManager = true)
+            uiState = uiState.copy(
+                pendingVersion = null,
+                isDownloading = false,
+                isReadyToInstall = false,
+            )
+            return
+        }
+
+        val downloadState = queryDownloadState(downloadId)
+        when (downloadState) {
             DownloadState.Running -> {
                 uiState = uiState.copy(
-                    pendingVersion = settings.appUpdatePendingVersion.takeIf { it.isNotBlank() },
+                    pendingVersion = pendingVersion,
                     isDownloading = true,
                     isReadyToInstall = false,
                 )
@@ -135,7 +149,7 @@ class AppUpdateManager(
 
             DownloadState.Successful -> {
                 uiState = uiState.copy(
-                    pendingVersion = settings.appUpdatePendingVersion.takeIf { it.isNotBlank() },
+                    pendingVersion = pendingVersion,
                     isDownloading = false,
                     isReadyToInstall = true,
                 )
@@ -144,7 +158,7 @@ class AppUpdateManager(
             DownloadState.Missing,
             DownloadState.Failed,
             -> {
-                clearPendingDownload()
+                clearPendingDownload(removeFromDownloadManager = downloadState == DownloadState.Failed)
                 uiState = uiState.copy(
                     pendingVersion = null,
                     isDownloading = false,
@@ -154,10 +168,9 @@ class AppUpdateManager(
         }
     }
 
-    fun handleDownloadComplete(downloadId: Long): Intent? {
-        if (downloadId == 0L || downloadId != settings.appUpdateDownloadId) return null
+    fun handleDownloadComplete(downloadId: Long) {
+        if (downloadId == 0L || downloadId != settings.appUpdateDownloadId) return
         syncPendingDownloadState()
-        return installDownloadedUpdate()
     }
 
     fun installDownloadedUpdate(): Intent? {
@@ -250,7 +263,11 @@ class AppUpdateManager(
         }
     }
 
-    private fun clearPendingDownload() {
+    private fun clearPendingDownload(removeFromDownloadManager: Boolean = false) {
+        val downloadId = settings.appUpdateDownloadId
+        if (removeFromDownloadManager && downloadId != 0L) {
+            runCatching { downloadManager.remove(downloadId) }
+        }
         settings.appUpdateDownloadId = 0L
         settings.appUpdatePendingVersion = ""
     }

@@ -13,6 +13,9 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
@@ -20,7 +23,8 @@ import io.github.derundevu.yaxc.helper.AppUpdateManager
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.root.RootDestination
 import io.github.derundevu.yaxc.presentation.root.SettingsHomeScreen
-import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class SettingsHomeActivity : AppCompatActivity() {
@@ -31,7 +35,7 @@ class SettingsHomeActivity : AppCompatActivity() {
     private val appUpdateDownloadReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val downloadId = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, 0L) ?: 0L
-            appUpdateManager.handleDownloadComplete(downloadId)?.let(::startInstallerIntent)
+            appUpdateManager.handleDownloadComplete(downloadId)
         }
     }
 
@@ -55,6 +59,7 @@ class SettingsHomeActivity : AppCompatActivity() {
                     onOpenLinks = { startActivity(Intent(applicationContext, LinksActivity::class.java)) },
                     onOpenLogs = { startActivity(Intent(applicationContext, LogsActivity::class.java)) },
                     onOpenSettings = { startActivity(Intent(applicationContext, SettingsActivity::class.java)) },
+                    onCheckAppUpdate = ::checkAppUpdate,
                     onDownloadAppUpdate = ::downloadAppUpdate,
                     onInstallAppUpdate = ::installAppUpdate,
                     onSelectDestination = ::navigateRoot,
@@ -64,6 +69,14 @@ class SettingsHomeActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             appUpdateManager.refresh()
+        }
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    appUpdateManager.syncPendingDownloadState()
+                    delay(APP_UPDATE_POLL_INTERVAL_MS)
+                }
+            }
         }
     }
 
@@ -101,6 +114,12 @@ class SettingsHomeActivity : AppCompatActivity() {
         appUpdateManager.startDownload()
     }
 
+    private fun checkAppUpdate() {
+        lifecycleScope.launch {
+            appUpdateManager.refresh()
+        }
+    }
+
     private fun installAppUpdate() {
         appUpdateManager.installDownloadedUpdate()?.let(::startInstallerIntent)
     }
@@ -117,6 +136,8 @@ class SettingsHomeActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val APP_UPDATE_POLL_INTERVAL_MS = 1_500L
+
         fun rootIntent(context: Context): Intent = rootIntent(context, SettingsHomeActivity::class.java)
 
         private fun rootIntent(context: Context, clazz: Class<out AppCompatActivity>): Intent {

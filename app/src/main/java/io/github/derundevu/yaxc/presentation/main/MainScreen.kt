@@ -72,6 +72,7 @@ import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -129,6 +130,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPa
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
+import io.github.derundevu.yaxc.presentation.root.AppUpdateCheckButton
 import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -173,6 +175,7 @@ fun MainScreen(
     xrayVersion: String,
     tun2socksVersion: String,
     appUpdateState: AppUpdateUiState,
+    onCheckAppUpdate: () -> Unit,
     onDownloadAppUpdate: () -> Unit,
     onInstallAppUpdate: () -> Unit,
     onAction: (MainAction) -> Unit,
@@ -282,6 +285,7 @@ fun MainScreen(
                                     xrayVersion = xrayVersion,
                                     tun2socksVersion = tun2socksVersion,
                                     appUpdateState = appUpdateState,
+                                    onCheckAppUpdate = onCheckAppUpdate,
                                     onDownloadAppUpdate = onDownloadAppUpdate,
                                     onInstallAppUpdate = onInstallAppUpdate,
                                     topPadding = 86.dp,
@@ -734,6 +738,7 @@ private fun SettingsContent(
     xrayVersion: String,
     tun2socksVersion: String,
     appUpdateState: AppUpdateUiState,
+    onCheckAppUpdate: () -> Unit,
     onDownloadAppUpdate: () -> Unit,
     onInstallAppUpdate: () -> Unit,
     topPadding: androidx.compose.ui.unit.Dp,
@@ -788,38 +793,49 @@ private fun SettingsContent(
         }
         item {
             YaxcGlassPanel {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    VersionRow(
-                        textResource(R.string.appFullName),
-                        appVersion,
-                    )
-                    AppUpdatePanel(
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    AppUpdateCheckButton(
                         state = appUpdateState,
-                        onDownload = onDownloadAppUpdate,
-                        onInstall = onInstallAppUpdate,
+                        onClick = onCheckAppUpdate,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 12.dp, y = (-12).dp),
                     )
-                    VersionRow(
-                        textResource(R.string.xrayLabel),
-                        xrayVersion,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                    VersionRow(
-                        textResource(R.string.tun2socksLabel),
-                        tun2socksVersion,
-                        modifier = Modifier.padding(top = 10.dp),
-                    )
-                    Text(
-                        text = textResource(R.string.madeWithPeople),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        textAlign = TextAlign.Center,
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 16.dp),
-                    )
+                            .padding(horizontal = 42.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        VersionRow(
+                            textResource(R.string.appFullName),
+                            appVersion,
+                        )
+                        AppUpdatePanel(
+                            state = appUpdateState,
+                            onDownload = onDownloadAppUpdate,
+                            onInstall = onInstallAppUpdate,
+                        )
+                        VersionRow(
+                            textResource(R.string.xrayLabel),
+                            xrayVersion,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                        VersionRow(
+                            textResource(R.string.tun2socksLabel),
+                            tun2socksVersion,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                        Text(
+                            text = textResource(R.string.madeWithPeople),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YaxcTheme.extendedColors.textMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp),
+                        )
+                    }
                 }
             }
         }

@@ -115,7 +115,7 @@ class MainActivity : AppCompatActivity() {
     private val appUpdateDownloadReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val downloadId = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, 0L) ?: 0L
-            appUpdateManager.handleDownloadComplete(downloadId)?.let(::startInstallerIntent)
+            appUpdateManager.handleDownloadComplete(downloadId)
         }
     }
 
@@ -154,6 +154,7 @@ class MainActivity : AppCompatActivity() {
                     xrayVersion = XrayCore.version(),
                     tun2socksVersion = getString(R.string.tun2socksVersion),
                     appUpdateState = appUpdateManager.uiState,
+                    onCheckAppUpdate = ::checkAppUpdate,
                     onDownloadAppUpdate = ::downloadAppUpdate,
                     onInstallAppUpdate = ::installAppUpdate,
                     onAction = mainViewModel::onAction,
@@ -169,6 +170,15 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             appUpdateManager.refresh()
+        }
+
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    appUpdateManager.syncPendingDownloadState()
+                    delay(APP_UPDATE_POLL_INTERVAL_MS)
+                }
+            }
         }
 
         intent?.data?.let { deepLink ->
@@ -225,6 +235,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun downloadAppUpdate() {
         appUpdateManager.startDownload()
+    }
+
+    private fun checkAppUpdate() {
+        lifecycleScope.launch {
+            appUpdateManager.refresh()
+        }
     }
 
     private fun installAppUpdate() {
@@ -592,5 +608,9 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         return true
+    }
+
+    private companion object {
+        const val APP_UPDATE_POLL_INTERVAL_MS = 1_500L
     }
 }
