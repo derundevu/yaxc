@@ -6,7 +6,8 @@ import java.net.InetAddress
 
 object AntifilterHelper {
     const val DEFAULT_URL = "https://antifilter.download/list/allyouneed.lst"
-    const val ROUTING_RULE_TAG = "yaxc-antifilter-direct"
+    const val ROUTING_RULE_TAG = "yaxc-antifilter-proxy"
+    const val LEGACY_DIRECT_ROUTING_RULE_TAG = "yaxc-antifilter-direct"
 
     fun readRules(file: File): List<String> {
         if (!file.exists()) return emptyList()

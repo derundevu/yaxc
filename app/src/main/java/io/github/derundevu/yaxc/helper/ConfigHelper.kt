@@ -164,7 +164,7 @@ class ConfigHelper(
         val rules = removeManagedAntifilterRules(JsonHelper.getArray(routing, "rules"))
         val needsPrivateRule = !hasPrivateRule(rules)
 
-        antifilterDirectRule(outbounds)?.let(rules::put)
+        antifilterProxyRule(outbounds)?.let(rules::put)
         rules.put(runtimeProxyDnsRule(outbounds))
         if (needsPrivateRule) {
             rules.put(runtimeDirectPrivateRule(outbounds))
@@ -183,7 +183,10 @@ class ConfigHelper(
         return JSONArray().apply {
             for (index in 0 until source.length()) {
                 val rule = source.optJSONObject(index)
-                if (rule != null && rule.optString("ruleTag") == AntifilterHelper.ROUTING_RULE_TAG) {
+                val ruleTag = rule?.optString("ruleTag")
+                if (ruleTag == AntifilterHelper.ROUTING_RULE_TAG ||
+                    ruleTag == AntifilterHelper.LEGACY_DIRECT_ROUTING_RULE_TAG
+                ) {
                     continue
                 }
                 put(source.get(index))
@@ -191,7 +194,7 @@ class ConfigHelper(
         }
     }
 
-    private fun antifilterDirectRule(outbounds: JSONArray): JSONObject? {
+    private fun antifilterProxyRule(outbounds: JSONArray): JSONObject? {
         if (!settings.antifilterEnabled) return null
         val cidrs = runCatching { AntifilterHelper.readRules(settings.antifilterFile()) }
             .getOrDefault(emptyList())
@@ -200,7 +203,7 @@ class ConfigHelper(
         return JSONObject()
             .put("ruleTag", AntifilterHelper.ROUTING_RULE_TAG)
             .put("ip", JSONArray().apply { cidrs.forEach(::put) })
-            .put("outboundTag", resolveRoutingOutboundTag("direct", outbounds))
+            .put("outboundTag", resolveRoutingOutboundTag("proxy", outbounds))
     }
 
     private fun runtimeProxyDnsRule(outbounds: JSONArray): JSONObject {

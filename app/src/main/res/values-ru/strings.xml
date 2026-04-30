@@ -86,8 +86,8 @@
     <string name="routingModeVisual">Визуально</string>
     <string name="routingModeJson">JSON</string>
     <string name="coreRoutingUnsupportedRules">%1$d правил(а) содержат поля, которые сохраняются только в режиме JSON. Визуальный режим не потеряет их, но редактировать напрямую не сможет.</string>
-    <string name="routingAntifilterTitle">Сети Antifilter напрямую</string>
-    <string name="routingAntifilterEnabledLead">Добавляет %1$d скачанных сетей Antifilter в итоговый routing config Xray как DIRECT. Пользовательские правила остаются выше по приоритету.</string>
+    <string name="routingAntifilterTitle">Сети Antifilter через прокси</string>
+    <string name="routingAntifilterEnabledLead">Добавляет %1$d скачанных сетей Antifilter в итоговый routing config Xray как PROXY. Пользовательские правила остаются выше по приоритету.</string>
     <string name="routingAntifilterMissingLead">Скачайте список Antifilter в Ресурсах, прежде чем включать это управляемое правило маршрутизации.</string>
     <string name="routingAddRule">Добавить правило</string>
     <string name="coreRoutingNoRules">Правил маршрутизации ядра пока нет.</string>
