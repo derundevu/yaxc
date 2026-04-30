@@ -524,14 +524,8 @@ private fun ConnectContent(
                 selectedSourceMetadata = selectedSourceMetadata,
                 selectedProfileName = selectedProfileName,
                 pingState = pingState,
-                activeBatchPingSourceId = activeBatchPingSourceId,
                 collapseProgress = collapseProgress,
                 onPingCurrent = { onAction(MainAction.PingClicked) },
-                onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
-                onRefreshSource = {
-                    if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
-                    else onAction(MainAction.RefreshLinksClicked)
-                },
                 onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
             )
         }
@@ -849,11 +843,8 @@ private fun ConnectionTopCard(
     selectedSourceMetadata: SubscriptionMetadata?,
     selectedProfileName: String,
     pingState: MainPingState,
-    activeBatchPingSourceId: Long?,
     collapseProgress: Float,
     onPingCurrent: () -> Unit,
-    onPingAll: () -> Unit,
-    onRefreshSource: () -> Unit,
     onOpenConnectionInfo: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -934,29 +925,11 @@ private fun ConnectionTopCard(
                 }
             }
 
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ActionBubble(
-                        icon = Icons.Outlined.WifiTethering,
-                        onClick = onPingAll,
-                        loading = activeBatchPingSourceId != null,
-                    )
-                    ActionBubble(
-                        icon = Icons.Outlined.Refresh,
-                        onClick = onRefreshSource,
-                    )
-                }
-                ActionBubble(
-                    icon = Icons.Outlined.Info,
-                    onClick = onOpenConnectionInfo,
-                    contentDescription = textResource(R.string.mainConnectionInfo),
-                )
-            }
+            ActionBubble(
+                icon = Icons.Outlined.Info,
+                onClick = onOpenConnectionInfo,
+                contentDescription = textResource(R.string.mainConnectionInfo),
+            )
         }
     }
 }
