@@ -149,7 +149,7 @@ private enum class MainRootTab {
 }
 
 private const val MAIN_FLOATING_BAR_WIDTH_FRACTION = 0.94f
-private val MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET = 92.dp
+private val MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET = 82.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -316,8 +316,6 @@ fun MainScreen(
 
                 MainBottomConnectRow(
                     visible = rootTab == MainRootTab.Connect,
-                    showMiniBar = collapseProgress > 0f,
-                    collapseProgress = collapseProgress,
                     isRunning = isRunning,
                     selectedSourceName = selectedSourceName,
                     selectedProfileName = selectedProfileName,
@@ -1274,8 +1272,6 @@ private fun MainTopChrome(
 @Composable
 private fun MainBottomConnectRow(
     visible: Boolean,
-    showMiniBar: Boolean,
-    collapseProgress: Float,
     isRunning: Boolean,
     selectedSourceName: String,
     selectedProfileName: String,
@@ -1301,20 +1297,15 @@ private fun MainBottomConnectRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (showMiniBar) {
-                MiniControlBar(
-                    progress = collapseProgress,
-                    selectedSourceName = selectedSourceName,
-                    selectedProfileName = selectedProfileName,
-                    pingState = pingState,
-                    onPingCurrent = onPingCurrent,
-                    onPingAll = onPingAll,
-                    onRefreshSource = onRefreshSource,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
-            }
+            MiniControlBar(
+                selectedSourceName = selectedSourceName,
+                selectedProfileName = selectedProfileName,
+                pingState = pingState,
+                onPingCurrent = onPingCurrent,
+                onPingAll = onPingAll,
+                onRefreshSource = onRefreshSource,
+                modifier = Modifier.weight(1f),
+            )
 
             FloatingConnectButton(
                 isRunning = isRunning,
@@ -1326,7 +1317,6 @@ private fun MainBottomConnectRow(
 
 @Composable
 private fun MiniControlBar(
-    progress: Float,
     selectedSourceName: String,
     selectedProfileName: String,
     pingState: MainPingState,
@@ -1359,10 +1349,8 @@ private fun MiniControlBar(
                 .fillMaxWidth()
                 .height(64.dp)
                 .graphicsLayer {
-                    alpha = progress
-                    scaleX = (0.92f + progress * 0.08f) * pressScale
-                    scaleY = (0.96f + progress * 0.04f) * pressScale
-                    translationX = (1f - progress) * 18f
+                    scaleX = pressScale
+                    scaleY = pressScale
                 }
                 .combinedClickable(
                     interactionSource = interactionSource,
