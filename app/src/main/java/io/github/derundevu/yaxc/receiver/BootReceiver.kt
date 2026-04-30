@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,7 @@ class BootReceiver : BroadcastReceiver() {
             isAppLaunch
         ) return
         val settings = Settings(context)
+        SubscriptionRefreshScheduler.sync(context, settings)
         val xrayCorePid = settings.xrayCorePid()
         val networkMonitorPid = settings.networkMonitorPid()
         if (xrayCorePid.exists()) xrayCorePid.delete()

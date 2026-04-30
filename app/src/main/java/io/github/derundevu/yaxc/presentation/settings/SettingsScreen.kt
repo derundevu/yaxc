@@ -200,7 +200,7 @@ data class SettingsFormState(
             pingAddress = settings.pingAddress,
             pingType = settings.pingType.value,
             pingTimeout = settings.pingTimeout.toString(),
-            refreshLinksInterval = settings.refreshLinksInterval.toString(),
+            refreshLinksInterval = settings.refreshLinksIntervalMinutes.toString(),
             bypassLan = settings.bypassLan,
             enableIpV6 = settings.enableIpV6,
             socksUdp = settings.socksUdp,

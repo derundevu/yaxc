@@ -4,7 +4,7 @@ import org.json.JSONObject
 
 data class SubscriptionMetadata(
     val profileTitle: String? = null,
-    val updateIntervalHours: Int? = null,
+    val updateIntervalMinutes: Int? = null,
     val supportUrl: String? = null,
     val profileWebPageUrl: String? = null,
     val uploadBytes: Long? = null,
@@ -24,7 +24,7 @@ data class SubscriptionMetadata(
 
     fun isEmpty(): Boolean {
         return profileTitle.isNullOrBlank() &&
-            updateIntervalHours == null &&
+            updateIntervalMinutes == null &&
             supportUrl.isNullOrBlank() &&
             profileWebPageUrl.isNullOrBlank() &&
             uploadBytes == null &&
@@ -37,7 +37,7 @@ data class SubscriptionMetadata(
         if (isEmpty()) return null
         return JSONObject().apply {
             profileTitle?.takeIf { it.isNotBlank() }?.let { put(KEY_PROFILE_TITLE, it) }
-            updateIntervalHours?.let { put(KEY_UPDATE_INTERVAL_HOURS, it) }
+            updateIntervalMinutes?.let { put(KEY_UPDATE_INTERVAL_MINUTES, it) }
             supportUrl?.takeIf { it.isNotBlank() }?.let { put(KEY_SUPPORT_URL, it) }
             profileWebPageUrl?.takeIf { it.isNotBlank() }?.let { put(KEY_PROFILE_WEB_PAGE_URL, it) }
             uploadBytes?.let { put(KEY_UPLOAD_BYTES, it) }
@@ -49,6 +49,7 @@ data class SubscriptionMetadata(
 
     companion object {
         private const val KEY_PROFILE_TITLE = "profileTitle"
+        private const val KEY_UPDATE_INTERVAL_MINUTES = "updateIntervalMinutes"
         private const val KEY_UPDATE_INTERVAL_HOURS = "updateIntervalHours"
         private const val KEY_SUPPORT_URL = "supportUrl"
         private const val KEY_PROFILE_WEB_PAGE_URL = "profileWebPageUrl"
@@ -63,8 +64,11 @@ data class SubscriptionMetadata(
                 val json = JSONObject(raw)
                 SubscriptionMetadata(
                     profileTitle = json.optString(KEY_PROFILE_TITLE).ifBlank { null },
-                    updateIntervalHours = json.optInt(KEY_UPDATE_INTERVAL_HOURS)
-                        .takeIf { json.has(KEY_UPDATE_INTERVAL_HOURS) && it > 0 },
+                    updateIntervalMinutes = json.optInt(KEY_UPDATE_INTERVAL_MINUTES)
+                        .takeIf { json.has(KEY_UPDATE_INTERVAL_MINUTES) && it > 0 }
+                        ?: json.optInt(KEY_UPDATE_INTERVAL_HOURS)
+                            .takeIf { json.has(KEY_UPDATE_INTERVAL_HOURS) && it > 0 }
+                            ?.let { it * 60 },
                     supportUrl = json.optString(KEY_SUPPORT_URL).ifBlank { null },
                     profileWebPageUrl = json.optString(KEY_PROFILE_WEB_PAGE_URL).ifBlank { null },
                     uploadBytes = json.optLong(KEY_UPLOAD_BYTES)

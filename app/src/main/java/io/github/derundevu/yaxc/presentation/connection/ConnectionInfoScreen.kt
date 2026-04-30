@@ -85,7 +85,7 @@ fun ConnectionInfoScreen(
         ?.let { formatDaysLeftFull(it) }
         ?: noValue
     val autoUpdateValue = state.selectedSourceMetadata
-        ?.updateIntervalHours
+        ?.updateIntervalMinutes
         ?.let { formatAutoUpdateFull(it) }
         ?: noValue
     val resolvedServerValue by produceState(

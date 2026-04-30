@@ -33,6 +33,8 @@ data class Link(
     var customHeaders: String? = null,
     @ColumnInfo(name = "subscription_metadata")
     var subscriptionMetadata: String? = null,
+    @ColumnInfo(name = "last_refreshed_at")
+    var lastRefreshedAt: Long = 0L,
 ) : Parcelable {
     enum class Type(
         val value: Int,

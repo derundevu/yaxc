@@ -23,6 +23,7 @@ data class MainUiState(
     val selectedSourceId: Long = 0L,
     val selectedSourceName: String = "",
     val selectedSourceMetadata: SubscriptionMetadata? = null,
+    val selectedSourceLastRefreshedAt: Long? = null,
     val filteredProfiles: List<MainProfileItem> = emptyList(),
     val selectedProfileId: Long = 0L,
     val selectedProfileName: String = "",

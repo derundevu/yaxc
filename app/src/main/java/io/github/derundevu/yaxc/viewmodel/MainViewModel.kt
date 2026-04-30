@@ -97,6 +97,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val selectedSourceMetadata = SubscriptionMetadata.fromJsonString(
             selectedSource?.subscriptionMetadata
         )
+        val selectedSourceLastRefreshedAt = selectedSource
+            ?.lastRefreshedAt
+            ?.takeIf { it > 0L }
         val filteredProfiles = profiles
             .filter { resolvedTabId == 0L || it.link == resolvedTabId }
             .map { profile ->
@@ -125,6 +128,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedSourceId = cardSourceId,
             selectedSourceName = selectedSourceName,
             selectedSourceMetadata = selectedSourceMetadata,
+            selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
             filteredProfiles = filteredProfiles,
             selectedProfileId = selection.selectedProfileId,
             selectedProfileName = selectedProfileName,

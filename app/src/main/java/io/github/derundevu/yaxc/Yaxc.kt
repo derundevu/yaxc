@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import io.github.derundevu.yaxc.database.YaxcDatabase
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
 import io.github.derundevu.yaxc.repository.ConfigRepository
 import io.github.derundevu.yaxc.repository.LinkRepository
 import io.github.derundevu.yaxc.repository.ProfileRepository
@@ -19,5 +20,6 @@ class Yaxc : Application() {
         super.onCreate()
         val settings = Settings(this)
         AppCompatDelegate.setApplicationLocales(settings.appLocales())
+        SubscriptionRefreshScheduler.sync(this, settings)
     }
 }

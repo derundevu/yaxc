@@ -33,6 +33,7 @@ import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.AppUpdateManager
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.helper.LinkHelper
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
@@ -70,6 +71,7 @@ class MainActivity : AppCompatActivity() {
     private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
     private var batchPingJob: Job? = null
     private var singlePingJob: Job? = null
+    private var subscriptionRefreshJob: Job? = null
     private var queuedSinglePingProfileId: Long? = null
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
@@ -138,6 +140,7 @@ class MainActivity : AppCompatActivity() {
                     isRunning = uiState.isRunning,
                     selectedSourceName = uiState.selectedSourceName,
                     selectedSourceMetadata = uiState.selectedSourceMetadata,
+                    selectedSourceLastRefreshedAt = uiState.selectedSourceLastRefreshedAt,
                     selectedProfileName = uiState.selectedProfileName,
                     selectedServerLabel = uiState.selectedServerLabel,
                     socksAddress = uiState.socksAddress,
@@ -220,11 +223,7 @@ class MainActivity : AppCompatActivity() {
                 registerReceiver(appUpdateDownloadReceiver, it)
             }
         }
-        if (settings.refreshLinksOnOpen) {
-            val interval = (settings.refreshLinksInterval * 60 * 1000).toLong()
-            val diff = System.currentTimeMillis() - settings.lastRefreshLinks
-            if (diff >= interval) refreshLinks()
-        }
+        if (settings.refreshLinksOnOpen) refreshDueSubscriptions()
     }
 
     override fun onStop() {
@@ -412,6 +411,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshLinks() {
         startActivity(LinksManagerActivity.refreshLinks(applicationContext))
+    }
+
+    private fun refreshDueSubscriptions() {
+        if (subscriptionRefreshJob?.isActive == true) return
+        subscriptionRefreshJob = lifecycleScope.launch {
+            runCatching {
+                SubscriptionRefreshHelper(applicationContext, settings).refreshDueLinks()
+            }
+        }
     }
 
     private fun refreshSource(linkId: Long) {

@@ -92,6 +92,8 @@ class Settings(private val context: Context) {
         val DEFAULT_GEO_IP_ADDRESS = GeoResourcesProvider.RunetFreedom.geoIpAddress
         val DEFAULT_GEO_SITE_ADDRESS = GeoResourcesProvider.RunetFreedom.geoSiteAddress
         const val DEFAULT_ANTIFILTER_ADDRESS = AntifilterHelper.DEFAULT_URL
+        const val MIN_REFRESH_LINKS_INTERVAL_MINUTES = 15
+        const val DEFAULT_REFRESH_LINKS_INTERVAL_MINUTES = 60
         val USERNAME_ALPHABET: CharArray = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
         val PASSWORD_ALPHABET: CharArray =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray()
@@ -114,11 +116,6 @@ class Settings(private val context: Context) {
     var selectedProfile: Long
         get() = sharedPreferences.getLong("selectedProfile", 0L)
         set(value) = sharedPreferences.edit { putLong("selectedProfile", value) }
-
-    /** The time of last refresh */
-    var lastRefreshLinks: Long
-        get() = sharedPreferences.getLong("lastRefreshLinks", 0L)
-        set(value) = sharedPreferences.edit { putLong("lastRefreshLinks", value) }
 
     /** Pending app update download */
     var appUpdateDownloadId: Long
@@ -281,9 +278,13 @@ class Settings(private val context: Context) {
     var pingTimeout: Int
         get() = sharedPreferences.getInt("pingTimeout", 5)
         set(value) = sharedPreferences.edit { putInt("pingTimeout", value) }
-    var refreshLinksInterval: Int
-        get() = sharedPreferences.getInt("refreshLinksInterval", 60)
-        set(value) = sharedPreferences.edit { putInt("refreshLinksInterval", value) }
+    var refreshLinksIntervalMinutes: Int
+        get() = sharedPreferences
+            .getInt("refreshLinksInterval", DEFAULT_REFRESH_LINKS_INTERVAL_MINUTES)
+            .coerceAtLeast(MIN_REFRESH_LINKS_INTERVAL_MINUTES)
+        set(value) = sharedPreferences.edit {
+            putInt("refreshLinksInterval", value.coerceAtLeast(MIN_REFRESH_LINKS_INTERVAL_MINUTES))
+        }
     var bypassLan: Boolean
         get() = sharedPreferences.getBoolean("bypassLan", true)
         set(value) = sharedPreferences.edit { putBoolean("bypassLan", value) }

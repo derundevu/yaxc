@@ -244,11 +244,11 @@ class HttpHelper(
 
             return SubscriptionMetadata(
                 profileTitle = extractSubscriptionTitle(headers),
-                updateIntervalHours = firstDecodedHeaderValue(
+                updateIntervalMinutes = firstDecodedHeaderValue(
                     normalizedHeaders,
                     "profile-update-interval",
                     "x-profile-update-interval",
-                )?.toIntOrNull()?.takeIf { it > 0 },
+                )?.toIntOrNull()?.takeIf { it > 0 }?.let { it * 60 },
                 supportUrl = firstDecodedHeaderValue(
                     normalizedHeaders,
                     "support-url",

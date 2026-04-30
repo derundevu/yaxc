@@ -279,14 +279,17 @@
     <string name="mainSubscriptionSupportUrl">Support URL</string>
     <string name="mainSubscriptionWebPage">Service Page</string>
     <string name="mainSubscriptionUnlimited">Unlimited</string>
+    <string name="mainSubscriptionUnlimitedSymbol">∞</string>
     <string name="mainSubscriptionExpired">Expired</string>
     <string name="mainSubscriptionToday">Today</string>
     <string name="mainSubscriptionUsedShort">used %1$s</string>
     <string name="mainSubscriptionUsageShort">%1$s / %2$s</string>
     <string name="mainSubscriptionDaysShort">%1$s d left</string>
     <string name="mainSubscriptionDaysFull">%1$d days</string>
-    <string name="mainSubscriptionAutoUpdateShort">auto %1$sh</string>
-    <string name="mainSubscriptionAutoUpdateFull">Every %1$d h</string>
+    <string name="mainSubscriptionAutoUpdateShort">%1$d min</string>
+    <string name="mainSubscriptionAutoUpdateHoursShort">%1$d h</string>
+    <string name="mainSubscriptionAutoUpdateFull">Every %1$d min</string>
+    <string name="mainSubscriptionLastRefreshShort">%1$s</string>
     <string name="mainConnectionPasswordHidden">Hidden</string>
     <string name="mainConnectionResolveFailed">Unable to resolve</string>
     <string name="mainPingFailedShort">ERR</string>
@@ -325,7 +328,7 @@
     <string name="settingsPingAddressLead">URL or host used for latency checks through the selected profile.</string>
     <string name="settingsPingTypeLead">Choose how the app checks whether the route is alive.</string>
     <string name="settingsPingTimeoutLead">In seconds. Maximum wait time for a ping result before it is treated as failed.</string>
-    <string name="settingsRefreshLinksIntervalLead">In hours. How often subscription links refresh in the background.</string>
+    <string name="settingsRefreshLinksIntervalLead">In minutes. Used when a subscription does not provide its own update interval. Minimum is 15 minutes.</string>
     <string name="settingsBypassLanLead">Keeps local IPv4 networks such as 192.168.x.x and 10.x.x.x outside the VPN.</string>
     <string name="settingsSocksUdpLead">Allows UDP through the local SOCKS inbound. Needed for QUIC, DNS and some apps.</string>
     <string name="settingsTun2socksLead">Forwards TUN traffic into the local SOCKS proxy. Usually should stay enabled.</string>
@@ -381,13 +384,13 @@
     <string name="pingTypeGet">HTTP GET</string>
     <string name="pingTypeTcp">TCP Connect</string>
     <string name="pingTimeout">Ping Timeout</string>
-    <string name="refreshLinksInterval">Refresh Links Interval</string>
+    <string name="refreshLinksInterval">Subscription Refresh Interval</string>
     <string name="bypassLan">Bypass LAN (IPv4)</string>
     <string name="enableIpV6">Enable IPv6</string>
     <string name="socksUdp">Socks UDP</string>
     <string name="tun2socks">Tun2socks</string>
     <string name="bootAutoStart">Boot Auto Start</string>
-    <string name="refreshLinksOnOpen">Refresh Links On Open</string>
+    <string name="refreshLinksOnOpen">Auto-refresh subscriptions</string>
 
     <!-- Advanced Settings -->
     <string name="primaryDns">Primary DNS (v4)</string>

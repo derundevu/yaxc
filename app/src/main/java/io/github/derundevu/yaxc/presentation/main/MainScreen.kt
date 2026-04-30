@@ -139,6 +139,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private enum class MainRootTab {
@@ -159,6 +160,7 @@ fun MainScreen(
     isRunning: Boolean,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
+    selectedSourceLastRefreshedAt: Long?,
     selectedProfileName: String,
     selectedServerLabel: String,
     socksAddress: String,
@@ -250,6 +252,7 @@ fun MainScreen(
                                     isRunning = isRunning,
                                     selectedSourceName = selectedSourceName,
                                     selectedSourceMetadata = selectedSourceMetadata,
+                                    selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
                                     selectedProfileName = selectedProfileName,
                                     selectedServerLabel = selectedServerLabel,
                                     socksAddress = socksAddress,
@@ -425,6 +428,7 @@ private fun ConnectContent(
     isRunning: Boolean,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
+    selectedSourceLastRefreshedAt: Long?,
     selectedProfileName: String,
     selectedServerLabel: String,
     socksAddress: String,
@@ -522,6 +526,7 @@ private fun ConnectContent(
                 isRunning = isRunning,
                 selectedSourceName = selectedSourceName,
                 selectedSourceMetadata = selectedSourceMetadata,
+                selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
                 selectedProfileName = selectedProfileName,
                 pingState = pingState,
                 collapseProgress = collapseProgress,
@@ -841,6 +846,7 @@ private fun ConnectionTopCard(
     isRunning: Boolean,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
+    selectedSourceLastRefreshedAt: Long?,
     selectedProfileName: String,
     pingState: MainPingState,
     collapseProgress: Float,
@@ -850,7 +856,10 @@ private fun ConnectionTopCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val subscriptionSummary = subscriptionCardSummary(selectedSourceMetadata)
+    val subscriptionSummary = subscriptionCardSummary(
+        metadata = selectedSourceMetadata,
+        lastRefreshedAt = selectedSourceLastRefreshedAt,
+    )
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.992f else 1f,
         animationSpec = spring(dampingRatio = 0.82f, stiffness = 720f),
@@ -910,7 +919,7 @@ private fun ConnectionTopCard(
                         text = subscriptionSummary,
                         style = MaterialTheme.typography.labelSmall,
                         color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -935,38 +944,40 @@ private fun ConnectionTopCard(
 }
 
 @Composable
-private fun subscriptionCardSummary(metadata: SubscriptionMetadata?): String? {
-    if (metadata == null) return null
+private fun subscriptionCardSummary(
+    metadata: SubscriptionMetadata?,
+    lastRefreshedAt: Long?,
+): String? {
+    if (metadata == null && lastRefreshedAt == null) return null
     val parts = buildList {
-        formatTrafficSummaryShort(metadata)?.let(::add)
-        formatDaysLeftShort(metadata.expireAtEpochSeconds)?.let(::add)
-        metadata.updateIntervalHours?.let { interval ->
-            add(formatAutoUpdateShort(interval))
+        metadata?.let { value ->
+            formatTrafficSummaryShort(value)?.let(::add)
+            formatDaysLeftShort(value.expireAtEpochSeconds)?.let(::add)
+            value.updateIntervalMinutes?.let { interval ->
+                add(formatAutoUpdateShort(interval))
+            }
         }
+        add(formatLastRefreshShort(lastRefreshedAt))
     }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" • ")
 }
 
 @Composable
 private fun formatTrafficSummaryShort(metadata: SubscriptionMetadata): String? {
-    val usedBytes = metadata.usedBytes ?: return null
+    val usedBytes = metadata.usedBytes
     val totalBytes = metadata.totalBytes
-    return when {
-        totalBytes == 0L && usedBytes == 0L -> stringResource(R.string.mainSubscriptionUnlimited)
-        totalBytes == null -> stringResource(
-            R.string.mainSubscriptionUsedShort,
-            formatBytesCompact(usedBytes),
-        )
-        totalBytes == 0L -> stringResource(
-            R.string.mainSubscriptionUsedShort,
-            formatBytesCompact(usedBytes),
-        )
-        else -> stringResource(
-            R.string.mainSubscriptionUsageShort,
-            formatBytesCompact(usedBytes),
-            formatBytesCompact(totalBytes),
-        )
-    }
+    if (usedBytes == null && totalBytes == null) return null
+
+    val usedLabel = formatBytesCompact(usedBytes ?: 0L)
+    val limitLabel = totalBytes
+        ?.takeIf { it > 0L }
+        ?.let(::formatBytesCompact)
+        ?: textResource(R.string.mainSubscriptionUnlimitedSymbol)
+    return stringResource(
+        R.string.mainSubscriptionUsageShort,
+        usedLabel,
+        limitLabel,
+    )
 }
 
 @Composable
@@ -986,8 +997,22 @@ private fun formatDaysLeftShort(expireAtEpochSeconds: Long?): String? {
 }
 
 @Composable
-private fun formatAutoUpdateShort(hours: Int): String {
-    return stringResource(R.string.mainSubscriptionAutoUpdateShort, hours)
+private fun formatAutoUpdateShort(minutes: Int): String {
+    return if (minutes % 60 == 0) {
+        stringResource(R.string.mainSubscriptionAutoUpdateHoursShort, minutes / 60)
+    } else {
+        stringResource(R.string.mainSubscriptionAutoUpdateShort, minutes)
+    }
+}
+
+@Composable
+private fun formatLastRefreshShort(lastRefreshedAt: Long?): String {
+    val label = lastRefreshedAt
+        ?.let { Instant.ofEpochMilli(it) }
+        ?.atZone(ZoneId.systemDefault())
+        ?.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        ?: textResource(R.string.noValue)
+    return stringResource(R.string.mainSubscriptionLastRefreshShort, label)
 }
 
 private fun formatBytesCompact(bytes: Long): String {

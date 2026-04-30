@@ -42,13 +42,13 @@ fun formatDaysLeftFull(expireAtEpochSeconds: Long): String {
 }
 
 @Composable
-fun formatAutoUpdateShort(hours: Int): String {
-    return stringResource(R.string.mainSubscriptionAutoUpdateShort, hours)
+fun formatAutoUpdateShort(minutes: Int): String {
+    return stringResource(R.string.mainSubscriptionAutoUpdateShort, minutes)
 }
 
 @Composable
-fun formatAutoUpdateFull(hours: Int): String {
-    return stringResource(R.string.mainSubscriptionAutoUpdateFull, hours)
+fun formatAutoUpdateFull(minutes: Int): String {
+    return stringResource(R.string.mainSubscriptionAutoUpdateFull, minutes)
 }
 
 fun formatExpiryDateTime(expireAtEpochSeconds: Long): String {

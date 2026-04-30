@@ -19,6 +19,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
 import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.launch
 import java.net.Inet4Address
@@ -75,7 +76,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val pingTimeout = formState.pingTimeout.toIntOrNull()
             ?: return showInvalidNumber(R.string.pingTimeout)
-        val refreshLinksInterval = formState.refreshLinksInterval.toIntOrNull()
+        val refreshLinksIntervalMinutes = formState.refreshLinksInterval.toIntOrNull()
             ?: return showInvalidNumber(R.string.refreshLinksInterval)
         val tunMtu = formState.tunMtu.toIntOrNull()
             ?: return showInvalidNumber(R.string.tunMtu)
@@ -197,7 +198,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.pingAddress = newPingAddress
             settings.pingType = newPingType
             settings.pingTimeout = pingTimeout
-            settings.refreshLinksInterval = refreshLinksInterval
+            settings.refreshLinksIntervalMinutes = refreshLinksIntervalMinutes
             settings.bypassLan = formState.bypassLan
             settings.enableIpV6 = formState.enableIpV6
             settings.socksUdp = formState.socksUdp
@@ -226,6 +227,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.transparentProxy = formState.transparentProxy
             settings.languageTag = newLanguageTag
             settings.themeStyle = newThemeStyle
+            SubscriptionRefreshScheduler.sync(this@SettingsActivity, settings)
 
             if (oldLanguageTag != newLanguageTag) {
                 AppCompatDelegate.setApplicationLocales(settings.appLocales())

@@ -9,6 +9,7 @@ androidxCoreKtx = "1.17.0"
 androidxAppCompat = "1.7.1"
 androidxLifecycleViewmodelKtx = "2.10.0"
 androidxRoom = "2.8.4"
+androidxWork = "2.11.0"
 blacksquircleUi = "2.9.0"
 googleMaterial = "1.13.0"
 libsuCore = "5.2.2"
@@ -34,6 +35,7 @@ androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lif
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "androidxRoom" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "androidxRoom" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "androidxRoom" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
 blacksquircle-ui-editorkit = { group = "com.blacksquircle.ui", name = "editorkit", version.ref = "blacksquircleUi" }
 blacksquircle-ui-language-json = { group = "com.blacksquircle.ui", name = "language-json", version.ref = "blacksquircleUi" }
 google-material = { group = "com.google.android.material", name = "material", version.ref = "googleMaterial" }
