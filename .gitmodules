@@ -1,12 +1,12 @@
 [submodule "app/src/main/jni/hev-socks5-tunnel"]
 	path = app/src/main/jni/hev-socks5-tunnel
-	url = https://github.com/heiher/hev-socks5-tunnel.git
+	url = https://github.com/derundevu/hev-socks5-tunnel.git
 [submodule "XrayCore/libXray"]
 	path = XrayCore/libXray
-	url = https://github.com/XTLS/libXray.git
+	url = https://github.com/derundevu/libXray.git
 [submodule "XrayCore/Xray-core"]
 	path = XrayCore/Xray-core
-	url = https://github.com/XTLS/Xray-core.git
+	url = https://github.com/derundevu/Xray-core.git
 [submodule "XrayHelper"]
 	path = XrayHelper
-	url = https://github.com/SaeedDev94/XrayHelper.git
+	url = https://github.com/derundevu/XrayHelper.git
