@@ -476,7 +476,7 @@ class HttpHelper(
                     Settings.PingType.Tcp -> {
                         val target = resolveTcpTarget(settings.pingAddress)
                         val socket = if (proxy) {
-                            Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress(settings.socksAddress, settings.socksPort.toInt())))
+                            Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress(settings.socksAddress, settings.effectiveSocksPort().toInt())))
                         } else {
                             Socket()
                         }
@@ -522,7 +522,7 @@ class HttpHelper(
                 Settings.PingType.Get -> "GET"
                 Settings.PingType.Tcp -> "GET"
             }
-            val address = InetSocketAddress(settings.socksAddress, settings.socksPort.toInt())
+            val address = InetSocketAddress(settings.socksAddress, settings.effectiveSocksPort().toInt())
             val proxy = if (withProxy) Proxy(Proxy.Type.SOCKS, address) else null
             val timeout = settings.pingTimeout * 1000
 

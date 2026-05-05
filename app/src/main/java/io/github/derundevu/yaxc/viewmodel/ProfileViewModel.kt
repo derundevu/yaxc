@@ -26,8 +26,8 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
 
     fun next(link: Long) = viewModelScope.launch {
         val all = profiles.value
-        fixIndex(all)
         val list = all.filter { link == 0L || link == it.link }
+        fixIndex(list)
         filtered.emit(list)
     }
 

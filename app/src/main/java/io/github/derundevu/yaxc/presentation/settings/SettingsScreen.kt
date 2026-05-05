@@ -65,6 +65,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchR
 data class SettingsFormState(
     val socksAddress: String,
     val socksPort: String,
+    val randomizeSocksPort: Boolean,
     val socksUsername: String,
     val socksPassword: String,
     val userAgent: String,
@@ -144,12 +145,14 @@ data class SettingsFormState(
                     it.languageTag,
                     it.themeStyle,
                     it.xHwid,
+                    it.randomizeSocksPort,
                 )
             },
             restore = { values ->
                 SettingsFormState(
                     socksAddress = values[0] as String,
                     socksPort = values[1] as String,
+                    randomizeSocksPort = values.getOrNull(38) as? Boolean ?: true,
                     socksUsername = values[2] as String,
                     socksPassword = values[3] as String,
                     userAgent = values[4] as String,
@@ -193,6 +196,7 @@ data class SettingsFormState(
         fun from(settings: Settings) = SettingsFormState(
             socksAddress = settings.socksAddress,
             socksPort = settings.socksPort,
+            randomizeSocksPort = settings.randomizeSocksPort,
             socksUsername = settings.socksUsername,
             socksPassword = settings.socksPassword,
             userAgent = settings.userAgent,
@@ -580,6 +584,27 @@ private fun BasicSettingsTab(
                 value = formState.socksPort,
                 onValueChange = { onFormStateChange(formState.copy(socksPort = it)) },
                 keyboardType = KeyboardType.Number,
+                enabled = !formState.randomizeSocksPort,
+                helperText = if (formState.randomizeSocksPort) {
+                    textResource(R.string.settingsRandomizeSocksPortLead)
+                } else {
+                    null
+                },
+            )
+            SettingsDivider()
+            YaxcSwitchRow(
+                title = textResource(R.string.randomizeSocksPort),
+                checked = formState.randomizeSocksPort,
+                onCheckedChange = { enabled ->
+                    onFormStateChange(
+                        formState.copy(
+                            randomizeSocksPort = enabled,
+                            socksPort = formState.socksPort.ifBlank { Settings.DEFAULT_SOCKS_PORT },
+                        )
+                    )
+                },
+                icon = Icons.Outlined.Security,
+                subtitle = textResource(R.string.settingsRandomizeSocksPortLead),
             )
             SettingsDivider()
             SettingsTextField(
@@ -1011,6 +1036,7 @@ private fun SettingsTextField(
     keyboardType: KeyboardType = KeyboardType.Text,
     isPassword: Boolean = false,
     helperText: String? = null,
+    enabled: Boolean = true,
     trailingContent: @Composable (() -> Unit)? = null,
 ) {
     Column(
@@ -1024,6 +1050,7 @@ private fun SettingsTextField(
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
             label = { Text(text = label) },
+            enabled = enabled,
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,

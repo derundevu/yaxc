@@ -199,6 +199,7 @@ class TProxyService : VpnService() {
 
     private fun start(profile: Profile?, globalConfigs: Config) {
         if (profile == null) return
+        if (!settings.transparentProxy) settings.prepareRuntimeSocksPort()
         getConfig(profile, globalConfigs)?.let {
             startXray(it)
             startVPN(profile)
@@ -300,7 +301,7 @@ class TProxyService : VpnService() {
                     "  mtu: ${settings.tunMtu}",
                     "socks5:",
                     "  address: ${settings.socksAddress}",
-                    "  port: ${settings.socksPort}",
+                    "  port: ${settings.effectiveSocksPort()}",
                 )
                 if (
                     settings.socksUsername.trim().isNotEmpty() &&

@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.helper
 
 import android.content.Context
+import androidx.room.withTransaction
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Link
@@ -83,8 +84,10 @@ class SubscriptionRefreshHelper(
         now: Long = System.currentTimeMillis(),
     ) {
         withContext(Dispatchers.IO) {
-            val existingProfiles = if (link.id == 0L) emptyList() else profileDao.linkProfiles(link.id)
-            applyResolvedLink(link, parsed, existingProfiles, now)
+            database.withTransaction {
+                val existingProfiles = if (link.id == 0L) emptyList() else profileDao.linkProfiles(link.id)
+                applyResolvedLink(link, parsed, existingProfiles, now)
+            }
         }
     }
 
@@ -97,8 +100,10 @@ class SubscriptionRefreshHelper(
         links.forEach { link ->
             runCatching {
                 val parsed = resolveProfiles(link)
-                val existingProfiles = profileDao.linkProfiles(link.id)
-                applyResolvedLink(link, parsed, existingProfiles, now)
+                database.withTransaction {
+                    val existingProfiles = profileDao.linkProfiles(link.id)
+                    applyResolvedLink(link, parsed, existingProfiles, now)
+                }
             }.onSuccess {
                 refreshed += 1
             }.onFailure {
@@ -217,40 +222,53 @@ class SubscriptionRefreshHelper(
         linkProfiles: List<Profile>,
         newProfiles: List<Profile>,
     ) {
-        if (newProfiles.size >= linkProfiles.size) {
-            newProfiles.forEachIndexed { index, newProfile ->
-                if (index >= linkProfiles.size) {
-                    newProfile.linkId = link.id
-                    profileDao.create(newProfile)
-                } else {
-                    updateProfile(linkProfiles[index], newProfile)
-                }
-            }
-            return
+        val profilesToInsert = arrayListOf<Profile>()
+        val profilesToUpdate = arrayListOf<Profile>()
+        val profilesToDelete = if (linkProfiles.size > newProfiles.size) {
+            linkProfiles.drop(newProfiles.size)
+        } else {
+            emptyList()
         }
 
-        linkProfiles.forEachIndexed { index, linkProfile ->
-            if (index >= newProfiles.size) {
-                deleteProfile(linkProfile)
-            } else {
-                updateProfile(linkProfile, newProfiles[index])
-            }
-        }
-    }
+        newProfiles.forEachIndexed { index, newProfile ->
+            val newIndex = newProfiles.lastIndex - index
+            val existingProfile = linkProfiles.getOrNull(index)
 
-    private suspend fun updateProfile(linkProfile: Profile, newProfile: Profile) {
-        linkProfile.name = newProfile.name
-        linkProfile.config = newProfile.config
-        profileDao.update(linkProfile)
-    }
-
-    private suspend fun deleteProfile(linkProfile: Profile) {
-        profileDao.remove(linkProfile)
-        withContext(Dispatchers.Main) {
-            val selectedProfile = settings.selectedProfile
-            if (selectedProfile == linkProfile.id) {
-                settings.selectedProfile = 0L
+            if (existingProfile == null) {
+                profilesToInsert.add(
+                    newProfile.apply {
+                        linkId = link.id
+                        this.index = newIndex
+                    }
+                )
+                return@forEachIndexed
             }
+
+            var changed = false
+            if (existingProfile.linkId != link.id) {
+                existingProfile.linkId = link.id
+                changed = true
+            }
+            if (existingProfile.index != newIndex) {
+                existingProfile.index = newIndex
+                changed = true
+            }
+            if (existingProfile.name != newProfile.name) {
+                existingProfile.name = newProfile.name
+                changed = true
+            }
+            if (existingProfile.config != newProfile.config) {
+                existingProfile.config = newProfile.config
+                changed = true
+            }
+            if (changed) profilesToUpdate.add(existingProfile)
         }
+
+        if (profilesToDelete.any { it.id == settings.selectedProfile }) {
+            settings.selectedProfile = 0L
+        }
+        if (profilesToDelete.isNotEmpty()) profileDao.deleteAll(profilesToDelete)
+        if (profilesToUpdate.isNotEmpty()) profileDao.updateAll(profilesToUpdate)
+        if (profilesToInsert.isNotEmpty()) profileDao.insertAll(profilesToInsert)
     }
 }

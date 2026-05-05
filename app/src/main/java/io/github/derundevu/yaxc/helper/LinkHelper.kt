@@ -145,7 +145,7 @@ class LinkHelper(
 
         val socks = JSONObject()
         socks.put("listen", settings.socksAddress)
-        socks.put("port", settings.socksPort.toInt())
+        socks.put("port", settings.effectiveSocksPort().toInt())
         socks.put("protocol", "socks")
 
         val socksSettings = JSONObject()

@@ -322,6 +322,7 @@
     <string name="settingsHidePassword">Hide password</string>
     <string name="settingsSocksUsernameLead">Generated automatically on first launch. You can change it later.</string>
     <string name="settingsSocksPasswordLead">Generated automatically on first launch. You can change it later.</string>
+    <string name="settingsRandomizeSocksPortLead">Chooses a new local SOCKS port for every connection. Disable to use a fixed manual port.</string>
     <string name="settingsUserAgentLead">Used for subscription refresh requests unless a source overrides it. Some panels use User-Agent rules to decide whether they return JSON or base64 links.</string>
     <string name="settingsXHwidLead">Generated automatically on first launch and sent with subscription refresh requests. Reset restores the original generated value.</string>
     <string name="settingsResetXHwid">Reset x-hwid</string>
@@ -374,6 +375,7 @@
     <!-- Basic Settings -->
     <string name="socksAddress">Socks Address</string>
     <string name="socksPort">Socks Port</string>
+    <string name="randomizeSocksPort">Randomize SOCKS port</string>
     <string name="socksUsername">Socks Username</string>
     <string name="socksPassword">Socks Password</string>
     <string name="geoIpAddress">GeoIP Address</string>

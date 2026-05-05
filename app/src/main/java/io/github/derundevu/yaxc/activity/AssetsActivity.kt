@@ -302,7 +302,7 @@ class AssetsActivity : AppCompatActivity() {
             return
         }
 
-        setDownloadState(kind, isLoading = true, progress = 0)
+        setDownloadState(kind, isLoading = true, progress = -1)
 
         DownloadHelper(lifecycleScope, url, file, object : DownloadHelper.DownloadListener {
             override fun onProgress(progress: Int) {

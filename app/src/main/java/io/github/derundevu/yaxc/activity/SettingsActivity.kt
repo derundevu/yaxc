@@ -89,6 +89,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val oldSocksAddress = settings.socksAddress
         val oldSocksPort = settings.socksPort
+        val oldRandomizeSocksPort = settings.randomizeSocksPort
         val oldSocksUsername = settings.socksUsername
         val oldSocksPassword = settings.socksPassword
         val oldPrimaryDns = settings.primaryDns
@@ -120,6 +121,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val newSocksAddress = formState.socksAddress.trim()
         val newSocksPort = formState.socksPort.trim()
+        val newRandomizeSocksPort = formState.randomizeSocksPort
         val newSocksUsername = formState.socksUsername.trim()
         val newSocksPassword = formState.socksPassword
         val newUserAgent = formState.userAgent.trim()
@@ -150,6 +152,9 @@ class SettingsActivity : AppCompatActivity() {
         if (!isValidIpv4Address(newSecondaryDns)) {
             return showInvalidIpAddress(R.string.secondaryDns)
         }
+        if (!newRandomizeSocksPort && !isValidPort(newSocksPort)) {
+            return showInvalidNumber(R.string.socksPort)
+        }
         if (!isValidIpv6Address(newPrimaryDnsV6)) {
             return showInvalidIpAddress(R.string.primaryDnsV6)
         }
@@ -159,6 +164,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val vpnSettingsChanged = oldSocksAddress != newSocksAddress ||
                 oldSocksPort != newSocksPort ||
+                oldRandomizeSocksPort != newRandomizeSocksPort ||
                 oldSocksUsername != newSocksUsername ||
                 oldSocksPassword != newSocksPassword ||
                 oldPrimaryDns != newPrimaryDns ||
@@ -190,7 +196,8 @@ class SettingsActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             settings.socksAddress = newSocksAddress
-            settings.socksPort = newSocksPort
+            settings.socksPort = newSocksPort.ifBlank { Settings.DEFAULT_SOCKS_PORT }
+            settings.randomizeSocksPort = newRandomizeSocksPort
             settings.socksUsername = newSocksUsername
             settings.socksPassword = newSocksPassword
             settings.userAgent = newUserAgent
@@ -270,6 +277,10 @@ class SettingsActivity : AppCompatActivity() {
         if (parts.any { it.isBlank() || (it.length > 1 && it.startsWith('0')) }) return false
         if (parts.any { part -> part.toIntOrNull()?.let { it in 0..255 } != true }) return false
         return parseAddress(value) is Inet4Address
+    }
+
+    private fun isValidPort(value: String): Boolean {
+        return value.toIntOrNull()?.let { it in 1..65535 } == true
     }
 
     private fun isValidIpv6Address(value: String): Boolean {

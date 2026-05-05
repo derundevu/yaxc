@@ -1,5 +1,6 @@
 package io.github.derundevu.yaxc.helper
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -11,6 +12,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 class DownloadHelper(
     private val scope: CoroutineScope,
@@ -24,9 +27,14 @@ class DownloadHelper(
             var input: InputStream? = null
             var output: OutputStream? = null
             var connection: HttpURLConnection? = null
+            val tempFile = File(file.parentFile, "${file.name}.download")
 
             try {
                 connection = URL(url).openConnection() as HttpURLConnection
+                connection.connectTimeout = CONNECT_TIMEOUT_MS
+                connection.readTimeout = READ_TIMEOUT_MS
+                connection.instanceFollowRedirects = true
+                connection.setRequestProperty("User-Agent", USER_AGENT)
                 connection.connect()
 
                 if (connection.responseCode != HttpURLConnection.HTTP_OK) {
@@ -34,26 +42,37 @@ class DownloadHelper(
                 }
 
                 input = connection.inputStream
-                output = FileOutputStream(file)
+                file.parentFile?.mkdirs()
+                tempFile.delete()
+                output = FileOutputStream(tempFile)
 
-                val fileLength = connection.contentLength
+                val fileLength = connection.contentLengthLong
                 val data = ByteArray(4096)
                 var total: Long = 0
                 var count: Int
+                var lastProgress = -1
                 while (input.read(data).also { count = it } != -1) {
                     total += count.toLong()
                     if (fileLength > 0) {
-                        val progress = (total * 100 / fileLength).toInt()
-                        withContext(Dispatchers.Main) {
-                            callback.onProgress(progress)
+                        val progress = (total * 100 / fileLength).toInt().coerceIn(0, 100)
+                        if (progress != lastProgress) {
+                            lastProgress = progress
+                            withContext(Dispatchers.Main) {
+                                callback.onProgress(progress)
+                            }
                         }
                     }
                     output.write(data, 0, count)
                 }
+                output.close()
+                output = null
+                Files.move(tempFile.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
                 withContext(Dispatchers.Main) {
                     callback.onComplete()
                 }
             } catch (exception: Exception) {
+                tempFile.delete()
+                Log.w("DownloadHelper", "Download failed: $url", exception)
                 withContext(Dispatchers.Main) {
                     callback.onError(exception)
                 }
@@ -67,6 +86,12 @@ class DownloadHelper(
                 connection?.disconnect()
             }
         }
+    }
+
+    companion object {
+        private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val READ_TIMEOUT_MS = 30_000
+        private const val USER_AGENT = "yaxc"
     }
 
     interface DownloadListener {

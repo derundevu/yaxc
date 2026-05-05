@@ -322,6 +322,7 @@
     <string name="settingsHidePassword">Скрыть пароль</string>
     <string name="settingsSocksUsernameLead">Генерируется автоматически при первом запуске. Потом можно изменить вручную.</string>
     <string name="settingsSocksPasswordLead">Генерируется автоматически при первом запуске. Потом можно изменить вручную.</string>
+    <string name="settingsRandomizeSocksPortLead">Выбирает новый локальный SOCKS-порт для каждого подключения. Выключите, чтобы использовать фиксированный порт вручную.</string>
     <string name="settingsUserAgentLead">Используется для обновления подписок, если у конкретного источника не задан свой User-Agent. Некоторые панели по User-Agent выбирают, вернуть JSON или base64-ссылки.</string>
     <string name="settingsXHwidLead">Генерируется автоматически при первом запуске и отправляется при обновлении подписок. Reset возвращает исходное сгенерированное значение.</string>
     <string name="settingsResetXHwid">Сбросить x-hwid</string>
@@ -372,6 +373,7 @@
     <string name="deleteSourceDialogMessage">"%1$s" и все связанные профили будут удалены.</string>
     <string name="socksAddress">Адрес SOCKS</string>
     <string name="socksPort">Порт SOCKS</string>
+    <string name="randomizeSocksPort">Рандомизировать порт SOCKS</string>
     <string name="socksUsername">Пользователь SOCKS</string>
     <string name="socksPassword">Пароль SOCKS</string>
     <string name="geoIpAddress">Адрес GeoIP</string>

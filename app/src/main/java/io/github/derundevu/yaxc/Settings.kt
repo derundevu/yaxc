@@ -8,6 +8,7 @@ import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.helper.AntifilterHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import java.io.File
+import java.net.ServerSocket
 import java.security.SecureRandom
 
 class Settings(private val context: Context) {
@@ -76,6 +77,9 @@ class Settings(private val context: Context) {
     companion object {
         private const val LEGACY_APPS_ROUTING_MODE_KEY = "appsRoutingMode"
         private const val APPS_ROUTING_MODE_KEY = "appsRoutingModeV2"
+        const val DEFAULT_SOCKS_PORT = "10808"
+        private const val RANDOM_SOCKS_PORT_MIN = 20000
+        private const val RANDOM_SOCKS_PORT_MAX = 60999
         private const val LEGACY_DEFAULT_USER_AGENT = "${BuildConfig.APPLICATION_ID}/${BuildConfig.VERSION_NAME}"
         private const val DEFAULT_USER_AGENT = "yaxc/${BuildConfig.VERSION_NAME}"
         private const val PREVIOUS_DEFAULT_PING_ADDRESS = "https://www.google.com"
@@ -166,8 +170,14 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getString("socksAddress", "127.0.0.1")!!
         set(value) = sharedPreferences.edit { putString("socksAddress", value) }
     var socksPort: String
-        get() = sharedPreferences.getString("socksPort", "10808")!!
+        get() = sharedPreferences.getString("socksPort", DEFAULT_SOCKS_PORT)!!
         set(value) = sharedPreferences.edit { putString("socksPort", value) }
+    var randomizeSocksPort: Boolean
+        get() = sharedPreferences.getBoolean("randomizeSocksPort", true)
+        set(value) = sharedPreferences.edit { putBoolean("randomizeSocksPort", value) }
+    var runtimeSocksPort: String
+        get() = sharedPreferences.getString("runtimeSocksPort", socksPort)!!
+        private set(value) = sharedPreferences.edit { putString("runtimeSocksPort", value) }
     var socksUsername: String
         get() = sharedPreferences.getString("socksUsername", "")!!
         set(value) = sharedPreferences.edit { putString("socksUsername", value) }
@@ -388,6 +398,19 @@ class Settings(private val context: Context) {
     fun xrayCoreLogs(): File = File(baseDir(), "error.log")
     fun getString(resId: Int, vararg args: Any): String = context.getString(resId, *args)
 
+    fun effectiveSocksPort(): String {
+        if (!randomizeSocksPort) return socksPort
+        return runtimeSocksPort.trim()
+            .takeIf { value -> value.toIntOrNull()?.let { it in 1..65535 } == true }
+            ?: socksPort
+    }
+
+    fun prepareRuntimeSocksPort(): String {
+        val port = if (randomizeSocksPort) randomAvailableSocksPort() else socksPort
+        runtimeSocksPort = port
+        return port
+    }
+
     fun currentGeoResourcesProvider(): GeoResourcesProvider {
         return GeoResourcesProvider.fromUrls(geoIpAddress, geoSiteAddress)
             ?: GeoResourcesProvider.Custom
@@ -466,6 +489,24 @@ class Settings(private val context: Context) {
                 append(alphabet[random.nextInt(alphabet.size)])
             }
         }
+    }
+
+    private fun randomAvailableSocksPort(): String {
+        repeat(16) {
+            val candidate = random.nextInt(
+                RANDOM_SOCKS_PORT_MAX - RANDOM_SOCKS_PORT_MIN + 1
+            ) + RANDOM_SOCKS_PORT_MIN
+            if (isPortAvailable(candidate)) return candidate.toString()
+        }
+        return ServerSocket(0).use { socket -> socket.localPort.toString() }
+    }
+
+    private fun isPortAvailable(port: Int): Boolean {
+        return runCatching {
+            ServerSocket(port).use { socket ->
+                socket.reuseAddress = true
+            }
+        }.isSuccess
     }
 
     private fun randomHexString(byteCount: Int): String {

@@ -146,7 +146,7 @@ class ConfigHelper(
         inbounds.put(
             JSONObject()
                 .put("listen", settings.socksAddress)
-                .put("port", settings.socksPort.toInt())
+                .put("port", settings.effectiveSocksPort().toInt())
                 .put("protocol", "socks")
                 .put("settings", socksSettings)
                 .put("sniffing", sniffing)

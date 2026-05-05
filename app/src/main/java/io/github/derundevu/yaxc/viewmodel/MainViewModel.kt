@@ -40,6 +40,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val activeBatchPingSourceId: Long?,
     )
 
+    private data class ProfileSummaryCacheEntry(
+        val configHash: Int,
+        val configLength: Int,
+        val summary: String,
+    )
+
     private val settings = Settings(application)
     private val linkRepository by lazy { getApplication<Yaxc>().linkRepository }
     private val profileRepository by lazy { getApplication<Yaxc>().profileRepository }
@@ -52,6 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val profilePingStates = MutableStateFlow<Map<Long, MainPingState>>(emptyMap())
     private val activeBatchPingSourceId = MutableStateFlow<Long?>(null)
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
+    private val profileSummaryCache = mutableMapOf<Long, ProfileSummaryCacheEntry>()
 
     private val tabs = linkRepository.tabs.flowOn(Dispatchers.IO)
     private val allProfiles = profileRepository.all.flowOn(Dispatchers.IO).stateIn(
@@ -105,7 +112,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .map { profile ->
                 MainProfileItem(
                     profile = profile,
-                    summary = extractProfileSummary(profile.config),
+                    summary = cachedProfileSummary(profile),
                     pingState = runtime.profilePingStates[profile.id] ?: MainPingState.Idle,
                 )
             }
@@ -117,7 +124,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?.let(::extractServerLabel)
             ?: application.getString(R.string.noValue)
         val socksAddress = settings.socksAddress.trim()
-        val socksPort = settings.socksPort.trim()
+        val socksPort = settings.effectiveSocksPort().trim()
         val socksUsername = settings.socksUsername.trim()
         val socksPassword = settings.socksPassword
         val pingAddress = settings.pingAddress.trim()
@@ -168,8 +175,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     hasResolvedProfilesSnapshot = true
                     if (profiles.isEmpty()) return@collect
                 }
-                fixIndex(profiles)
                 val validProfileIds = profiles.map { it.id }.toSet()
+                profileSummaryCache.keys.toList().filterNot(validProfileIds::contains).forEach(profileSummaryCache::remove)
                 profilePingStates.value = profilePingStates.value
                     .filterKeys { it in validProfileIds }
                 if (selectedProfileId.value != 0L && profiles.isNotEmpty() && profiles.none { it.id == selectedProfileId.value }) {
@@ -379,13 +386,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun fixIndex(list: List<ProfileList>) = viewModelScope.launch {
-        list.forEachIndexed { index, profile ->
-            if (profile.index == index) return@forEachIndexed
-            profileRepository.updateIndex(index, profile.id)
-        }
-    }
-
     private fun extractServerLabel(config: String): String {
         return runCatching {
             val root = JSONObject(config)
@@ -420,5 +420,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .joinToString(separator = " • ")
                 .ifBlank { getApplication<Application>().getString(R.string.noValue) }
         }.getOrDefault(getApplication<Application>().getString(R.string.noValue))
+    }
+
+    private fun cachedProfileSummary(profile: ProfileList): String {
+        val cached = profileSummaryCache[profile.id]
+        if (
+            cached != null &&
+            cached.configHash == profile.config.hashCode() &&
+            cached.configLength == profile.config.length
+        ) {
+            return cached.summary
+        }
+
+        val summary = extractProfileSummary(profile.config)
+        profileSummaryCache[profile.id] = ProfileSummaryCacheEntry(
+            configHash = profile.config.hashCode(),
+            configLength = profile.config.length,
+            summary = summary,
+        )
+        return summary
     }
 }

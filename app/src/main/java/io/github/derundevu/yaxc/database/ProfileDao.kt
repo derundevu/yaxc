@@ -16,7 +16,7 @@ interface ProfileDao {
         "  FROM `profiles`" +
         "  LEFT JOIN `links` ON `profiles`.`link_id` = `links`.`id`" +
         "  WHERE `links`.`is_active` IS NULL OR `links`.`is_active` = 1" +
-        "  ORDER BY `profiles`.`index` ASC"
+        "  ORDER BY COALESCE(`links`.`position`, -1) ASC, `profiles`.`index` ASC"
     )
     fun all(): Flow<List<ProfileList>>
 
@@ -29,20 +29,38 @@ interface ProfileDao {
     @Insert
     suspend fun insert(profile: Profile): Long
 
+    @Insert
+    suspend fun insertAll(profiles: List<Profile>): List<Long>
+
     @Update
     suspend fun update(profile: Profile)
+
+    @Update
+    suspend fun updateAll(profiles: List<Profile>)
 
     @Delete
     suspend fun delete(profile: Profile)
 
+    @Delete
+    suspend fun deleteAll(profiles: List<Profile>)
+
     @Query("UPDATE profiles SET `index` = :index WHERE `id` = :id")
     suspend fun updateIndex(index: Int, id: Long)
 
-    @Query("UPDATE profiles SET `index` = `index` + 1")
-    suspend fun fixInsertIndex()
+    @Query(
+        "UPDATE profiles" +
+        "  SET `index` = `index` + 1" +
+        "  WHERE (:linkId IS NULL AND `link_id` IS NULL) OR `link_id` = :linkId"
+    )
+    suspend fun fixInsertIndex(linkId: Long?)
 
-    @Query("UPDATE profiles SET `index` = `index` - 1 WHERE `index` > :index")
-    suspend fun fixDeleteIndex(index: Int)
+    @Query(
+        "UPDATE profiles" +
+        "  SET `index` = `index` - 1" +
+        "  WHERE `index` > :index" +
+        "  AND ((:linkId IS NULL AND `link_id` IS NULL) OR `link_id` = :linkId)"
+    )
+    suspend fun fixDeleteIndex(index: Int, linkId: Long?)
 
     @Query(
         "UPDATE profiles" +
@@ -65,13 +83,13 @@ interface ProfileDao {
     @Transaction
     suspend fun create(profile: Profile) {
         insert(profile)
-        fixInsertIndex()
+        fixInsertIndex(profile.linkId)
     }
 
     @Transaction
     suspend fun remove(profile: Profile) {
         delete(profile)
-        fixDeleteIndex(profile.index)
+        fixDeleteIndex(profile.index, profile.linkId)
     }
 
     @Transaction
