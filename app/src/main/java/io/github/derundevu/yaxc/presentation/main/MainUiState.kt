@@ -14,7 +14,12 @@ sealed interface MainPingState {
 data class MainProfileItem(
     val profile: ProfileList,
     val summary: String,
-    val pingState: MainPingState = MainPingState.Idle,
+)
+
+data class MainBatchPingProgress(
+    val sourceId: Long?,
+    val completed: Int,
+    val total: Int,
 )
 
 data class MainUiState(
@@ -34,7 +39,9 @@ data class MainUiState(
     val socksUsername: String = "",
     val socksPassword: String = "",
     val pingAddress: String = "",
+    val profilePingStates: Map<Long, MainPingState> = emptyMap(),
     val isRunning: Boolean = false,
     val pingState: MainPingState = MainPingState.Idle,
     val activeBatchPingSourceId: Long? = null,
+    val batchPingProgress: MainBatchPingProgress? = null,
 )

@@ -11,6 +11,7 @@ import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
+import io.github.derundevu.yaxc.presentation.main.MainBatchPingProgress
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
 import io.github.derundevu.yaxc.presentation.main.MainProfileItem
@@ -38,6 +39,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val isRunning: Boolean,
         val profilePingStates: Map<Long, MainPingState>,
         val activeBatchPingSourceId: Long?,
+        val batchPingProgress: MainBatchPingProgress?,
     )
 
     private data class ProfileSummaryCacheEntry(
@@ -57,6 +59,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val isRunning = MutableStateFlow(false)
     private val profilePingStates = MutableStateFlow<Map<Long, MainPingState>>(emptyMap())
     private val activeBatchPingSourceId = MutableStateFlow<Long?>(null)
+    private val batchPingProgress = MutableStateFlow<MainBatchPingProgress?>(null)
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
     private val profileSummaryCache = mutableMapOf<Long, ProfileSummaryCacheEntry>()
 
@@ -76,20 +79,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isRunning,
         profilePingStates,
         activeBatchPingSourceId,
-    ) { isRunning, profilePingStates, activeBatchPingSourceId ->
+        batchPingProgress,
+    ) { isRunning, profilePingStates, activeBatchPingSourceId, batchPingProgress ->
         RuntimeState(
             isRunning = isRunning,
             profilePingStates = profilePingStates,
             activeBatchPingSourceId = activeBatchPingSourceId,
+            batchPingProgress = batchPingProgress,
         )
     }
 
-    val uiState = combine(
+    private val baseUiState = combine(
         tabs,
         allProfiles,
         selection,
-        runtime,
-    ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState, runtime: RuntimeState ->
+    ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState ->
         val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
         val profileCountsBySource = profiles
             .mapNotNull { profile -> profile.link?.let { linkId -> linkId to profile } }
@@ -117,12 +121,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 MainProfileItem(
                     profile = profile.copy(config = ""),
                     summary = cachedProfileSummary(profile),
-                    pingState = runtime.profilePingStates[profile.id] ?: MainPingState.Idle,
                 )
             }
         val selectedProfileName = selectedProfile?.name.orEmpty()
-        val selectedProfilePingState = runtime.profilePingStates[selection.selectedProfileId]
-            ?: MainPingState.Idle
         val selectedServerLabel = selectedProfile
             ?.config
             ?.let(::extractServerLabel)
@@ -150,9 +151,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             socksUsername = socksUsername,
             socksPassword = socksPassword,
             pingAddress = pingAddress,
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        MainUiState(selectedSourceName = application.getString(R.string.mainNoSourceSelected)),
+    )
+    val uiState = combine(baseUiState, runtime) { baseUiState, runtime ->
+        baseUiState.copy(
+            profilePingStates = runtime.profilePingStates,
             isRunning = runtime.isRunning,
-            pingState = selectedProfilePingState,
+            pingState = runtime.profilePingStates[baseUiState.selectedProfileId] ?: MainPingState.Idle,
             activeBatchPingSourceId = runtime.activeBatchPingSourceId,
+            batchPingProgress = runtime.batchPingProgress,
         )
     }.stateIn(
         viewModelScope,
@@ -210,6 +221,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isRunning.value = running
         if (!running && !XrayBatchPingHelper.supportsIsolatedPing()) {
             activeBatchPingSourceId.value = null
+            batchPingProgress.value = null
             profilePingStates.value = profilePingStates.value.mapValues { (_, value) ->
                 if (value == MainPingState.Loading) MainPingState.Idle else value
             }
@@ -224,6 +236,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         profilePingStates.value = profilePingStates.value.toMutableMap().apply {
             put(profileId, state)
         }
+    }
+
+    fun clearLoadingPingStates(profileIds: Collection<Long>) {
+        if (profileIds.isEmpty()) return
+        val profileIdSet = profileIds.toSet()
+        profilePingStates.value = profilePingStates.value.mapValues { (profileId, value) ->
+            if (profileId in profileIdSet && value == MainPingState.Loading) {
+                MainPingState.Idle
+            } else {
+                value
+            }
+        }
+    }
+
+    fun startBatchPingProgress(sourceId: Long?, total: Int) {
+        batchPingProgress.value = MainBatchPingProgress(
+            sourceId = sourceId,
+            completed = 0,
+            total = total.coerceAtLeast(0),
+        )
+    }
+
+    fun updateBatchPingProgress(sourceId: Long?, completed: Int, total: Int) {
+        batchPingProgress.value = MainBatchPingProgress(
+            sourceId = sourceId,
+            completed = completed.coerceIn(0, total.coerceAtLeast(0)),
+            total = total.coerceAtLeast(0),
+        )
+    }
+
+    fun clearBatchPingProgress() {
+        batchPingProgress.value = null
     }
 
     private fun parsePingState(result: String): MainPingState {
@@ -262,12 +306,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             return
         }
+        clearLoadingPingStates(profileIds)
         activeBatchPingSourceId.value = sourceId
-        val updatedStates = profilePingStates.value.toMutableMap()
-        profileIds.forEach { profileId ->
-            updatedStates[profileId] = MainPingState.Loading
-        }
-        profilePingStates.value = updatedStates
+        startBatchPingProgress(sourceId, profileIds.size)
         _effects.tryEmit(
             MainEffect.RunBatchPing(
                 sourceId = sourceId,

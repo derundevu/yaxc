@@ -261,6 +261,7 @@
     <string name="mainProfilesTitle">Профили</string>
     <string name="mainProfilesSubtitle">%1$d профилей доступно • активный: %2$s</string>
     <string name="mainProfilesCount">%1$d профилей</string>
+    <string name="mainProfilesCountWithProgress">%1$d профилей • %2$d/%3$d</string>
     <string name="mainBatchPingPending">Batch ping для всего источника пока не реализован.</string>
     <string name="mainConnectionInfo">Инфо о подключении</string>
     <string name="connectionInfoScreenLead">Все текущие точки подключения, метаданные подписки и локальный доступ к прокси в одном месте.</string>

@@ -45,6 +45,7 @@ import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
@@ -148,9 +149,11 @@ class MainActivity : AppCompatActivity() {
                     socksPassword = uiState.socksPassword,
                     pingAddress = uiState.pingAddress,
                     pingState = uiState.pingState,
+                    profilePingStates = uiState.profilePingStates,
                     profiles = uiState.filteredProfiles,
                     selectedProfileId = uiState.selectedProfileId,
                     activeBatchPingSourceId = uiState.activeBatchPingSourceId,
+                    batchPingProgress = uiState.batchPingProgress,
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),
                     tun2socksVersion = getString(R.string.tun2socksVersion),
@@ -565,9 +568,9 @@ class MainActivity : AppCompatActivity() {
             val supportsIsolatedPing = XrayBatchPingHelper.supportsIsolatedPing()
             try {
                 if (supportsIsolatedPing) {
-                    runIsolatedBatchPing(effect.profileIds)
+                    runIsolatedBatchPing(effect.sourceId, effect.profileIds)
                 } else {
-                    runLegacyBatchPing(effect.profileIds)
+                    runLegacyBatchPing(effect.sourceId, effect.profileIds)
                 }
             } finally {
                 if (!supportsIsolatedPing && settings.selectedProfile != restoreProfileId) {
@@ -576,51 +579,47 @@ class MainActivity : AppCompatActivity() {
                         TProxyService.newConfig(applicationContext)
                     }
                 }
+                mainViewModel.clearLoadingPingStates(effect.profileIds)
+                mainViewModel.clearBatchPingProgress()
                 mainViewModel.onAction(MainAction.SetBatchPingSource(null))
             }
         }
     }
 
-    private suspend fun runIsolatedBatchPing(profileIds: List<Long>) {
+    private suspend fun runIsolatedBatchPing(sourceId: Long?, profileIds: List<Long>) {
         val globalConfig = configRepository.get()
-        val profiles = buildList {
-            profileIds.forEach { profileId ->
-                val profile = try {
-                    profileRepository.find(profileId)
-                } catch (_: Exception) {
-                    null
-                }
-                if (profile != null) add(profile)
-            }
-        }
-        if (profiles.isEmpty()) return
+        if (profileIds.isEmpty()) return
 
-        val maxWorkers = minOf(MAX_BATCH_PING_WORKERS, profiles.size)
+        val maxWorkers = minOf(MAX_BATCH_PING_WORKERS, profileIds.size)
         val nextIndex = AtomicInteger(0)
+        val completedCount = AtomicInteger(0)
 
         supervisorScope {
             List(maxWorkers) {
-                launch(Dispatchers.IO) {
+                launch(Dispatchers.Default) {
                     while (isActive) {
                         val profileIndex = nextIndex.getAndIncrement()
-                        if (profileIndex >= profiles.size) break
-                        val profile = profiles[profileIndex]
-                        val result = try {
-                            withTimeoutOrNull(BATCH_PING_TIMEOUT_MS) {
-                                XrayBatchPingHelper.measureProfileDelay(
-                                    context = applicationContext,
-                                    settings = settings,
-                                    globalConfig = globalConfig,
-                                    profile = profile,
-                                )
-                            } ?: getString(R.string.pingFailedGeneric)
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: Exception) {
-                            error.message ?: getString(R.string.pingFailedGeneric)
-                        }
+                        if (profileIndex >= profileIds.size) break
+                        val profileId = profileIds[profileIndex]
                         if (isActive) {
-                            mainViewModel.onAction(MainAction.ProfilePingUpdated(profile.id, result))
+                            mainViewModel.onAction(
+                                MainAction.SetProfilePingState(
+                                    profileId,
+                                    io.github.derundevu.yaxc.presentation.main.MainPingState.Loading,
+                                )
+                            )
+                        }
+                        val result = measureIsolatedProfileDelayWithTimeout(
+                            profileId = profileId,
+                            globalConfig = globalConfig,
+                        )
+                        if (isActive) {
+                            mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
+                            mainViewModel.updateBatchPingProgress(
+                                sourceId = sourceId,
+                                completed = completedCount.incrementAndGet(),
+                                total = profileIds.size,
+                            )
                         }
                     }
                 }
@@ -628,8 +627,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun runLegacyBatchPing(profileIds: List<Long>) {
-        profileIds.forEach { profileId ->
+    private suspend fun measureIsolatedProfileDelayWithTimeout(
+        profileId: Long,
+        globalConfig: io.github.derundevu.yaxc.database.Config,
+    ): String {
+        return supervisorScope {
+            val pingTask = async(Dispatchers.IO) {
+                val profile = profileRepository.find(profileId)
+                XrayBatchPingHelper.measureProfileDelay(
+                    context = applicationContext,
+                    settings = settings,
+                    globalConfig = globalConfig,
+                    profile = profile,
+                )
+            }
+
+            val result = try {
+                withTimeoutOrNull(BATCH_PING_TIMEOUT_MS) {
+                    pingTask.await()
+                }
+            } catch (error: CancellationException) {
+                pingTask.cancel()
+                throw error
+            } catch (error: Exception) {
+                error.message ?: getString(R.string.pingFailedGeneric)
+            }
+
+            if (result != null) {
+                result
+            } else {
+                pingTask.cancel()
+                getString(R.string.pingFailedGeneric)
+            }
+        }
+    }
+
+    private suspend fun runLegacyBatchPing(sourceId: Long?, profileIds: List<Long>) {
+        profileIds.forEachIndexed { index, profileId ->
             mainViewModel.onAction(
                 MainAction.SetProfilePingState(
                     profileId,
@@ -645,6 +679,11 @@ class MainActivity : AppCompatActivity() {
                 measureDelaySuspend()
             } ?: getString(R.string.pingFailedGeneric)
             mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
+            mainViewModel.updateBatchPingProgress(
+                sourceId = sourceId,
+                completed = index + 1,
+                total = profileIds.size,
+            )
         }
     }
 
@@ -673,7 +712,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val APP_UPDATE_POLL_INTERVAL_MS = 1_500L
-        const val MAX_BATCH_PING_WORKERS = 50
+        const val MAX_BATCH_PING_WORKERS = 15
         const val BATCH_PING_TIMEOUT_MS = 5_000L
     }
 }

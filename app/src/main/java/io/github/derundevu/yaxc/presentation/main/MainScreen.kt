@@ -163,9 +163,11 @@ fun MainScreen(
     socksPassword: String,
     pingAddress: String,
     pingState: MainPingState,
+    profilePingStates: Map<Long, MainPingState>,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
     activeBatchPingSourceId: Long?,
+    batchPingProgress: MainBatchPingProgress?,
     appVersion: String,
     xrayVersion: String,
     tun2socksVersion: String,
@@ -257,9 +259,11 @@ fun MainScreen(
                                     socksPassword = socksPassword,
                                     pingAddress = pingAddress,
                                     pingState = pingState,
+                                    profilePingStates = profilePingStates,
                                     profiles = profiles,
                                     selectedProfileId = selectedProfileId,
                                     activeBatchPingSourceId = activeBatchPingSourceId,
+                                    batchPingProgress = batchPingProgress,
                                     listState = connectListState,
                                     collapseProgress = collapseProgress,
                                     onCopyProfileJson = onCopyProfileJson,
@@ -433,9 +437,11 @@ private fun ConnectContent(
     socksPassword: String,
     pingAddress: String,
     pingState: MainPingState,
+    profilePingStates: Map<Long, MainPingState>,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
     activeBatchPingSourceId: Long?,
+    batchPingProgress: MainBatchPingProgress?,
     listState: LazyListState,
     collapseProgress: Float,
     onCopyProfileJson: (Long) -> Unit,
@@ -647,6 +653,7 @@ private fun ConnectContent(
                     source = source,
                     isExpanded = isExpanded,
                     profileCount = profileCountsBySource[source.id] ?: 0,
+                    batchPingProgress = batchPingProgress?.takeIf { it.sourceId == source.id },
                     isBatchPingRunning = activeBatchPingSourceId == source.id,
                     onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
                     onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
@@ -695,6 +702,7 @@ private fun ConnectContent(
                         ProfileCard(
                             profile = profile,
                             isSelected = profile.profile.id == selectedProfileId,
+                            pingState = profilePingStates[profile.profile.id] ?: MainPingState.Idle,
                             onSelect = { onAction(MainAction.SelectProfile(profile.profile.id)) },
                             onEdit = { onAction(MainAction.EditProfile(profile.profile)) },
                             onDelete = { onAction(MainAction.RequestDeleteProfile(profile.profile)) },
@@ -1635,6 +1643,7 @@ private fun SourceGroupCard(
     source: Link,
     isExpanded: Boolean,
     profileCount: Int,
+    batchPingProgress: MainBatchPingProgress?,
     isBatchPingRunning: Boolean,
     onToggleExpanded: () -> Unit,
     onRefresh: () -> Unit,
@@ -1645,10 +1654,18 @@ private fun SourceGroupCard(
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
+    val profileLabel = batchPingProgress?.let { progress ->
+        textResource(
+            R.string.mainProfilesCountWithProgress,
+            profileCount,
+            progress.completed,
+            progress.total,
+        )
+    } ?: textResource(R.string.mainProfilesCount, profileCount)
 
     YaxcGlassPanel(
         modifier = modifier,
-        contentPadding = YaxcTheme.paddings.regular,
+        contentPadding = YaxcTheme.paddings.card,
         accentAlpha = if (isExpanded) 0.14f else 0.10f,
         borderColor = if (isExpanded) profileHierarchyLineColor() else Color.Unspecified,
     ) {
@@ -1656,20 +1673,21 @@ private fun SourceGroupCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onToggleExpanded)
-                .padding(vertical = 4.dp),
+                .padding(vertical = YaxcTheme.spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.sm),
         ) {
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .then(dragModifier),
+                    .then(dragModifier)
+                    .padding(start = YaxcTheme.spacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.sm),
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.xs / 2),
                 ) {
                     Text(
                         text = source.name,
@@ -1679,7 +1697,7 @@ private fun SourceGroupCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = textResource(R.string.mainProfilesCount, profileCount),
+                        text = profileLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = YaxcTheme.extendedColors.textMuted,
                         maxLines = 1,
@@ -1735,6 +1753,7 @@ private fun profileHierarchyLineColor(): Color {
 private fun ProfileCard(
     profile: MainProfileItem,
     isSelected: Boolean,
+    pingState: MainPingState,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -1821,7 +1840,7 @@ private fun ProfileCard(
             }
 
             PingStateBadge(
-                pingState = profile.pingState,
+                pingState = pingState,
                 modifier = Modifier.padding(start = 4.dp, end = 2.dp),
             )
 
@@ -2002,3 +2021,6 @@ private fun textResource(id: Int): String = stringResource(id)
 
 @Composable
 private fun textResource(id: Int, arg0: Int): String = stringResource(id, arg0)
+
+@Composable
+private fun textResource(id: Int, arg0: Int, arg1: Int, arg2: Int): String = stringResource(id, arg0, arg1, arg2)

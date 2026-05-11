@@ -261,6 +261,7 @@
     <string name="mainProfilesTitle">Profiles</string>
     <string name="mainProfilesSubtitle">%1$d profiles available • active: %2$s</string>
     <string name="mainProfilesCount">%1$d profiles</string>
+    <string name="mainProfilesCountWithProgress">%1$d profiles • %2$d/%3$d</string>
     <string name="mainBatchPingPending">Batch ping for the whole source is not implemented yet.</string>
     <string name="mainConnectionInfo">Connection Info</string>
     <string name="connectionInfoScreenLead">Current connection endpoints, subscription metadata and local proxy access in one place.</string>
