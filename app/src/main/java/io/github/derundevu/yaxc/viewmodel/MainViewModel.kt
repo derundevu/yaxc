@@ -48,6 +48,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val summary: String,
     )
 
+    private data class ProfileConfigFingerprint(
+        val configHash: Int,
+        val configLength: Int,
+    )
+
     private val settings = Settings(application)
     private val linkRepository by lazy { getApplication<Yaxc>().linkRepository }
     private val profileRepository by lazy { getApplication<Yaxc>().profileRepository }
@@ -62,6 +67,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val batchPingProgress = MutableStateFlow<MainBatchPingProgress?>(null)
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
     private val profileSummaryCache = mutableMapOf<Long, ProfileSummaryCacheEntry>()
+    private val profileConfigFingerprints = mutableMapOf<Long, ProfileConfigFingerprint>()
 
     private val tabs = linkRepository.tabs.flowOn(Dispatchers.IO)
     private val allProfiles = profileRepository.all.flowOn(Dispatchers.IO).stateIn(
@@ -191,9 +197,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (profiles.isEmpty()) return@collect
                 }
                 val validProfileIds = profiles.map { it.id }.toSet()
+                val changedProfileIds = profiles.mapNotNullTo(linkedSetOf()) { profile ->
+                    val nextFingerprint = profileConfigFingerprint(profile)
+                    val previousFingerprint = profileConfigFingerprints.put(profile.id, nextFingerprint)
+                    profile.id.takeIf {
+                        previousFingerprint != null && previousFingerprint != nextFingerprint
+                    }
+                }
+                profileConfigFingerprints.keys.toList().filterNot(validProfileIds::contains).forEach(profileConfigFingerprints::remove)
                 profileSummaryCache.keys.toList().filterNot(validProfileIds::contains).forEach(profileSummaryCache::remove)
                 profilePingStates.value = profilePingStates.value
-                    .filterKeys { it in validProfileIds }
+                    .filterKeys { it in validProfileIds && it !in changedProfileIds }
                 if (selectedProfileId.value != 0L && profiles.none { it.id == selectedProfileId.value }) {
                     clearSelectedProfile()
                 }
@@ -238,16 +252,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setLoadingPingStates(profileIds: Collection<Long>) {
+        if (profileIds.isEmpty()) return
+        val profileIdSet = profileIds.toSet()
+        profilePingStates.value = profilePingStates.value.toMutableMap().apply {
+            profileIdSet.forEach { profileId ->
+                put(profileId, MainPingState.Loading)
+            }
+        }
+    }
+
     fun clearLoadingPingStates(profileIds: Collection<Long>) {
         if (profileIds.isEmpty()) return
         val profileIdSet = profileIds.toSet()
-        profilePingStates.value = profilePingStates.value.mapValues { (profileId, value) ->
-            if (profileId in profileIdSet && value == MainPingState.Loading) {
-                MainPingState.Idle
-            } else {
-                value
+        profilePingStates.value = profilePingStates.value.toMutableMap().apply {
+            profileIdSet.forEach { profileId ->
+                if (this[profileId] == MainPingState.Loading) {
+                    remove(profileId)
+                }
             }
         }
+    }
+
+    fun clearPingStates(profileIds: Collection<Long>) {
+        if (profileIds.isEmpty()) return
+        val profileIdSet = profileIds.toSet()
+        profilePingStates.value = profilePingStates.value.filterKeys { it !in profileIdSet }
     }
 
     fun startBatchPingProgress(sourceId: Long?, total: Int) {
@@ -306,7 +336,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             return
         }
-        clearLoadingPingStates(profileIds)
+        clearPingStates(profileIds)
+        setLoadingPingStates(profileIds)
         activeBatchPingSourceId.value = sourceId
         startBatchPingProgress(sourceId, profileIds.size)
         _effects.tryEmit(
@@ -484,5 +515,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             summary = summary,
         )
         return summary
+    }
+
+    private fun profileConfigFingerprint(profile: ProfileList): ProfileConfigFingerprint {
+        return ProfileConfigFingerprint(
+            configHash = profile.config.hashCode(),
+            configLength = profile.config.length,
+        )
     }
 }

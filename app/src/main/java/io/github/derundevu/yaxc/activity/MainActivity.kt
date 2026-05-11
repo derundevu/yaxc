@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.widget.Toast
 import android.widget.EditText
@@ -73,6 +74,8 @@ class MainActivity : AppCompatActivity() {
     private var singlePingJob: Job? = null
     private var subscriptionRefreshJob: Job? = null
     private var queuedSinglePingProfileId: Long? = null
+    private var latestBatchPingRunId: Long = 0L
+    private var activeBatchPingProfileIds: Set<Long> = emptySet()
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
         if (!it) return@registerForActivityResult
@@ -523,6 +526,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         singlePingJob = lifecycleScope.launch {
+            val loadingStartedAt = SystemClock.elapsedRealtime()
             val timeoutMs = ((settings.pingTimeout + 2).coerceAtLeast(1) * 1000L)
             val result = withTimeoutOrNull(timeoutMs) {
                 try {
@@ -545,8 +549,12 @@ class MainActivity : AppCompatActivity() {
                 }
             } ?: getString(R.string.pingFailedGeneric)
 
-            if (queuedSinglePingProfileId == null) {
+            ensureMinimumPingLoadingVisibility(loadingStartedAt)
+            val queuedProfileId = queuedSinglePingProfileId
+            if (queuedProfileId == null) {
                 mainViewModel.onAction(MainAction.PingResultReceived(profileId, result))
+            } else if (queuedProfileId != profileId) {
+                mainViewModel.clearPingStates(listOf(profileId))
             }
         }.also { job ->
             job.invokeOnCompletion {
@@ -562,7 +570,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runBatchPing(effect: MainEffect.RunBatchPing) {
+        val nextProfileIds = effect.profileIds.toSet()
+        val staleLoadingProfileIds = activeBatchPingProfileIds - nextProfileIds
         batchPingJob?.cancel()
+        mainViewModel.clearLoadingPingStates(staleLoadingProfileIds)
+        val runId = ++latestBatchPingRunId
+        activeBatchPingProfileIds = nextProfileIds
         batchPingJob = lifecycleScope.launch {
             val restoreProfileId = effect.restoreProfileId
             val supportsIsolatedPing = XrayBatchPingHelper.supportsIsolatedPing()
@@ -579,9 +592,12 @@ class MainActivity : AppCompatActivity() {
                         TProxyService.newConfig(applicationContext)
                     }
                 }
-                mainViewModel.clearLoadingPingStates(effect.profileIds)
-                mainViewModel.clearBatchPingProgress()
-                mainViewModel.onAction(MainAction.SetBatchPingSource(null))
+                if (latestBatchPingRunId == runId) {
+                    activeBatchPingProfileIds = emptySet()
+                    mainViewModel.clearLoadingPingStates(effect.profileIds)
+                    mainViewModel.clearBatchPingProgress()
+                    mainViewModel.onAction(MainAction.SetBatchPingSource(null))
+                }
             }
         }
     }
@@ -609,10 +625,12 @@ class MainActivity : AppCompatActivity() {
                                 )
                             )
                         }
+                        val loadingStartedAt = SystemClock.elapsedRealtime()
                         val result = measureIsolatedProfileDelayWithTimeout(
                             profileId = profileId,
                             globalConfig = globalConfig,
                         )
+                        ensureMinimumPingLoadingVisibility(loadingStartedAt)
                         if (isActive) {
                             mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
                             mainViewModel.updateBatchPingProgress(
@@ -670,6 +688,7 @@ class MainActivity : AppCompatActivity() {
                     io.github.derundevu.yaxc.presentation.main.MainPingState.Loading,
                 )
             )
+            val loadingStartedAt = SystemClock.elapsedRealtime()
             if (settings.selectedProfile != profileId) {
                 settings.selectedProfile = profileId
                 TProxyService.newConfig(applicationContext)
@@ -678,6 +697,7 @@ class MainActivity : AppCompatActivity() {
             val result = withTimeoutOrNull(BATCH_PING_TIMEOUT_MS) {
                 measureDelaySuspend()
             } ?: getString(R.string.pingFailedGeneric)
+            ensureMinimumPingLoadingVisibility(loadingStartedAt)
             mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
             mainViewModel.updateBatchPingProgress(
                 sourceId = sourceId,
@@ -697,6 +717,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private suspend fun ensureMinimumPingLoadingVisibility(startedAt: Long) {
+        val remaining = MIN_PING_LOADING_VISIBILITY_MS - (SystemClock.elapsedRealtime() - startedAt)
+        if (remaining > 0L) delay(remaining)
+    }
+
     private fun hasPostNotification(): Boolean {
         val sharedPref = getSharedPreferences("app", MODE_PRIVATE)
         val key = "request_notification_permission"
@@ -714,5 +739,6 @@ class MainActivity : AppCompatActivity() {
         const val APP_UPDATE_POLL_INTERVAL_MS = 1_500L
         const val MAX_BATCH_PING_WORKERS = 15
         const val BATCH_PING_TIMEOUT_MS = 5_000L
+        const val MIN_PING_LOADING_VISIBILITY_MS = 250L
     }
 }
