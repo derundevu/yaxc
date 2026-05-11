@@ -91,6 +91,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runtime,
     ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState, runtime: RuntimeState ->
         val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
+        val profileCountsBySource = profiles
+            .mapNotNull { profile -> profile.link?.let { linkId -> linkId to profile } }
+            .groupBy({ it.first }, { it.second.id })
+            .mapValues { (_, profileIds) -> profileIds.size }
         val selectedSourceId = selectedProfile?.link?.takeIf { linkId ->
             tabs.any { it.id == linkId }
         } ?: 0L
@@ -131,6 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         MainUiState(
             tabs = tabs,
+            profileCountsBySource = profileCountsBySource,
             selectedTabId = resolvedTabId,
             selectedSourceId = cardSourceId,
             selectedSourceName = selectedSourceName,
@@ -145,7 +150,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             socksUsername = socksUsername,
             socksPassword = socksPassword,
             pingAddress = pingAddress,
-            profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
             pingState = selectedProfilePingState,
             activeBatchPingSourceId = runtime.activeBatchPingSourceId,

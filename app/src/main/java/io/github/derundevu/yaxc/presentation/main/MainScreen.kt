@@ -96,6 +96,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
@@ -147,6 +148,7 @@ private val MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET = 82.dp
 @Composable
 fun MainScreen(
     tabs: List<Link>,
+    profileCountsBySource: Map<Long, Int>,
     selectedTabId: Long,
     selectedSourceId: Long,
     isRunning: Boolean,
@@ -163,7 +165,6 @@ fun MainScreen(
     pingState: MainPingState,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
-    profilesCount: Int,
     activeBatchPingSourceId: Long?,
     appVersion: String,
     xrayVersion: String,
@@ -241,6 +242,7 @@ fun MainScreen(
                             MainRootTab.Connect -> {
                                 ConnectContent(
                                     tabs = tabs,
+                                    profileCountsBySource = profileCountsBySource,
                                     selectedTabId = selectedTabId,
                                     selectedSourceId = selectedSourceId,
                                     isRunning = isRunning,
@@ -257,7 +259,6 @@ fun MainScreen(
                                     pingState = pingState,
                                     profiles = profiles,
                                     selectedProfileId = selectedProfileId,
-                                    profilesCount = profilesCount,
                                     activeBatchPingSourceId = activeBatchPingSourceId,
                                     listState = connectListState,
                                     collapseProgress = collapseProgress,
@@ -417,6 +418,7 @@ private fun draggedSlotCenterY(
 @Composable
 private fun ConnectContent(
     tabs: List<Link>,
+    profileCountsBySource: Map<Long, Int>,
     selectedTabId: Long,
     selectedSourceId: Long,
     isRunning: Boolean,
@@ -433,7 +435,6 @@ private fun ConnectContent(
     pingState: MainPingState,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
-    profilesCount: Int,
     activeBatchPingSourceId: Long?,
     listState: LazyListState,
     collapseProgress: Float,
@@ -444,7 +445,10 @@ private fun ConnectContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
 ) {
     val spacing = YaxcTheme.spacing
+    val regularPadding = YaxcTheme.paddings.regular
+    val densePadding = YaxcTheme.paddings.dense
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val sourceSpacingPx = remember(density, spacing.md) {
         with(density) { spacing.md.toPx() }
     }
@@ -642,7 +646,7 @@ private fun ConnectContent(
                 SourceGroupCard(
                     source = source,
                     isExpanded = isExpanded,
-                    profileCount = if (isExpanded) profiles.size else null,
+                    profileCount = profileCountsBySource[source.id] ?: 0,
                     isBatchPingRunning = activeBatchPingSourceId == source.id,
                     onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
                     onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
@@ -701,10 +705,14 @@ private fun ConnectContent(
                                     placementSpec = spring(dampingRatio = 0.86f, stiffness = 520f),
                                 )
                                 .padding(
-                                    start = spacing.lg,
-                                    end = spacing.lg,
-                                    top = if (index == 0) 8.dp else 0.dp,
-                                    bottom = if (index == profiles.lastIndex) spacing.md else 8.dp,
+                                    start = regularPadding.calculateLeftPadding(layoutDirection),
+                                    end = regularPadding.calculateRightPadding(layoutDirection),
+                                    top = if (index == 0) densePadding.calculateTopPadding() else 0.dp,
+                                    bottom = if (index == profiles.lastIndex) {
+                                        regularPadding.calculateBottomPadding()
+                                    } else {
+                                        densePadding.calculateBottomPadding()
+                                    },
                                 ),
                         )
                     }
@@ -714,14 +722,6 @@ private fun ConnectContent(
 
         if (tabs.isEmpty()) {
             item { EmptySourcesCard() }
-        }
-
-        item {
-            Text(
-                text = textResource(R.string.mainProfilesCount, profilesCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = YaxcTheme.extendedColors.textMuted,
-            )
         }
     }
 }
@@ -1634,7 +1634,7 @@ private fun SettingsActionCard(
 private fun SourceGroupCard(
     source: Link,
     isExpanded: Boolean,
-    profileCount: Int?,
+    profileCount: Int,
     isBatchPingRunning: Boolean,
     onToggleExpanded: () -> Unit,
     onRefresh: () -> Unit,
@@ -1678,15 +1678,13 @@ private fun SourceGroupCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    AnimatedVisibility(visible = profileCount != null) {
-                        Text(
-                            text = textResource(R.string.mainProfilesCount, profileCount ?: 0),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YaxcTheme.extendedColors.textMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    Text(
+                        text = textResource(R.string.mainProfilesCount, profileCount),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
 

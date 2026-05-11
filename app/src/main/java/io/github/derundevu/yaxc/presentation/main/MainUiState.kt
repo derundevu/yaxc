@@ -19,6 +19,7 @@ data class MainProfileItem(
 
 data class MainUiState(
     val tabs: List<Link> = emptyList(),
+    val profileCountsBySource: Map<Long, Int> = emptyMap(),
     val selectedTabId: Long = 0L,
     val selectedSourceId: Long = 0L,
     val selectedSourceName: String = "",
@@ -33,7 +34,6 @@ data class MainUiState(
     val socksUsername: String = "",
     val socksPassword: String = "",
     val pingAddress: String = "",
-    val profilesCount: Int = 0,
     val isRunning: Boolean = false,
     val pingState: MainPingState = MainPingState.Idle,
     val activeBatchPingSourceId: Long? = null,

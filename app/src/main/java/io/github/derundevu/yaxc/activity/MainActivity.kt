@@ -133,6 +133,7 @@ class MainActivity : AppCompatActivity() {
             YaxcAppTheme {
                 MainScreen(
                     tabs = uiState.tabs,
+                    profileCountsBySource = uiState.profileCountsBySource,
                     selectedTabId = uiState.selectedTabId,
                     selectedSourceId = uiState.selectedSourceId,
                     isRunning = uiState.isRunning,
@@ -149,7 +150,6 @@ class MainActivity : AppCompatActivity() {
                     pingState = uiState.pingState,
                     profiles = uiState.filteredProfiles,
                     selectedProfileId = uiState.selectedProfileId,
-                    profilesCount = uiState.profilesCount,
                     activeBatchPingSourceId = uiState.activeBatchPingSourceId,
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),
