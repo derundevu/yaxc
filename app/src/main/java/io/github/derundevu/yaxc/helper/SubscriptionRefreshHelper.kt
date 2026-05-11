@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.helper
 
 import android.content.Context
+import android.util.Log
 import androidx.room.withTransaction
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
@@ -64,6 +65,8 @@ class SubscriptionRefreshHelper(
                     customHeaders = link.customHeaders,
                     overrideXHwid = link.xHwid,
                 ),
+                timeout = SUBSCRIPTION_FETCH_TIMEOUT_MS,
+                retries = SUBSCRIPTION_FETCH_RETRIES,
             )
             val detected = detectProfiles(link, response.body.trim())
             val metadata = HttpHelper.extractSubscriptionMetadata(response.headers)
@@ -111,7 +114,11 @@ class SubscriptionRefreshHelper(
             }
         }
         if (refreshed > 0 && TProxyService.isActive()) {
-            TProxyService.newConfig(context.applicationContext)
+            runCatching {
+                TProxyService.newConfig(context.applicationContext)
+            }.onFailure { error ->
+                Log.w(TAG, "Could not reload runtime after refreshing links", error)
+            }
         }
         return RefreshResult(
             attempted = links.size,
@@ -194,8 +201,12 @@ class SubscriptionRefreshHelper(
         val decodedJsonProfiles = jsonProfiles(link, candidate)
         if (decodedJsonProfiles.isNotEmpty()) return decodedJsonProfiles
 
-        return candidate.split("\n")
-            .reversed()
+        val links = candidate.lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toList()
+
+        return links.asReversed()
             .map { LinkHelper(settings, it) }
             .filter { it.isValid() }
             .map { linkHelper ->
@@ -270,5 +281,11 @@ class SubscriptionRefreshHelper(
         if (profilesToDelete.isNotEmpty()) profileDao.deleteAll(profilesToDelete)
         if (profilesToUpdate.isNotEmpty()) profileDao.updateAll(profilesToUpdate)
         if (profilesToInsert.isNotEmpty()) profileDao.insertAll(profilesToInsert)
+    }
+
+    private companion object {
+        const val TAG = "SubscriptionRefresh"
+        const val SUBSCRIPTION_FETCH_TIMEOUT_MS = 20_000
+        const val SUBSCRIPTION_FETCH_RETRIES = 3
     }
 }

@@ -4,6 +4,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.widget.Toast
 import android.widget.LinearLayout
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withContext
 class LinksManagerActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "LinksManagerActivity"
         private const val LINK_REF = "ref"
         private const val DELETE_ACTION = "delete"
         private const val REFRESH_LINK_ID = "refresh_link_id"
@@ -97,39 +99,59 @@ class LinksManagerActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val loadingDialog = loadingDialog()
-                loadingDialog.show()
-                val detected = runCatching { subscriptionRefreshHelper.resolveProfiles(link) }
-                if (link.id == 0L) {
-                    val parsed = detected.getOrNull()
-                    if (parsed == null) {
-                        loadingDialog.dismiss()
-                        Toast.makeText(
-                            this@LinksManagerActivity,
-                            getString(R.string.invalidSourceContent),
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                        return@launch
-                    }
-                    subscriptionRefreshHelper.saveResolvedLink(link, parsed)
-                } else {
-                    linkViewModel.updateNow(link)
-                    detected.getOrNull()?.let { parsed ->
-                        subscriptionRefreshHelper.saveResolvedLink(link, parsed)
-                    } ?: run {
-                        Toast.makeText(
-                            this@LinksManagerActivity,
-                            getString(R.string.linkSavedWithoutRefresh),
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }
-                TProxyService.newConfig(applicationContext)
-                loadingDialog.dismiss()
-                setResult(RESULT_OK)
-                finish()
+                saveRemoteLink(link)
             }
         }.show(supportFragmentManager, null)
+    }
+
+    private suspend fun saveRemoteLink(link: Link) {
+        val loadingDialog = loadingDialog()
+        loadingDialog.show()
+
+        val result = runCatching {
+            val detected = runCatching { subscriptionRefreshHelper.resolveProfiles(link) }
+
+            if (link.id == 0L) {
+                val parsed = detected.getOrThrow()
+                subscriptionRefreshHelper.saveResolvedLink(link, parsed)
+            } else {
+                linkViewModel.updateNow(link)
+                detected.getOrNull()?.let { parsed ->
+                    subscriptionRefreshHelper.saveResolvedLink(link, parsed)
+                } ?: run {
+                    Log.w(TAG, "Saved source without refresh", detected.exceptionOrNull())
+                    Toast.makeText(
+                        this@LinksManagerActivity,
+                        getString(R.string.linkSavedWithoutRefresh),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+
+        if (loadingDialog.isShowing) {
+            loadingDialog.dismiss()
+        }
+
+        result.onSuccess {
+            if (TProxyService.isActive()) {
+                runCatching {
+                    TProxyService.newConfig(applicationContext)
+                }.onFailure { error ->
+                    Log.w(TAG, "Could not reload runtime after saving source", error)
+                }
+            }
+            setResult(RESULT_OK)
+            finish()
+        }.onFailure { error ->
+            Log.w(TAG, "Could not parse or save source: ${link.address}", error)
+            Toast.makeText(
+                this@LinksManagerActivity,
+                getString(R.string.invalidSourceContent),
+                Toast.LENGTH_SHORT,
+            ).show()
+            finish()
+        }
     }
 
     private fun loadingDialog(): Dialog {
@@ -147,9 +169,19 @@ class LinksManagerActivity : AppCompatActivity() {
         val loadingDialog = loadingDialog()
         loadingDialog.show()
         lifecycleScope.launch {
-            subscriptionRefreshHelper.refreshLinks(linkId)
+            val result = runCatching {
+                subscriptionRefreshHelper.refreshLinks(linkId)
+            }
             withContext(Dispatchers.Main) {
                 loadingDialog.dismiss()
+                result.exceptionOrNull()?.let { error ->
+                    Log.w(TAG, "Could not refresh sources", error)
+                    Toast.makeText(
+                        this@LinksManagerActivity,
+                        getString(R.string.invalidSourceContent),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
                 finish()
             }
         }

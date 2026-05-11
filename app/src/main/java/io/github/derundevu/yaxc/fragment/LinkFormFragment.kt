@@ -156,7 +156,7 @@ class LinkFormFragment(
             delay(350)
             val title = withContext(Dispatchers.IO) {
                 runCatching {
-                    HttpHelper.fetch(
+                    HttpHelper.fetchHeaders(
                         link = trimmedAddress,
                         userAgent = HttpHelper.resolveSubscriptionUserAgent(
                             settings,
@@ -167,9 +167,7 @@ class LinkFormFragment(
                             customHeaders = customHeaders,
                             overrideXHwid = xHwid.ifBlank { null },
                         ),
-                    ).let { response ->
-                        HttpHelper.extractSubscriptionTitle(response.headers)
-                    }
+                    ).let(HttpHelper::extractSubscriptionTitle)
                 }.getOrNull()
             }
 

@@ -43,20 +43,19 @@ import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.reflect.cast
 
@@ -81,9 +80,8 @@ class MainActivity : AppCompatActivity() {
     private val notificationPermission = registerForActivityResult(RequestPermission()) {
         handleToggleVpnRequest()
     }
-    private val linksManager = registerForActivityResult(StartActivityForResult()) {
-        if (it.resultCode != RESULT_OK) return@registerForActivityResult
-        refreshLinks()
+    private val linksManager = registerForActivityResult(StartActivityForResult()) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
     }
     private var scannerLauncher = registerForActivityResult(StartActivityForResult()) {
         val link = it.data?.getStringExtra("link")
@@ -160,6 +158,8 @@ class MainActivity : AppCompatActivity() {
                     onCheckAppUpdate = ::checkAppUpdate,
                     onDownloadAppUpdate = ::downloadAppUpdate,
                     onInstallAppUpdate = ::installAppUpdate,
+                    onCopyProfileJson = ::copyProfileJson,
+                    onCopyProfileDeepLink = ::copyProfileDeepLink,
                     onAction = mainViewModel::onAction,
                 )
             }
@@ -409,6 +409,52 @@ class MainActivity : AppCompatActivity() {
         }.getOrNull()?.let { processLink(it) }
     }
 
+    private fun copyProfileJson(profileId: Long) {
+        lifecycleScope.launch {
+            val config = runCatching {
+                profileRepository.find(profileId).config
+            }.getOrNull() ?: return@launch
+
+            clipboardManager.setPrimaryClip(
+                android.content.ClipData.newPlainText("profile-json", config),
+            )
+            Toast.makeText(
+                this@MainActivity,
+                getString(R.string.profileJsonCopied),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    private fun copyProfileDeepLink(profileId: Long) {
+        lifecycleScope.launch {
+            val config = runCatching {
+                profileRepository.find(profileId).config
+            }.getOrNull() ?: return@launch
+
+            val shareLink = withContext(Dispatchers.Default) {
+                XrayCore.share(config).trim()
+            }
+            if (shareLink.isBlank()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.profileDeepLinkUnavailable),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return@launch
+            }
+
+            clipboardManager.setPrimaryClip(
+                android.content.ClipData.newPlainText("profile-deep-link", shareLink),
+            )
+            Toast.makeText(
+                this@MainActivity,
+                getString(R.string.profileDeepLinkCopied),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     private fun refreshLinks() {
         startActivity(LinksManagerActivity.refreshLinks(applicationContext))
     }
@@ -549,22 +595,27 @@ class MainActivity : AppCompatActivity() {
         }
         if (profiles.isEmpty()) return
 
-        val deviceWorkerCap = (Runtime.getRuntime().availableProcessors() * 2).coerceAtLeast(4)
-        val maxWorkers = minOf(20, profiles.size, deviceWorkerCap)
-        val semaphore = Semaphore(maxWorkers)
+        val maxWorkers = minOf(MAX_BATCH_PING_WORKERS, profiles.size)
+        val nextIndex = AtomicInteger(0)
 
         supervisorScope {
-            profiles.map { profile ->
-                async(Dispatchers.IO) {
-                    semaphore.withPermit {
-                        if (!isActive) return@withPermit
+            List(maxWorkers) {
+                launch(Dispatchers.IO) {
+                    while (isActive) {
+                        val profileIndex = nextIndex.getAndIncrement()
+                        if (profileIndex >= profiles.size) break
+                        val profile = profiles[profileIndex]
                         val result = try {
-                            XrayBatchPingHelper.measureProfileDelay(
-                                context = applicationContext,
-                                settings = settings,
-                                globalConfig = globalConfig,
-                                profile = profile,
-                            )
+                            withTimeoutOrNull(BATCH_PING_TIMEOUT_MS) {
+                                XrayBatchPingHelper.measureProfileDelay(
+                                    context = applicationContext,
+                                    settings = settings,
+                                    globalConfig = globalConfig,
+                                    profile = profile,
+                                )
+                            } ?: getString(R.string.pingFailedGeneric)
+                        } catch (error: CancellationException) {
+                            throw error
                         } catch (error: Exception) {
                             error.message ?: getString(R.string.pingFailedGeneric)
                         }
@@ -573,7 +624,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-            }.awaitAll()
+            }.joinAll()
         }
     }
 
@@ -590,7 +641,9 @@ class MainActivity : AppCompatActivity() {
                 TProxyService.newConfig(applicationContext)
                 delay(650)
             }
-            val result = measureDelaySuspend()
+            val result = withTimeoutOrNull(BATCH_PING_TIMEOUT_MS) {
+                measureDelaySuspend()
+            } ?: getString(R.string.pingFailedGeneric)
             mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
         }
     }
@@ -620,5 +673,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val APP_UPDATE_POLL_INTERVAL_MS = 1_500L
+        const val MAX_BATCH_PING_WORKERS = 50
+        const val BATCH_PING_TIMEOUT_MS = 5_000L
     }
 }

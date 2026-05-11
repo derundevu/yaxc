@@ -111,7 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .filter { resolvedTabId == 0L || it.link == resolvedTabId }
             .map { profile ->
                 MainProfileItem(
-                    profile = profile,
+                    profile = profile.copy(config = ""),
                     summary = cachedProfileSummary(profile),
                     pingState = runtime.profilePingStates[profile.id] ?: MainPingState.Idle,
                 )
@@ -164,7 +164,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     hasResolvedTabsSnapshot = true
                     if (tabs.isEmpty()) return@collect
                 }
-                if (selectedTabId.value != 0L && tabs.isNotEmpty() && tabs.none { it.id == selectedTabId.value }) {
+                if (selectedTabId.value != 0L && tabs.none { it.id == selectedTabId.value }) {
                     selectTab(0L)
                 }
             }
@@ -179,7 +179,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 profileSummaryCache.keys.toList().filterNot(validProfileIds::contains).forEach(profileSummaryCache::remove)
                 profilePingStates.value = profilePingStates.value
                     .filterKeys { it in validProfileIds }
-                if (selectedProfileId.value != 0L && profiles.isNotEmpty() && profiles.none { it.id == selectedProfileId.value }) {
+                if (selectedProfileId.value != 0L && profiles.none { it.id == selectedProfileId.value }) {
                     clearSelectedProfile()
                 }
             }

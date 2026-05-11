@@ -84,13 +84,17 @@ class TProxyService : VpnService() {
         }
 
         private fun startCommand(context: Context, name: String, foreground: Boolean = false) {
-            Intent(context, TProxyService::class.java).also {
-                it.action = name
-                if (foreground) {
-                    context.startForegroundService(it)
-                } else {
-                    context.startService(it)
+            runCatching {
+                Intent(context, TProxyService::class.java).also {
+                    it.action = name
+                    if (foreground) {
+                        context.startForegroundService(it)
+                    } else {
+                        context.startService(it)
+                    }
                 }
+            }.onFailure { error ->
+                Log.e("TProxyService", "Could not start service command: $name", error)
             }
         }
     }
@@ -119,7 +123,11 @@ class TProxyService : VpnService() {
             when (intent?.action) {
                 START_VPN_SERVICE_ACTION_NAME -> start(getProfile(), globalConfigs())
                 RESTART_VPN_SERVICE_ACTION_NAME -> restart(getProfile(), globalConfigs())
-                NEW_CONFIG_SERVICE_ACTION_NAME -> newConfig(getProfile(), globalConfigs())
+                NEW_CONFIG_SERVICE_ACTION_NAME -> {
+                    if (!getIsRunning()) return@launch
+                    val profile = getProfile() ?: return@launch
+                    newConfig(profile, globalConfigs())
+                }
                 STOP_VPN_SERVICE_ACTION_NAME -> stopVPN()
                 STATUS_VPN_SERVICE_ACTION_NAME -> broadcastStatus()
                 NETWORK_UPDATE_SERVICE_ACTION_NAME -> transparentProxyHelper.networkUpdate()
@@ -153,10 +161,19 @@ class TProxyService : VpnService() {
     }
 
     private suspend fun getProfile(): Profile? {
-        return if (settings.selectedProfile == 0L) {
+        val selectedProfileId = settings.selectedProfile
+        return if (selectedProfileId == 0L) {
             null
         } else {
-            profileRepository.find(settings.selectedProfile)
+            runCatching {
+                profileRepository.find(selectedProfileId)
+            }.getOrElse { error ->
+                Log.w("TProxyService", "Selected profile is missing: $selectedProfileId", error)
+                if (settings.selectedProfile == selectedProfileId) {
+                    settings.selectedProfile = 0L
+                }
+                null
+            }
         }
     }
 
@@ -219,8 +236,7 @@ class TProxyService : VpnService() {
         start(profile, globalConfigs)
     }
 
-    private fun newConfig(profile: Profile?, globalConfigs: Config) {
-        if (!getIsRunning() || profile == null) return
+    private fun newConfig(profile: Profile, globalConfigs: Config) {
         stopXray()
         getConfig(profile, globalConfigs).also {
             if (it == null) stopVPN() else startXray(it)

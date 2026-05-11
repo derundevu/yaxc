@@ -4,8 +4,10 @@ import android.os.Build
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -61,33 +63,51 @@ class HttpHelper(
             link: String,
             userAgent: String? = null,
             headers: Map<String, String> = emptyMap(),
+            timeout: Int = 5000,
+            retries: Int = 1,
         ): HttpResponse {
             return withContext(Dispatchers.IO) {
                 val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
-                val connection = getConnection(
-                    link = link,
-                    userAgent = userAgent ?: defaultUserAgent,
-                    headers = headers,
-                )
-                var responseCode = 0
-                val responseBody = try {
-                    connection.connect()
-                    responseCode = connection.responseCode
-                    connection.readResponseText()
-                } catch (_: Exception) {
-                    null
+                val attempts = retries.coerceAtLeast(1)
+                var lastError: Exception? = null
+
+                repeat(attempts) { attempt ->
+                    val connection = getConnection(
+                        link = link,
+                        userAgent = userAgent ?: defaultUserAgent,
+                        headers = headers,
+                        timeout = timeout,
+                    ).apply {
+                        instanceFollowRedirects = true
+                    }
+                    try {
+                        connection.connect()
+                        val responseCode = connection.responseCode
+                        val responseBody = connection.readResponseText()
+                        val responseHeaders = connection.headerFields
+                            .filterKeys { it != null }
+                            .mapKeys { it.key!! }
+                        if (responseCode == HttpURLConnection.HTTP_OK && responseBody != null) {
+                            return@withContext HttpResponse(
+                                body = responseBody,
+                                headers = responseHeaders,
+                            )
+                        }
+                        lastError = Exception("HTTP Error: $responseCode")
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        lastError = error
+                    } finally {
+                        connection.disconnect()
+                    }
+
+                    if (attempt < attempts - 1) {
+                        delay(400L * (attempt + 1))
+                    }
                 }
-                val headers = connection.headerFields
-                    .filterKeys { it != null }
-                    .mapKeys { it.key!! }
-                connection.disconnect()
-                if (responseCode != HttpURLConnection.HTTP_OK || responseBody == null) {
-                    throw Exception("HTTP Error: $responseCode")
-                }
-                HttpResponse(
-                    body = responseBody,
-                    headers = headers,
-                )
+
+                throw Exception(lastError?.message ?: "HTTP Error")
             }
         }
 
@@ -97,6 +117,55 @@ class HttpHelper(
             headers: Map<String, String> = emptyMap(),
         ): String {
             return fetch(link, userAgent, headers).body
+        }
+
+        suspend fun fetchHeaders(
+            link: String,
+            userAgent: String? = null,
+            headers: Map<String, String> = emptyMap(),
+            timeout: Int = 5000,
+            retries: Int = 1,
+        ): Map<String, List<String>> {
+            return withContext(Dispatchers.IO) {
+                val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
+                val attempts = retries.coerceAtLeast(1)
+                var lastError: Exception? = null
+
+                repeat(attempts) { attempt ->
+                    val connection = getConnection(
+                        link = link,
+                        method = "HEAD",
+                        userAgent = userAgent ?: defaultUserAgent,
+                        headers = headers,
+                        timeout = timeout,
+                    ).apply {
+                        instanceFollowRedirects = true
+                    }
+                    try {
+                        connection.connect()
+                        val responseCode = connection.responseCode
+                        val responseHeaders = connection.headerFields
+                            .filterKeys { it != null }
+                            .mapKeys { it.key!! }
+                        if (responseCode in 200..399) {
+                            return@withContext responseHeaders
+                        }
+                        lastError = Exception("HTTP Error: $responseCode")
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        lastError = error
+                    } finally {
+                        connection.disconnect()
+                    }
+
+                    if (attempt < attempts - 1) {
+                        delay(400L * (attempt + 1))
+                    }
+                }
+
+                throw Exception(lastError?.message ?: "HTTP Error")
+            }
         }
 
         fun parseHeaders(rawHeaders: String?): Map<String, String> {
