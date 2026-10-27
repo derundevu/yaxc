@@ -27,8 +27,8 @@ class ProfileRepository(private val profileDao: ProfileDao) {
         profileDao.remove(profile)
     }
 
-    suspend fun updateIndex(index: Int, id: Long) {
-        profileDao.updateIndex(index, id)
+    suspend fun normalizeIndices() {
+        profileDao.normalizeIndices()
     }
 
     suspend fun moveUp(start: Int, end: Int, exclude: Long) {

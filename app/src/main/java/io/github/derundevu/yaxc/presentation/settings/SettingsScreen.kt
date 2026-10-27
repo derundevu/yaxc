@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -522,12 +523,13 @@ private fun BasicSettingsTab(
 ) {
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     val copyToClipboard: (Int, String) -> Unit = { labelRes, value ->
         clipboardManager.setText(AnnotatedString(value))
         android.widget.Toast.makeText(
             context,
-            context.getString(R.string.settingsValueCopied, context.getString(labelRes)),
+            resources.getString(R.string.settingsValueCopied, resources.getString(labelRes)),
             android.widget.Toast.LENGTH_SHORT,
         ).show()
     }

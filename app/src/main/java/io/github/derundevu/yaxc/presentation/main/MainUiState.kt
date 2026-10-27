@@ -37,4 +37,6 @@ data class MainUiState(
     val isRunning: Boolean = false,
     val pingState: MainPingState = MainPingState.Idle,
     val activeBatchPingSourceId: Long? = null,
+    val batchPingCompleted: Int = 0,
+    val batchPingTotal: Int = 0,
 )

@@ -9,21 +9,21 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.overscroll
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.withoutVisualEffect
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -84,7 +86,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -94,22 +95,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.safeDrawing
@@ -141,6 +150,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private enum class MainRootTab {
     Connect,
@@ -173,6 +183,8 @@ fun MainScreen(
     selectedProfileId: Long,
     profilesCount: Int,
     activeBatchPingSourceId: Long?,
+    batchPingCompleted: Int,
+    batchPingTotal: Int,
     appVersion: String,
     xrayVersion: String,
     tun2socksVersion: String,
@@ -265,6 +277,8 @@ fun MainScreen(
                                     selectedProfileId = selectedProfileId,
                                     profilesCount = profilesCount,
                                     activeBatchPingSourceId = activeBatchPingSourceId,
+                                    batchPingCompleted = batchPingCompleted,
+                                    batchPingTotal = batchPingTotal,
                                     listState = connectListState,
                                     collapseProgress = collapseProgress,
                                     onAction = onAction,
@@ -391,31 +405,90 @@ private fun draggedTargetIndex(
     return targetIndex
 }
 
-private fun draggedSlotCenterY(
-    startOrder: List<Long>,
-    draggedSourceId: Long,
-    targetIndex: Int,
-    sourceCenters: Map<Long, Float>,
-    sourceHeights: Map<Long, Float>,
-    sourceSpacingPx: Float,
-): Float? {
-    val firstId = startOrder.firstOrNull() ?: return sourceCenters[draggedSourceId]
-    val firstCenter = sourceCenters[firstId] ?: return sourceCenters[draggedSourceId]
-    val firstHeight = sourceHeights[firstId] ?: return sourceCenters[draggedSourceId]
-    val finalOrder = reorderedSourceIds(
-        startOrder = startOrder,
-        draggedSourceId = draggedSourceId,
-        targetIndex = targetIndex,
-    )
-    var slotTop = firstCenter - firstHeight / 2f
-    finalOrder.forEach { sourceId ->
-        val sourceHeight = sourceHeights[sourceId] ?: return sourceCenters[draggedSourceId]
-        if (sourceId == draggedSourceId) {
-            return slotTop + sourceHeight / 2f
-        }
-        slotTop += sourceHeight + sourceSpacingPx
+private fun sourceHeaderKey(sourceId: Long): String = "source:$sourceId:header"
+
+/**
+ * Only the surface occupies a viewport-sized layer; its outline reaches the source's
+ * offscreen edges. The actual profile content remains separate keyed lazy items.
+ */
+@Composable
+private fun ExpandedSourceBackground(
+    listState: LazyListState,
+    headerIndex: Int,
+    bodyCount: Int,
+    headerHeightPx: Int,
+    bodyStridePx: Int,
+    bottomPaddingPx: Float,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
+) {
+    val layout = listState.layoutInfo
+    val footerIndex = headerIndex + bodyCount + 1
+    val visibleItems = layout.visibleItemsInfo
+    val anchor = visibleItems.firstOrNull { it.index in headerIndex..footerIndex } ?: return
+    val measuredHeaderHeight = visibleItems.firstOrNull { it.index == headerIndex }?.size
+        ?: headerHeightPx
+    // Profile title, summary and badge are single-line. All rows therefore share
+    // the same measured stride, including at non-default density/font scale.
+    val measuredStride = visibleItems.firstOrNull {
+        it.index > headerIndex && it.index < footerIndex
+    }?.size ?: bodyStridePx
+    val anchorWithinSource = when (anchor.index) {
+        headerIndex -> 0
+        footerIndex -> measuredHeaderHeight + bodyCount * measuredStride
+        else -> measuredHeaderHeight + (anchor.index - headerIndex - 1) * measuredStride
     }
-    return sourceCenters[draggedSourceId]
+    val sourceTop = anchor.offset + layout.beforeContentPadding - anchorWithinSource
+    val sourceBottom = sourceTop + measuredHeaderHeight + bodyCount * measuredStride + bottomPaddingPx
+    val viewportHeight = layout.viewportSize.height.toFloat()
+    val shape = SourceViewportShape(
+        shape = YaxcTheme.shapes.extraLarge,
+        top = if (measuredHeaderHeight == 0 && anchor.index > headerIndex) {
+            -viewportHeight
+        } else {
+            sourceTop.toFloat().coerceAtLeast(-viewportHeight)
+        },
+        bottom = sourceBottom.coerceAtMost(viewportHeight * 2f),
+    )
+    YaxcGlassPanel(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = horizontalPadding),
+        shape = shape,
+        contentPadding = PaddingValues(0.dp),
+    ) {}
+}
+
+private data class SourceViewportShape(
+    val shape: Shape,
+    val top: Float,
+    val bottom: Float,
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density,
+    ): Outline {
+        if (bottom <= top) return Outline.Rectangle(Rect.Zero)
+        val offset = Offset(0f, top)
+        return when (val outline = shape.createOutline(Size(size.width, bottom - top), layoutDirection, density)) {
+            is Outline.Rectangle -> Outline.Rectangle(outline.rect.translate(offset))
+            is Outline.Rounded -> with(outline.roundRect) {
+                val translated = RoundRect(
+                    left = left,
+                    top = top + offset.y,
+                    right = right,
+                    bottom = bottom + offset.y,
+                    topLeftCornerRadius = topLeftCornerRadius,
+                    topRightCornerRadius = topRightCornerRadius,
+                    bottomRightCornerRadius = bottomRightCornerRadius,
+                    bottomLeftCornerRadius = bottomLeftCornerRadius,
+                )
+                // The rounded-border fast path ignores translated bounds.
+                Outline.Generic(Path().apply { addRoundRect(translated) })
+            }
+            is Outline.Generic -> Outline.Generic(Path().apply { addPath(outline.path, offset) })
+        }
+    }
 }
 
 @Composable
@@ -439,6 +512,8 @@ private fun ConnectContent(
     selectedProfileId: Long,
     profilesCount: Int,
     activeBatchPingSourceId: Long?,
+    batchPingCompleted: Int,
+    batchPingTotal: Int,
     listState: LazyListState,
     collapseProgress: Float,
     onAction: (MainAction) -> Unit,
@@ -447,24 +522,29 @@ private fun ConnectContent(
 ) {
     val spacing = YaxcTheme.spacing
     val density = LocalDensity.current
-    val sourceSpacingPx = remember(density, spacing.md) {
-        with(density) { spacing.md.toPx() }
-    }
-    val dragHysteresisPx = remember(density) {
-        with(density) { 16.dp.toPx() }
-    }
-    val sourceCenters = remember { mutableStateMapOf<Long, Float>() }
-    val sourceHeights = remember { mutableStateMapOf<Long, Float>() }
+    val panelPadding = YaxcTheme.paddings.regular
+    val layoutDirection = LocalLayoutDirection.current
+    val panelStartPadding = panelPadding.calculateStartPadding(layoutDirection)
+    val panelEndPadding = panelPadding.calculateEndPadding(layoutDirection)
+    val panelTopPadding = panelPadding.calculateTopPadding()
+    val panelBottomPadding = panelPadding.calculateBottomPadding()
+    val sourceSpacingPx = with(density) { spacing.md.toPx() }
+    val dragHysteresisPx = with(density) { 16.dp.toPx() }
+    val overscrollEffect = rememberOverscrollEffect()
+    val scrollOnlyEffect = remember(overscrollEffect) { overscrollEffect?.withoutVisualEffect() }
+    var headerContentHeightPx by remember(density) { mutableIntStateOf(0) }
+    var profileStridePx by remember(density) { mutableIntStateOf(0) }
+    var emptyBodyHeightPx by remember(density) { mutableIntStateOf(0) }
+    val collapsedSourceHeightPx = headerContentHeightPx +
+        with(density) { (panelTopPadding + panelBottomPadding).roundToPx() }
     val tabIds = remember(tabs) { tabs.map { it.id } }
     val tabsById = remember(tabs) { tabs.associateBy { it.id } }
     var localSourceOrder by remember { mutableStateOf<List<Long>?>(null) }
     var draggingSourceId by remember { mutableStateOf<Long?>(null) }
     var draggedCenterY by remember { mutableFloatStateOf(0f) }
-    var draggedSlotCenterY by remember { mutableFloatStateOf(0f) }
     var draggingTargetIndex by remember { mutableIntStateOf(-1) }
     var dragStartOrder by remember { mutableStateOf(emptyList<Long>()) }
     var dragStartCenters by remember { mutableStateOf(emptyMap<Long, Float>()) }
-    var dragStartHeights by remember { mutableStateOf(emptyMap<Long, Float>()) }
     val orderedTabs = remember(tabs, tabsById, localSourceOrder) {
         val sourceOrder = localSourceOrder ?: return@remember tabs
         val usedIds = mutableSetOf<Long>()
@@ -481,19 +561,47 @@ private fun ConnectContent(
     val orderedTabIds = remember(orderedTabs) { orderedTabs.map { it.id } }
     val currentTabIds = rememberUpdatedState(tabIds)
     val currentOrderedTabIds = rememberUpdatedState(orderedTabIds)
+    val currentCollapsedSourceHeight = rememberUpdatedState(collapsedSourceHeightPx)
+    val currentSelectedTabId = rememberUpdatedState(selectedTabId)
+    val currentBodyCount = rememberUpdatedState(profiles.size.coerceAtLeast(1))
+
+    fun finishSourceDrag(cancelled: Boolean) {
+        val sourceId = draggingSourceId ?: return
+        val finalOrder = if (cancelled) currentTabIds.value else
+            localSourceOrder ?: currentOrderedTabIds.value
+        val sourceIndex = finalOrder.indexOf(sourceId)
+        val expandedIndex = finalOrder.indexOf(currentSelectedTabId.value)
+        val headerIndex = 1 + sourceIndex + if (expandedIndex in 0 until sourceIndex) {
+            currentBodyCount.value + 1
+        } else {
+            0
+        }
+        // Keep the handle under the finger when the selected subscription expands again.
+        val restoredCenter = if (cancelled) dragStartCenters[sourceId] ?: draggedCenterY else draggedCenterY
+        listState.requestScrollToItem(
+            index = headerIndex.coerceAtLeast(0),
+            scrollOffset = -(restoredCenter - currentCollapsedSourceHeight.value / 2f).roundToInt(),
+        )
+        if (!cancelled && finalOrder != currentTabIds.value) {
+            onAction(MainAction.CommitSourceOrder(finalOrder))
+        } else {
+            localSourceOrder = null
+        }
+        draggingSourceId = null
+        draggedCenterY = 0f
+        draggingTargetIndex = -1
+        dragStartOrder = emptyList()
+        dragStartCenters = emptyMap()
+    }
 
     LaunchedEffect(tabIds) {
         val knownIds = tabIds.toSet()
-        sourceCenters.keys.toList().filterNot(knownIds::contains).forEach(sourceCenters::remove)
-        sourceHeights.keys.toList().filterNot(knownIds::contains).forEach(sourceHeights::remove)
         if (draggingSourceId != null && draggingSourceId !in knownIds) {
             draggingSourceId = null
             draggedCenterY = 0f
-            draggedSlotCenterY = 0f
             draggingTargetIndex = -1
             dragStartOrder = emptyList()
             dragStartCenters = emptyMap()
-            dragStartHeights = emptyMap()
             localSourceOrder = null
         } else {
             localSourceOrder = localSourceOrder?.let { sourceOrder ->
@@ -508,184 +616,204 @@ private fun ConnectContent(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(
-            start = spacing.md,
-            end = spacing.md,
-            top = topPadding,
-            bottom = bottomPadding,
-        ),
-        verticalArrangement = Arrangement.spacedBy(spacing.md),
-    ) {
-        item {
-            ConnectionTopCard(
-                isRunning = isRunning,
-                selectedSourceName = selectedSourceName,
-                selectedSourceMetadata = selectedSourceMetadata,
-                selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
-                selectedProfileName = selectedProfileName,
-                pingState = pingState,
-                collapseProgress = collapseProgress,
-                onPingCurrent = { onAction(MainAction.PingClicked) },
-                onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
-            )
-        }
-
-        items(
-            items = orderedTabs,
-            key = { item -> item.id },
-        ) { source ->
-            val isDragging = draggingSourceId == source.id
-            val isExpanded = source.id == selectedTabId
-            val dragOffsetTarget = if (isDragging) {
-                draggedCenterY - draggedSlotCenterY
-            } else {
-                0f
-            }
-            val dragOffset by animateFloatAsState(
-                targetValue = dragOffsetTarget,
-                animationSpec = if (isDragging) {
-                    snap()
-                } else {
-                    spring(dampingRatio = 0.86f, stiffness = 520f)
+    // Stretch the glass and the lazy content together; only the list handles scroll events.
+    Box(modifier = Modifier.fillMaxSize().clipToBounds().overscroll(overscrollEffect)) {
+        val expandedSourceIndex = orderedTabIds.indexOf(selectedTabId)
+        if (expandedSourceIndex >= 0 && draggingSourceId == null) {
+            ExpandedSourceBackground(
+                listState = listState,
+                headerIndex = 1 + expandedSourceIndex,
+                bodyCount = profiles.size.coerceAtLeast(1),
+                headerHeightPx = if (headerContentHeightPx == 0) 0 else {
+                    headerContentHeightPx + with(density) { panelTopPadding.roundToPx() }
                 },
-                label = "main_source_drag_offset",
+                bodyStridePx = if (profiles.isEmpty()) emptyBodyHeightPx else profileStridePx,
+                bottomPaddingPx = with(density) { panelBottomPadding.toPx() },
+                horizontalPadding = spacing.md,
             )
-            val placementModifier = if (isDragging) {
-                Modifier
-            } else {
-                Modifier.animateItem(
-                    placementSpec = spring(dampingRatio = 0.86f, stiffness = 520f),
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            overscrollEffect = scrollOnlyEffect,
+            contentPadding = PaddingValues(
+                start = spacing.md,
+                end = spacing.md,
+                top = topPadding,
+                bottom = bottomPadding,
+            ),
+        ) {
+            item(key = "connection", contentType = "connection") {
+                ConnectionTopCard(
+                    isRunning = isRunning,
+                    selectedSourceName = selectedSourceName,
+                    selectedSourceMetadata = selectedSourceMetadata,
+                    selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
+                    selectedProfileName = selectedProfileName,
+                    pingState = pingState,
+                    collapseProgress = collapseProgress,
+                    onPingCurrent = { onAction(MainAction.PingClicked) },
+                    onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
                 )
+                Spacer(Modifier.height(spacing.md))
             }
-            val dragModifier = Modifier.pointerInput(source.id) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = {
-                        val sourceOrder = currentOrderedTabIds.value
-                        val centerSnapshot = sourceCenters.toMap()
-                        val heightSnapshot = sourceHeights.toMap()
-                        val initialTargetIndex = sourceOrder.indexOf(source.id)
-                            .takeIf { it >= 0 }
-                            ?: 0
-                        localSourceOrder = sourceOrder
-                        draggingSourceId = source.id
-                        draggingTargetIndex = initialTargetIndex
-                        dragStartOrder = sourceOrder
-                        dragStartCenters = centerSnapshot
-                        dragStartHeights = heightSnapshot
-                        draggedCenterY = centerSnapshot[source.id] ?: 0f
-                        draggedSlotCenterY = centerSnapshot[source.id] ?: 0f
-                    },
-                    onDragCancel = {
-                        draggingSourceId = null
-                        draggedCenterY = 0f
-                        draggedSlotCenterY = 0f
-                        draggingTargetIndex = -1
-                        dragStartOrder = emptyList()
-                        dragStartCenters = emptyMap()
-                        dragStartHeights = emptyMap()
-                        localSourceOrder = null
-                    },
-                    onDragEnd = {
-                        val sourceId = draggingSourceId
-                        val orderedIds = localSourceOrder ?: currentOrderedTabIds.value
-                        val originalIds = currentTabIds.value
-                        if (sourceId != null && orderedIds != originalIds) {
-                            onAction(MainAction.CommitSourceOrder(orderedIds))
-                        } else {
-                            localSourceOrder = null
-                        }
-                        draggingSourceId = null
-                        draggedCenterY = 0f
-                        draggedSlotCenterY = 0f
-                        draggingTargetIndex = -1
-                        dragStartOrder = emptyList()
-                        dragStartCenters = emptyMap()
-                        dragStartHeights = emptyMap()
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        val sourceId = draggingSourceId ?: source.id
-                        val nextCenterY = draggedCenterY + dragAmount.y
-                        draggedCenterY = nextCenterY
-                        val startOrder = dragStartOrder.ifEmpty { currentOrderedTabIds.value }
-                        val startCenters = dragStartCenters.ifEmpty { sourceCenters.toMap() }
-                        val startHeights = dragStartHeights.ifEmpty { sourceHeights.toMap() }
-                        val nextTargetIndex = draggedTargetIndex(
-                            startOrder = startOrder,
-                            draggedSourceId = sourceId,
-                            draggedCenterY = nextCenterY,
-                            currentTargetIndex = draggingTargetIndex,
-                            sourceCenters = startCenters,
-                            hysteresisPx = dragHysteresisPx,
-                        )
-                        if (nextTargetIndex != draggingTargetIndex) {
-                            val nextOrder = reorderedSourceIds(
-                                startOrder = startOrder,
-                                draggedSourceId = sourceId,
-                                targetIndex = nextTargetIndex,
-                            )
-                            draggedSlotCenterY = draggedSlotCenterY(
-                                startOrder = startOrder,
-                                draggedSourceId = sourceId,
-                                targetIndex = nextTargetIndex,
-                                sourceCenters = startCenters,
-                                sourceHeights = startHeights,
-                                sourceSpacingPx = sourceSpacingPx,
-                            ) ?: draggedSlotCenterY
-                            draggingTargetIndex = nextTargetIndex
-                            localSourceOrder = nextOrder
-                        }
-                    },
-                )
-            }
-            SourceGroupCard(
-                source = source,
-                isExpanded = isExpanded,
-                isBatchPingRunning = activeBatchPingSourceId == source.id,
-                profiles = if (isExpanded) profiles else emptyList(),
-                selectedProfileId = selectedProfileId,
-                onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
-                onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
-                onPingAll = { onAction(MainAction.PingSourceClicked(source.id)) },
-                onRenameSource = { onAction(MainAction.RequestRenameSource(source.id)) },
-                onDeleteSource = { onAction(MainAction.RequestDeleteSource(source.id)) },
-                onSelectProfile = { onAction(MainAction.SelectProfile(it.profile.id)) },
-                onEditProfile = { onAction(MainAction.EditProfile(it.profile)) },
-                onDeleteProfile = { onAction(MainAction.RequestDeleteProfile(it.profile)) },
-                dragModifier = dragModifier,
-                modifier = Modifier
-                    .then(placementModifier)
-                    .graphicsLayer {
-                        translationY = dragOffset
-                        scaleX = if (isDragging) 1.01f else 1f
-                        scaleY = if (isDragging) 1.01f else 1f
-                    }
-                    .zIndex(if (isDragging) 3f else 0f)
-                    .shadow(
-                        elevation = if (isDragging) 24.dp else 0.dp,
-                        shape = MaterialTheme.shapes.extraLarge,
-                        clip = false,
+
+            orderedTabs.forEach { source ->
+                val isExpanded = source.id == selectedTabId && draggingSourceId == null
+                item(key = sourceHeaderKey(source.id), contentType = "source_header") {
+                    val isDragging = draggingSourceId == source.id
+                    val placementModifier = if (isDragging) Modifier else Modifier.animateItem(
+                        fadeInSpec = null,
+                        fadeOutSpec = null,
+                        placementSpec = spring(dampingRatio = 0.86f, stiffness = 520f),
                     )
-                    .onGloballyPositioned { coordinates ->
-                        sourceCenters[source.id] = coordinates.positionInParent().y + coordinates.size.height / 2f
-                        sourceHeights[source.id] = coordinates.size.height.toFloat()
+                    val dragModifier = Modifier.pointerInput(source.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                val sourceOrder = currentOrderedTabIds.value
+                                val initialIndex = sourceOrder.indexOf(source.id).coerceAtLeast(0)
+                                val header = listState.layoutInfo.visibleItemsInfo.firstOrNull {
+                                    it.key == sourceHeaderKey(source.id)
+                                } ?: return@detectDragGesturesAfterLongPress
+                                val height = currentCollapsedSourceHeight.value.toFloat()
+                                val center = header.offset + height / 2f
+                                // Reordering temporarily collapses the selected source. Measuring a
+                                // header as if it were the whole expanded group gives wrong slots,
+                                // and a thousand-row group cannot be moved with a screen-sized drag.
+                                dragStartCenters = sourceOrder.mapIndexed { index, id ->
+                                    id to center + (index - initialIndex) * (height + sourceSpacingPx)
+                                }.toMap()
+                                dragStartOrder = sourceOrder
+                                localSourceOrder = sourceOrder
+                                draggingTargetIndex = initialIndex
+                                draggedCenterY = center
+                                draggingSourceId = source.id
+                                listState.requestScrollToItem(
+                                    index = 1 + initialIndex,
+                                    scrollOffset = -header.offset,
+                                )
+                            },
+                            onDragCancel = { finishSourceDrag(cancelled = true) },
+                            onDragEnd = { finishSourceDrag(cancelled = false) },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val sourceId = draggingSourceId
+                                    ?: return@detectDragGesturesAfterLongPress
+                                draggedCenterY += dragAmount.y
+                                val nextTargetIndex = draggedTargetIndex(
+                                    startOrder = dragStartOrder,
+                                    draggedSourceId = sourceId,
+                                    draggedCenterY = draggedCenterY,
+                                    currentTargetIndex = draggingTargetIndex,
+                                    sourceCenters = dragStartCenters,
+                                    hysteresisPx = dragHysteresisPx,
+                                )
+                                if (nextTargetIndex != draggingTargetIndex) {
+                                    localSourceOrder = reorderedSourceIds(
+                                        startOrder = dragStartOrder,
+                                        draggedSourceId = sourceId,
+                                        targetIndex = nextTargetIndex,
+                                    )
+                                    draggingTargetIndex = nextTargetIndex
+                                }
+                            },
+                        )
                     }
-            )
-        }
-
-        if (tabs.isEmpty()) {
-            item { EmptySourcesCard() }
-        }
-
-        item {
-            Text(
-                text = textResource(R.string.mainProfilesCount, profilesCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = YaxcTheme.extendedColors.textMuted,
-            )
+                    Box(
+                        modifier = Modifier
+                            .then(placementModifier)
+                            .graphicsLayer {
+                                val header = if (isDragging) {
+                                    listState.layoutInfo.visibleItemsInfo.firstOrNull {
+                                        it.key == sourceHeaderKey(source.id)
+                                    }
+                                } else null
+                                translationY = if (header != null) {
+                                    draggedCenterY - header.offset - currentCollapsedSourceHeight.value / 2f
+                                } else 0f
+                            }
+                            .zIndex(if (isDragging) 3f else 0f)
+                            .padding(bottom = if (isExpanded) 0.dp else spacing.md),
+                    ) {
+                        if (!isExpanded) {
+                            YaxcGlassPanel(
+                                modifier = Modifier.matchParentSize(),
+                                contentPadding = PaddingValues(0.dp),
+                                shadowElevation = if (isDragging) 24.dp else 12.dp,
+                            ) {}
+                        }
+                        SourceGroupHeader(
+                            source = source,
+                            batchPingCompleted = batchPingCompleted,
+                            batchPingTotal = batchPingTotal,
+                            isBatchPingRunning = activeBatchPingSourceId == source.id,
+                            onToggleExpanded = { onAction(MainAction.SelectTab(source.id)) },
+                            onRefresh = { onAction(MainAction.RefreshSourceClicked(source.id)) },
+                            onPingAll = { onAction(MainAction.PingSourceClicked(source.id)) },
+                            onRenameSource = { onAction(MainAction.RequestRenameSource(source.id)) },
+                            onDeleteSource = { onAction(MainAction.RequestDeleteSource(source.id)) },
+                            dragModifier = dragModifier,
+                            modifier = Modifier.padding(
+                                start = panelStartPadding,
+                                end = panelEndPadding,
+                                top = panelTopPadding,
+                                bottom = if (isExpanded) 0.dp else panelBottomPadding,
+                            ),
+                            onHeaderHeight = { headerContentHeightPx = it },
+                        )
+                    }
+                }
+                if (isExpanded) {
+                    items(
+                        items = profiles,
+                        key = { "profile:${it.profile.id}" },
+                        contentType = { "profile" },
+                    ) { profile ->
+                        Box(
+                            modifier = Modifier
+                                .animateItem(placementSpec = null)
+                                .onSizeChanged { profileStridePx = it.height }
+                                .padding(start = panelStartPadding, end = panelEndPadding, top = 8.dp),
+                        ) {
+                            ProfileCard(
+                                profile = profile,
+                                isSelected = profile.profile.id == selectedProfileId,
+                                onSelect = { onAction(MainAction.SelectProfile(profile.profile.id)) },
+                                onEdit = { onAction(MainAction.EditProfile(profile.profile)) },
+                                onDelete = { onAction(MainAction.RequestDeleteProfile(profile.profile)) },
+                            )
+                        }
+                    }
+                    if (profiles.isEmpty()) {
+                        item(key = "source:${source.id}:empty", contentType = "source_empty") {
+                            Text(
+                                text = textResource(R.string.mainNoProfilesInSource),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = YaxcTheme.extendedColors.textMuted,
+                                modifier = Modifier
+                                    .onSizeChanged { emptyBodyHeightPx = it.height }
+                                    .padding(start = panelStartPadding, end = panelEndPadding, top = 8.dp),
+                            )
+                        }
+                    }
+                    item(key = "source:${source.id}:footer", contentType = "source_footer") {
+                        Spacer(Modifier.height(panelBottomPadding + spacing.md))
+                    }
+                }
+            }
+            if (tabs.isEmpty()) {
+                item(key = "empty_sources") {
+                    EmptySourcesCard()
+                    Spacer(Modifier.height(spacing.md))
+                }
+            }
+            item(key = "profile_count") {
+                Text(
+                    text = textResource(R.string.mainProfilesCount, profilesCount),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YaxcTheme.extendedColors.textMuted,
+                )
+            }
         }
     }
 }
@@ -1595,120 +1723,85 @@ private fun SettingsActionCard(
 }
 
 @Composable
-private fun SourceGroupCard(
+private fun SourceGroupHeader(
     source: Link,
-    isExpanded: Boolean,
     isBatchPingRunning: Boolean,
-    profiles: List<MainProfileItem>,
-    selectedProfileId: Long,
+    batchPingCompleted: Int,
+    batchPingTotal: Int,
     onToggleExpanded: () -> Unit,
     onRefresh: () -> Unit,
     onPingAll: () -> Unit,
     onRenameSource: () -> Unit,
     onDeleteSource: () -> Unit,
-    onSelectProfile: (MainProfileItem) -> Unit,
-    onEditProfile: (MainProfileItem) -> Unit,
-    onDeleteProfile: (MainProfileItem) -> Unit,
+    onHeaderHeight: (Int) -> Unit,
     dragModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
 
-    YaxcGlassPanel(
-        modifier = modifier,
-        contentPadding = YaxcTheme.paddings.regular,
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .onSizeChanged { onHeaderHeight(it.height) }
+            .yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onToggleExpanded)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onToggleExpanded)
-                .padding(vertical = 4.dp),
+                .weight(1f)
+                .then(dragModifier),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .then(dragModifier),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = source.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            ActionBubble(
-                icon = Icons.Outlined.WifiTethering,
-                onClick = onPingAll,
-                loading = isBatchPingRunning,
+            Text(
+                text = source.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            ActionBubble(icon = Icons.Outlined.Refresh, onClick = onRefresh)
-            Box {
-                ActionBubble(
-                    icon = Icons.Outlined.MoreVert,
-                    onClick = { actionsExpanded = true },
-                )
-                YaxcLiquidDropdownMenu(
-                    expanded = actionsExpanded,
-                    onDismissRequest = { actionsExpanded = false },
-                ) {
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.renameSource),
-                        onClick = {
-                            actionsExpanded = false
-                            onRenameSource()
-                        },
-                    )
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.deleteSource),
-                        onClick = {
-                            actionsExpanded = false
-                            onDeleteSource()
-                        },
-                    )
-                }
-            }
         }
 
-        AnimatedVisibility(
-            visible = isExpanded,
-            enter = expandVertically(
-                expandFrom = Alignment.Top,
-                animationSpec = spring(dampingRatio = 0.92f, stiffness = 560f),
-            ) + fadeIn(animationSpec = tween(durationMillis = 120, delayMillis = 40)),
-            exit = shrinkVertically(
-                shrinkTowards = Alignment.Top,
-                animationSpec = spring(dampingRatio = 0.96f, stiffness = 620f),
-            ) + fadeOut(animationSpec = tween(durationMillis = 90)),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+        if (isBatchPingRunning) {
+            Text(
+                text = "$batchPingCompleted/$batchPingTotal",
+                style = MaterialTheme.typography.labelSmall,
+                color = YaxcTheme.extendedColors.textMuted,
+                maxLines = 1,
+            )
+        }
+        ActionBubble(
+            icon = Icons.Outlined.WifiTethering,
+            onClick = onPingAll,
+            loading = isBatchPingRunning,
+        )
+        ActionBubble(icon = Icons.Outlined.Refresh, onClick = onRefresh)
+        Box {
+            ActionBubble(
+                icon = Icons.Outlined.MoreVert,
+                onClick = { actionsExpanded = true },
+            )
+            YaxcLiquidDropdownMenu(
+                expanded = actionsExpanded,
+                onDismissRequest = { actionsExpanded = false },
             ) {
-                profiles.forEach { profile ->
-                    ProfileCard(
-                        profile = profile,
-                        isSelected = profile.profile.id == selectedProfileId,
-                        onSelect = { onSelectProfile(profile) },
-                        onEdit = { onEditProfile(profile) },
-                        onDelete = { onDeleteProfile(profile) },
-                    )
-                }
-                if (profiles.isEmpty()) {
-                    Text(
-                        text = textResource(R.string.mainNoProfilesInSource),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YaxcTheme.extendedColors.textMuted,
-                    )
-                }
+                YaxcLiquidDropdownMenuItem(
+                    text = textResource(R.string.renameSource),
+                    onClick = {
+                        actionsExpanded = false
+                        onRenameSource()
+                    },
+                )
+                YaxcLiquidDropdownMenuItem(
+                    text = textResource(R.string.deleteSource),
+                    onClick = {
+                        actionsExpanded = false
+                        onDeleteSource()
+                    },
+                )
             }
         }
     }
@@ -1886,6 +1979,8 @@ private fun PingStateBadge(
                 text = pingState.label,
                 style = MaterialTheme.typography.bodySmall,
                 color = YaxcTheme.extendedColors.success,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = modifier,
             )
         }
@@ -1895,6 +1990,8 @@ private fun PingStateBadge(
                 text = pingState.label,
                 style = MaterialTheme.typography.bodySmall,
                 color = YaxcTheme.extendedColors.danger,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = modifier,
             )
         }

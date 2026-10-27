@@ -1,0 +1,31 @@
+## What's new in 1.3.2
+
+### Subscription lists
+
+- Large subscriptions now render individual profile rows lazily instead of composing the entire expanded group at once.
+- Preserved the continuous subscription card appearance, with the card background stretching together with its rows at scroll boundaries.
+- Source groups temporarily collapse while being reordered and restore their expanded content on drop or cancellation.
+- Moved profile summary parsing off the UI thread and stopped reparsing every profile after each ping result.
+- Replaced overlapping profile-index update jobs with transactional normalization to reduce unnecessary database work and memory pressure.
+
+### Ping reliability and concurrency
+
+- Reworked batch ping around a bounded pool of five parallel workers, without creating a coroutine for every profile.
+- Isolated native ping cores in separate worker processes so they do not share the VPN core's global state.
+- Ping no longer switches the selected profile or reloads the active VPN configuration.
+- Improved GET, HEAD and TCP deadline handling, including SOCKS negotiation.
+- Cancellation now waits for native resources to close before a worker is reused; cancelled queued requests do not consume worker capacity.
+- Added batch completion progress and protected profile results from stale or duplicate updates.
+- Fixed a native crash caused by malformed ping URLs and improved cleanup after configuration or core startup failures.
+
+### Subscription metadata and compatibility
+
+- Preserved numeric subscription titles, including leading zeros, without misidentifying them as Base64 text.
+- Rejected malformed UTF-8 title decoding, ignored negative subscription metadata values and prevented refresh-interval overflow.
+- Improved share-link URL decoding compatibility on older Android versions.
+- Settings copy confirmations now use the current app locale.
+
+### Maintenance
+
+- Added regression coverage for subscription metadata, ping state transitions, native deadlines, cancellation and resource cleanup.
+- Added CI checks for Android builds, lint and JVM tests.

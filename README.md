@@ -1,130 +1,44 @@
 # yaxc
 
-`yaxc` — Android-клиент для `Xray-core` с упором на удобную повседневную работу: импорт профилей и подписок, маршрутизация приложений и ядра, управление runtime-ресурсами, диагностика и современный интерфейс на Jetpack Compose.
+yaxc is an Android client for Xray-core. Manage subscriptions, compare profiles and control how your apps connect.
 
-Проект развивается как самостоятельный форк с отдельным именем пакета, собственной UI-архитектурой и независимым release cycle.
+**Android 8.0+** · [Download APKs](https://github.com/derundevu/yaxc/releases)
 
-## Что умеет приложение
+Based on [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray); maintained as an independent fork.
 
-- Подключение к `Xray-core` через локальный VPN-интерфейс на Android.
-- Защита tun0 через ConnectivityManager (Android 10+)
-- Импорт профилей из:
-  - JSON-конфигов
-  - подписок
-  - QR-кодов
-  - буфера обмена
-- Управление источниками и профилями:
-  - обновление подписок
-  - переименование и удаление
-  - пакетный и одиночный пинг
-- Маршрутизация приложений:
-  - режим исключения приложений из VPN
-  - режим включения только выбранных приложений
-- Маршрутизация ядра:
-  - визуальный редактор правил
-  - JSON-редактор
-  - импорт и экспорт правил
-- Управление runtime-ресурсами:
-  - `geoip.dat`
-  - `geosite.dat`
-  - выбор источника геобаз
-- Настройки подключения и диагностики:
-  - DNS IPv4 / IPv6
-  - `tun2socks`
-  - локальный SOCKS5
-  - `User-Agent`
-  - выбор типа пинга
-- Локализация интерфейса:
-  - русский
-  - английский
-  - системный язык
-- Несколько тем оформления, включая светлую и темные схемы.
+## Features
 
-## Для кого это
+- Import subscriptions and profiles from links, QR codes or the clipboard.
+- Keep subscriptions current with automatic refresh.
+- Compare profiles with individual and batch latency checks.
+- Customize per-app routing and routing rules.
+- View subscription traffic and expiry when provided by your service.
+- Choose light or dark themes and manage geodata inside the app.
+- Check for app updates without leaving the app.
+- Use optional root/transparent-proxy mode for advanced setups.
 
-`yaxc` подойдет, если нужен Android-клиент для Xray без лишней перегруженности, но с доступом к продвинутым возможностям:
+## Screenshots
 
-- обычное подключение по готовым профилям
-- работа с подписками
-- разделение трафика по приложениям
-- ручная настройка routing-правил ядра
-- отладка и диагностика прямо в приложении
+![Main screen](docs/screenshots/connect-main.jpg)
+![Routing](docs/screenshots/core-routing.jpg)
+![Settings](docs/screenshots/settings.jpg)
 
-## Скриншоты
+## Install and connect
 
-### Основной экран и разные темы
+1. Download an APK matching your device from [Releases](https://github.com/derundevu/yaxc/releases).
+   Most current phones use `arm64-v8a`.
+2. Add a subscription, select a profile and optionally check its latency.
+   Use **Scan QR code** or **From Clipboard** to import an HTTPS subscription URL or a profile share link.
+3. Download `geoip.dat` and `geosite.dat` in Settings → Resources before connecting:
+   the default routing rules use these files.
+4. Start the VPN. Routing rules are evaluated in order; higher rules take precedence.
 
-Так выглядит основной экран в разных темах. Тема меняется в настройках.
-![connect-main](./docs/screenshots/connect-main.jpg)
-![graphite-theme](./docs/screenshots/graphite-theme.jpg)
-![light-theme](./docs/screenshots/light-theme.jpg)
+Standalone configurations still have known limitations. TUN hardening is experimental and is not a guaranteed kill switch.
 
-### Маршрутизация
-![routing](./docs/screenshots/routing.jpg)
+## Contributing
 
-Эти правила добавлены изначально, они сразу будут включены после установки приложения, чтобы пользователю не надо было заморачиваться со стандартной маршрутизацией. **Порядок правил имеет влияение: чем выше правило, тем раньше оно будет выполнено. Правила можно перемещать между собой** 
-![core-routing](./docs/screenshots/core-routing.jpg)
-![rule-opened](./docs/screenshots/rule-opened.jpg)
-![core-routing-json](./docs/screenshots/core-routing-json.jpg)
-![apps-routing](./docs/screenshots/apps-routing.jpg)
+Build instructions, CI details and the testing checklist are in the [development guide](docs/DEVELOPMENT.md).
 
-### Настройки
-![settings](./docs/screenshots/settings.jpg)
-![assets](./docs/screenshots/assets.jpg)
-![main-settings](./docs/screenshots/main-settings.jpg)
-![ping-types](./docs/screenshots/ping-types.jpg)
+## License
 
-## Установка
-
-1. Открыть [Releases](https://github.com/derundevu/yaxc/releases) и выбрать последний стабильный.
-2. Скачать APK под свою архитектуру устройства.
-3. Установить приложение на устройство.
-
-Если не знаешь архитектуру устройства, обычно подойдет:
-
-- `arm64-v8a` для большинства современных Android-устройств
-
-## Быстрый старт
-
-После установки типичный сценарий такой:
-
-1. Добавить подписочную ссылку (*с отдельными конфигами приложение работает еще нестабильно*).
-2. Выбрать профиль.
-3. При необходимости проверить пинг.
-4. Скачать ресурсы в Настройках -> Ресурсы. Без этого не будет работать маршрутизация ядра, которая сразу завязана на правила `geoip:ru`, `geosite:category-ru`.
-5. Запустить VPN.
-
-## Статус проекта
-
-Проект активно перерабатывается и развивается. В репозитории уже есть:
-
-- собственный Compose-интерфейс
-- обновленный release pipeline
-- отдельная система тем и локализаций
-- своя логика маршрутизации и работы с ресурсами
-
-При этом это все еще живой проект, в котором интерфейс и внутренние механизмы продолжают дорабатываться.
-
-## Локальная сборка
-
-Короткий сценарий для debug-сборки на macOS:
-
-```bash
-export JAVA_HOME="your-path"
-export PATH="$JAVA_HOME/bin:$PATH"
-
-git submodule update --init --recursive
-
-./buildXrayCore.sh arm64
-./buildXrayHelper.sh arm64
-
-GRADLE_USER_HOME=/tmp/gradle-user-home ./gradlew :app:assembleDebug
-```
-
-## Происхождение проекта
-
-`yaxc` основан на форке проекта [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray), но развивается как отдельное приложение с собственным интерфейсом, настройками, релизами и внутренними изменениями. За основу взята интеграция с API системы и xray-core.
-
-## Лицензия
-
-Проект распространяется по лицензии MIT.
+[MIT](LICENSE).

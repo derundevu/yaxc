@@ -9,7 +9,6 @@ import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
-import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
@@ -23,6 +22,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,10 +34,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val selectedProfileId: Long,
     )
 
+    private data class ProfilePresentation(
+        val profile: ProfileList,
+        val summary: String,
+        val serverLabel: String,
+    )
+
     private data class RuntimeState(
         val isRunning: Boolean,
-        val profilePingStates: Map<Long, MainPingState>,
-        val activeBatchPingSourceId: Long?,
+        val ping: MainPingSnapshot,
     )
 
     private val settings = Settings(application)
@@ -49,8 +54,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val selectedTabId = MutableStateFlow(settings.selectedLink)
     private val selectedProfileId = MutableStateFlow(settings.selectedProfile)
     private val isRunning = MutableStateFlow(false)
-    private val profilePingStates = MutableStateFlow<Map<Long, MainPingState>>(emptyMap())
-    private val activeBatchPingSourceId = MutableStateFlow<Long?>(null)
+    private val pingTracker = MainPingTracker()
+    private val pingState = MutableStateFlow(pingTracker.snapshot)
+    private val pingResultPattern = "(\\d+)\\s*(ms|мс)".toRegex(RegexOption.IGNORE_CASE)
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
 
     private val tabs = linkRepository.tabs.flowOn(Dispatchers.IO)
@@ -59,31 +65,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SharingStarted.Eagerly,
         emptyList(),
     )
+    private val profilePresentations = allProfiles.map { profiles ->
+        profiles.map(::presentProfile)
+    }.flowOn(Dispatchers.Default)
     private val selection = combine(selectedTabId, selectedProfileId) { selectedTabId, selectedProfileId ->
         SelectionState(
             selectedTabId = selectedTabId,
             selectedProfileId = selectedProfileId,
         )
     }
-    private val runtime = combine(
-        isRunning,
-        profilePingStates,
-        activeBatchPingSourceId,
-    ) { isRunning, profilePingStates, activeBatchPingSourceId ->
-        RuntimeState(
-            isRunning = isRunning,
-            profilePingStates = profilePingStates,
-            activeBatchPingSourceId = activeBatchPingSourceId,
-        )
+    private val runtime = combine(isRunning, pingState) { isRunning, ping ->
+        RuntimeState(isRunning = isRunning, ping = ping)
     }
 
     val uiState = combine(
         tabs,
-        allProfiles,
+        profilePresentations,
         selection,
         runtime,
-    ) { tabs: List<Link>, profiles: List<ProfileList>, selection: SelectionState, runtime: RuntimeState ->
-        val selectedProfile = profiles.firstOrNull { it.id == selection.selectedProfileId }
+    ) { tabs: List<Link>, profiles: List<ProfilePresentation>, selection: SelectionState, runtime: RuntimeState ->
+        val selectedPresentation = profiles.firstOrNull { it.profile.id == selection.selectedProfileId }
+        val selectedProfile = selectedPresentation?.profile
         val selectedSourceId = selectedProfile?.link?.takeIf { linkId ->
             tabs.any { it.id == linkId }
         } ?: 0L
@@ -101,20 +103,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?.lastRefreshedAt
             ?.takeIf { it > 0L }
         val filteredProfiles = profiles
-            .filter { resolvedTabId == 0L || it.link == resolvedTabId }
-            .map { profile ->
+            .filter { resolvedTabId == 0L || it.profile.link == resolvedTabId }
+            .map { presentation ->
                 MainProfileItem(
-                    profile = profile,
-                    summary = extractProfileSummary(profile.config),
-                    pingState = runtime.profilePingStates[profile.id] ?: MainPingState.Idle,
+                    profile = presentation.profile,
+                    summary = presentation.summary,
+                    pingState = runtime.ping.profiles[presentation.profile.id] ?: MainPingState.Idle,
                 )
             }
         val selectedProfileName = selectedProfile?.name.orEmpty()
-        val selectedProfilePingState = runtime.profilePingStates[selection.selectedProfileId]
+        val selectedProfilePingState = runtime.ping.profiles[selection.selectedProfileId]
             ?: MainPingState.Idle
-        val selectedServerLabel = selectedProfile
-            ?.config
-            ?.let(::extractServerLabel)
+        val selectedServerLabel = selectedPresentation?.serverLabel
             ?: application.getString(R.string.noValue)
         val socksAddress = settings.socksAddress.trim()
         val socksPort = settings.socksPort.trim()
@@ -141,7 +141,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
             pingState = selectedProfilePingState,
-            activeBatchPingSourceId = runtime.activeBatchPingSourceId,
+            activeBatchPingSourceId = runtime.ping.sourceId,
+            batchPingCompleted = runtime.ping.completed,
+            batchPingTotal = runtime.ping.total,
         )
     }.stateIn(
         viewModelScope,
@@ -168,10 +170,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     hasResolvedProfilesSnapshot = true
                     if (profiles.isEmpty()) return@collect
                 }
-                fixIndex(profiles)
+                profileRepository.normalizeIndices()
                 val validProfileIds = profiles.map { it.id }.toSet()
-                profilePingStates.value = profilePingStates.value
-                    .filterKeys { it in validProfileIds }
+                pingTracker.retain(validProfileIds)
+                pingState.value = pingTracker.snapshot
                 if (selectedProfileId.value != 0L && profiles.isNotEmpty() && profiles.none { it.id == selectedProfileId.value }) {
                     clearSelectedProfile()
                 }
@@ -197,27 +199,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateVpnRunning(running: Boolean) {
         isRunning.value = running
-        if (!running && !XrayBatchPingHelper.supportsIsolatedPing()) {
-            activeBatchPingSourceId.value = null
-            profilePingStates.value = profilePingStates.value.mapValues { (_, value) ->
-                if (value == MainPingState.Loading) MainPingState.Idle else value
-            }
-        }
     }
 
-    fun markPingTesting(profileId: Long) {
-        setProfilePingState(profileId, MainPingState.Loading)
+    fun isCurrentPingOperation(operationId: Long): Boolean = pingTracker.isCurrent(operationId)
+
+    private fun startPing(profileIds: List<Long>, sourceId: Long? = null, batch: Boolean = false): Long {
+        val id = pingTracker.start(profileIds, sourceId, batch)
+        pingState.value = pingTracker.snapshot
+        return id
     }
 
-    fun setProfilePingState(profileId: Long, state: MainPingState) {
-        profilePingStates.value = profilePingStates.value.toMutableMap().apply {
-            put(profileId, state)
-        }
+    private fun finishPing(operationId: Long) {
+        pingTracker.finish(operationId)
+        pingState.value = pingTracker.snapshot
     }
 
     private fun parsePingState(result: String): MainPingState {
-        val pingLabel = "(\\d+)\\s*(ms|мс)".toRegex(RegexOption.IGNORE_CASE)
-            .find(result)
+        val pingLabel = pingResultPattern.matchEntire(result.trim())
             ?.groupValues
             ?.getOrNull(1)
             ?.let { "$it ms" }
@@ -230,19 +228,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updatePingResult(profileId: Long, result: String) {
-        setProfilePingState(profileId, parsePingState(result))
+    private fun updatePingResult(operationId: Long, profileId: Long, result: String) {
+        pingTracker.result(operationId, profileId, parsePingState(result))
+        pingState.value = pingTracker.snapshot
     }
 
     private fun requestBatchPing(sourceId: Long?, profileIds: List<Long>) {
-        if (!uiState.value.isRunning && !XrayBatchPingHelper.supportsIsolatedPing()) {
-            _effects.tryEmit(
-                MainEffect.ShowToast(
-                    getApplication<Application>().getString(R.string.pingNotConnected)
-                )
-            )
-            return
-        }
         if (profileIds.isEmpty()) {
             _effects.tryEmit(
                 MainEffect.ShowToast(
@@ -251,17 +242,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             return
         }
-        activeBatchPingSourceId.value = sourceId
-        val updatedStates = profilePingStates.value.toMutableMap()
-        profileIds.forEach { profileId ->
-            updatedStates[profileId] = MainPingState.Loading
-        }
-        profilePingStates.value = updatedStates
+        val operationId = startPing(profileIds, sourceId, batch = true)
         _effects.tryEmit(
             MainEffect.RunBatchPing(
+                operationId = operationId,
                 sourceId = sourceId,
                 profileIds = profileIds,
-                restoreProfileId = selectedProfileId.value,
             )
         )
     }
@@ -270,9 +256,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when (action) {
             is MainAction.SelectTab -> selectTab(action.linkId)
             is MainAction.UpdateVpnStatus -> updateVpnRunning(action.isRunning)
-            is MainAction.PingResultReceived -> updatePingResult(action.profileId, action.result)
-            is MainAction.ProfilePingUpdated -> updatePingResult(action.profileId, action.result)
-            is MainAction.SetProfilePingState -> setProfilePingState(action.profileId, action.state)
+            is MainAction.PingResultReceived -> updatePingResult(action.operationId, action.profileId, action.result)
+            is MainAction.PingFinished -> finishPing(action.operationId)
             is MainAction.SelectProfile -> {
                 if (selectedProfileId.value == action.profileId) return
                 selectProfile(action.profileId)
@@ -339,23 +324,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     linkRepository.reorder(action.orderedIds)
                 }
             }
-            is MainAction.SetBatchPingSource -> {
-                activeBatchPingSourceId.value = action.sourceId
-            }
             MainAction.ToggleVpnClicked -> _effects.tryEmit(MainEffect.HandleToggleVpn)
             MainAction.PingClicked -> {
                 val profileId = selectedProfileId.value
                 if (profileId == 0L) return
-                if (!uiState.value.isRunning && !XrayBatchPingHelper.supportsIsolatedPing()) {
-                    _effects.tryEmit(
-                        MainEffect.ShowToast(
-                            getApplication<Application>().getString(R.string.pingNotConnected)
-                        )
-                    )
-                    return
-                }
-                markPingTesting(profileId)
-                _effects.tryEmit(MainEffect.RunPing(profileId))
+                val operationId = startPing(listOf(profileId))
+                _effects.tryEmit(MainEffect.RunPing(operationId, profileId))
             }
             MainAction.PingAllProfilesClicked -> {
                 requestBatchPing(
@@ -379,46 +353,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun fixIndex(list: List<ProfileList>) = viewModelScope.launch {
-        list.forEachIndexed { index, profile ->
-            if (profile.index == index) return@forEachIndexed
-            profileRepository.updateIndex(index, profile.id)
-        }
-    }
-
-    private fun extractServerLabel(config: String): String {
+    private fun presentProfile(profile: ProfileList): ProfilePresentation {
+        val noValue = getApplication<Application>().getString(R.string.noValue)
         return runCatching {
-            val root = JSONObject(config)
+            val root = JSONObject(profile.config)
             val outbounds = root.optJSONArray("outbounds") ?: JSONArray()
-            val firstOutbound = outbounds.optJSONObject(0) ?: JSONObject()
-            val settings = firstOutbound.optJSONObject("settings") ?: JSONObject()
-
-            settings.optString("address").takeIf { it.isNotBlank() }
+            val outbound = outbounds.optJSONObject(0) ?: JSONObject()
+            val settings = outbound.optJSONObject("settings") ?: JSONObject()
+            val streamSettings = outbound.optJSONObject("streamSettings") ?: JSONObject()
+            val serverLabel = settings.optString("address").takeIf { it.isNotBlank() }
                 ?: settings.optJSONArray("vnext")
                     ?.optJSONObject(0)
                     ?.optString("address")
                     ?.takeIf { it.isNotBlank() }
-                ?: firstOutbound.optJSONObject("streamSettings")
-                    ?.optJSONObject("realitySettings")
+                ?: streamSettings.optJSONObject("realitySettings")
                     ?.optString("serverName")
                     ?.takeIf { it.isNotBlank() }
-                ?: getApplication<Application>().getString(R.string.noValue)
-        }.getOrDefault(getApplication<Application>().getString(R.string.noValue))
-    }
-
-    private fun extractProfileSummary(config: String): String {
-        return runCatching {
-            val root = JSONObject(config)
-            val outbounds = root.optJSONArray("outbounds") ?: JSONArray()
-            val firstOutbound = outbounds.optJSONObject(0) ?: JSONObject()
-            val protocol = firstOutbound.optString("protocol").uppercase().takeIf { it.isNotBlank() }
-            val streamSettings = firstOutbound.optJSONObject("streamSettings") ?: JSONObject()
+                ?: noValue
+            val protocol = outbound.optString("protocol").uppercase().takeIf { it.isNotBlank() }
             val network = streamSettings.optString("network").uppercase().takeIf { it.isNotBlank() }
             val security = streamSettings.optString("security").uppercase().takeIf { it.isNotBlank() }
-
-            listOfNotNull(protocol, network, security)
-                .joinToString(separator = " • ")
-                .ifBlank { getApplication<Application>().getString(R.string.noValue) }
-        }.getOrDefault(getApplication<Application>().getString(R.string.noValue))
+            ProfilePresentation(
+                profile = profile,
+                summary = listOfNotNull(protocol, network, security).joinToString(" • ").ifBlank { noValue },
+                serverLabel = serverLabel,
+            )
+        }.getOrElse { ProfilePresentation(profile, noValue, noValue) }
     }
 }

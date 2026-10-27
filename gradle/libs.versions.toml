@@ -15,6 +15,7 @@ googleMaterial = "1.13.0"
 libsuCore = "5.2.2"
 codeScanner="2.3.2"
 backdrop = "1.0.6"
+junit = "4.13.2"
 
 [libraries]
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "androidxActivityKtx" }
@@ -42,6 +43,7 @@ google-material = { group = "com.google.android.material", name = "material", ve
 topjohnwu-libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref = "libsuCore" }
 yuriy-budiyev-code-scanner = { group = "com.github.yuriy-budiyev", name = "code-scanner", version.ref = "codeScanner" }
 kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
+junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

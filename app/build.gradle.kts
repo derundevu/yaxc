@@ -23,7 +23,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = calcVersionCode()
-        versionName = "1.3.1"
+        versionName = "1.3.2"
     }
 
     buildFeatures {
@@ -113,5 +113,6 @@ dependencies {
     implementation(libs.kyant.backdrop)
     implementation(libs.topjohnwu.libsu.core)
     implementation(libs.yuriy.budiyev.code.scanner)
+    testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -4,9 +4,7 @@ import android.os.Build
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.net.Authenticator
@@ -14,17 +12,12 @@ import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.PasswordAuthentication
 import java.net.Proxy
-import java.net.Socket
-import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
-class HttpHelper(
-    val scope: CoroutineScope,
-    val settings: Settings,
-) {
+class HttpHelper private constructor() {
 
     companion object {
         data class HttpResponse(
@@ -248,7 +241,7 @@ class HttpHelper(
                     normalizedHeaders,
                     "profile-update-interval",
                     "x-profile-update-interval",
-                )?.toIntOrNull()?.takeIf { it > 0 }?.let { it * 60 },
+                )?.toIntOrNull()?.takeIf { it > 0 && it <= Int.MAX_VALUE / 60 }?.let { it * 60 },
                 supportUrl = firstDecodedHeaderValue(
                     normalizedHeaders,
                     "support-url",
@@ -375,7 +368,7 @@ class HttpHelper(
                     if (separatorIndex <= 0 || separatorIndex >= segment.lastIndex) return@forEach
                     val key = segment.substring(0, separatorIndex).trim().lowercase()
                     val rawValue = segment.substring(separatorIndex + 1).trim()
-                    val parsedValue = rawValue.toLongOrNull() ?: return@forEach
+                    val parsedValue = rawValue.toLongOrNull()?.takeIf { it >= 0L } ?: return@forEach
                     when (key) {
                         "upload" -> uploadBytes = parsedValue
                         "download" -> downloadBytes = parsedValue
@@ -451,10 +444,10 @@ class HttpHelper(
         }
 
         private fun decodeBase64Header(value: String): String? {
-            if (!value.matches(Regex("""[A-Za-z0-9+/=_-]+"""))) return null
+            if (value.all { it in '0'..'9' } || !value.matches(Regex("""[A-Za-z0-9+/=_-]+"""))) return null
             return runCatching {
                 val normalized = value.replace('-', '+').replace('_', '/')
-                String(Base64.getDecoder().decode(normalized), StandardCharsets.UTF_8)
+                Base64.getDecoder().decode(normalized).decodeToString(throwOnInvalidSequence = true)
             }.getOrNull()
         }
 
@@ -466,102 +459,4 @@ class HttpHelper(
                 .takeIf { it.isNotEmpty() }
         }
     }
-
-    fun measureDelay(proxy: Boolean, callback: (result: String) -> Unit) {
-        scope.launch(Dispatchers.IO) {
-            val start = System.currentTimeMillis()
-            val result = try {
-                setSocksAuth(getSocksAuth())
-                when (settings.pingType) {
-                    Settings.PingType.Tcp -> {
-                        val target = resolveTcpTarget(settings.pingAddress)
-                        val socket = if (proxy) {
-                            Socket(Proxy(Proxy.Type.SOCKS, InetSocketAddress(settings.socksAddress, settings.socksPort.toInt())))
-                        } else {
-                            Socket()
-                        }
-                        socket.use {
-                            it.connect(target, settings.pingTimeout * 1000)
-                        }
-                        val delay = System.currentTimeMillis() - start
-                        "TCP, $delay ms"
-                    }
-
-                    Settings.PingType.Get,
-                    Settings.PingType.Head,
-                    -> {
-                        val connection = getConnection(proxy, settings.pingType)
-                        try {
-                            val responseCode = connection.responseCode
-                            val delay = System.currentTimeMillis() - start
-                            "HTTP $responseCode, $delay ms"
-                        } finally {
-                            connection.disconnect()
-                        }
-                    }
-                }
-            } catch (error: Exception) {
-                error.message ?: "Http delay measure failed"
-            } finally {
-                setSocksAuth(null)
-            }
-            withContext(Dispatchers.Main) {
-                callback(result)
-            }
-        }
-    }
-
-    private suspend fun getConnection(
-        withProxy: Boolean,
-        pingType: Settings.PingType,
-    ): HttpURLConnection {
-        return withContext(Dispatchers.IO) {
-            val link = settings.pingAddress
-            val method = when (pingType) {
-                Settings.PingType.Head -> "HEAD"
-                Settings.PingType.Get -> "GET"
-                Settings.PingType.Tcp -> "GET"
-            }
-            val address = InetSocketAddress(settings.socksAddress, settings.socksPort.toInt())
-            val proxy = if (withProxy) Proxy(Proxy.Type.SOCKS, address) else null
-            val timeout = settings.pingTimeout * 1000
-
-            getConnection(link, method, proxy, timeout, settings.userAgent)
-        }
-    }
-
-    private fun resolveTcpTarget(value: String): InetSocketAddress {
-        val trimmed = value.trim()
-        val uri = if (trimmed.contains("://")) {
-            URI(trimmed)
-        } else {
-            URI("tcp://$trimmed")
-        }
-        val host = uri.host ?: throw IllegalArgumentException("Invalid ping address")
-        val port = when {
-            uri.port != -1 -> uri.port
-            uri.scheme.equals("http", ignoreCase = true) -> 80
-            else -> 443
-        }
-        return InetSocketAddress(host, port)
-    }
-
-    private fun getSocksAuth(): Authenticator? {
-        if (
-            settings.socksUsername.trim().isEmpty() || settings.socksPassword.trim().isEmpty()
-        ) return null
-        return object : Authenticator() {
-            override fun getPasswordAuthentication(): PasswordAuthentication {
-                return PasswordAuthentication(
-                    settings.socksUsername,
-                    settings.socksPassword.toCharArray()
-                )
-            }
-        }
-    }
-
-    private fun setSocksAuth(auth: Authenticator?) {
-        Authenticator.setDefault(auth)
-    }
-
 }

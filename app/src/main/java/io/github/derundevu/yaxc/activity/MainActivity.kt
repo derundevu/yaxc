@@ -31,7 +31,6 @@ import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.AppUpdateManager
-import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.helper.LinkHelper
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
@@ -45,20 +44,14 @@ import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.supervisorScope
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
-import kotlin.coroutines.resume
 import kotlin.reflect.cast
 
 class MainActivity : AppCompatActivity() {
@@ -70,10 +63,8 @@ class MainActivity : AppCompatActivity() {
     private val mainViewModel: MainViewModel by viewModels()
     private val configRepository by lazy { Yaxc::class.cast(application).configRepository }
     private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
-    private var batchPingJob: Job? = null
-    private var singlePingJob: Job? = null
+    private var pingJob: Job? = null
     private var subscriptionRefreshJob: Job? = null
-    private var queuedSinglePingProfileId: Long? = null
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
         if (!it) return@registerForActivityResult
@@ -153,6 +144,8 @@ class MainActivity : AppCompatActivity() {
                     selectedProfileId = uiState.selectedProfileId,
                     profilesCount = uiState.profilesCount,
                     activeBatchPingSourceId = uiState.activeBatchPingSourceId,
+                    batchPingCompleted = uiState.batchPingCompleted,
+                    batchPingTotal = uiState.batchPingTotal,
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),
                     tun2socksVersion = getString(R.string.tun2socksVersion),
@@ -276,8 +269,8 @@ class MainActivity : AppCompatActivity() {
     private fun handleEffect(effect: MainEffect) {
         when (effect) {
             MainEffect.HandleToggleVpn -> handleToggleVpnRequest()
-            is MainEffect.RunPing -> runPingMeasurement(effect.profileId)
-            is MainEffect.RunBatchPing -> runBatchPing(effect)
+            is MainEffect.RunPing -> runPing(effect.operationId, listOf(effect.profileId))
+            is MainEffect.RunBatchPing -> runPing(effect.operationId, effect.profileIds)
             MainEffect.RefreshLinks -> refreshLinks()
             is MainEffect.RefreshSelectedSource -> refreshSource(effect.linkId)
             MainEffect.OpenNewProfile -> {
@@ -483,141 +476,55 @@ class MainActivity : AppCompatActivity() {
         linksManager.launch(intent)
     }
 
-    private fun runPingMeasurement(profileId: Long) {
-        if (profileId == 0L) return
-        if (singlePingJob?.isActive == true) {
-            queuedSinglePingProfileId = profileId
-            return
-        }
-
-        singlePingJob = lifecycleScope.launch {
-            val timeoutMs = ((settings.pingTimeout + 2).coerceAtLeast(1) * 1000L)
-            val result = withTimeoutOrNull(timeoutMs) {
-                try {
-                    if (XrayBatchPingHelper.supportsIsolatedPing()) {
-                        withContext(Dispatchers.IO) {
-                            val profile = profileRepository.find(profileId)
-                            val globalConfig = configRepository.get()
-                            XrayBatchPingHelper.measureProfileDelay(
-                                context = applicationContext,
-                                settings = settings,
-                                globalConfig = globalConfig,
-                                profile = profile,
-                            )
-                        }
-                    } else {
-                        measureDelaySuspend()
-                    }
-                } catch (error: Exception) {
-                    error.message ?: getString(R.string.pingFailedGeneric)
-                }
-            } ?: getString(R.string.pingFailedGeneric)
-
-            if (queuedSinglePingProfileId == null) {
-                mainViewModel.onAction(MainAction.PingResultReceived(profileId, result))
-            }
-        }.also { job ->
-            job.invokeOnCompletion {
-                lifecycleScope.launch {
-                    val nextProfileId = queuedSinglePingProfileId
-                    queuedSinglePingProfileId = null
-                    if (nextProfileId != null && lifecycle.currentState != Lifecycle.State.DESTROYED) {
-                        runPingMeasurement(nextProfileId)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun runBatchPing(effect: MainEffect.RunBatchPing) {
-        batchPingJob?.cancel()
-        batchPingJob = lifecycleScope.launch {
-            val restoreProfileId = effect.restoreProfileId
-            val supportsIsolatedPing = XrayBatchPingHelper.supportsIsolatedPing()
+    private fun runPing(operationId: Long, profileIds: List<Long>) {
+        if (!mainViewModel.isCurrentPingOperation(operationId)) return
+        val previous = pingJob
+        previous?.cancel()
+        pingJob = lifecycleScope.launch {
             try {
-                if (supportsIsolatedPing) {
-                    runIsolatedBatchPing(effect.profileIds)
-                } else {
-                    runLegacyBatchPing(effect.profileIds)
+                // Cancellation keeps the worker bound until its native core has actually closed.
+                previous?.join()
+                val options = XrayBatchPingHelper.Options.from(settings)
+                val globalConfig = withContext(Dispatchers.IO) { configRepository.get() }
+                coroutineScope {
+                    // Only five long-lived loops, not one coroutine per profile. The iterator and
+                    // ViewModel updates stay on Main; lookup, config and native work run on IO.
+                    val remaining = profileIds.iterator()
+                    repeat(minOf(XrayBatchPingHelper.workerCount, profileIds.size)) {
+                        launch {
+                            while (remaining.hasNext()) {
+                                ensureActive()
+                                val profileId = remaining.next()
+                                val result = try {
+                                    withContext(Dispatchers.IO) {
+                                        XrayBatchPingHelper.measureProfileDelay(
+                                            context = applicationContext,
+                                            settings = settings,
+                                            globalConfig = globalConfig,
+                                            profile = profileRepository.find(profileId),
+                                            options = options,
+                                        )
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    error.message ?: getString(R.string.pingFailedGeneric)
+                                }
+                                ensureActive()
+                                mainViewModel.onAction(MainAction.PingResultReceived(operationId, profileId, result))
+                            }
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val result = error.message ?: getString(R.string.pingFailedGeneric)
+                profileIds.forEach { profileId ->
+                    mainViewModel.onAction(MainAction.PingResultReceived(operationId, profileId, result))
                 }
             } finally {
-                if (!supportsIsolatedPing && settings.selectedProfile != restoreProfileId) {
-                    settings.selectedProfile = restoreProfileId
-                    if (restoreProfileId != 0L && mainViewModel.uiState.value.isRunning) {
-                        TProxyService.newConfig(applicationContext)
-                    }
-                }
-                mainViewModel.onAction(MainAction.SetBatchPingSource(null))
-            }
-        }
-    }
-
-    private suspend fun runIsolatedBatchPing(profileIds: List<Long>) {
-        val globalConfig = configRepository.get()
-        val profiles = buildList {
-            profileIds.forEach { profileId ->
-                val profile = try {
-                    profileRepository.find(profileId)
-                } catch (_: Exception) {
-                    null
-                }
-                if (profile != null) add(profile)
-            }
-        }
-        if (profiles.isEmpty()) return
-
-        val deviceWorkerCap = (Runtime.getRuntime().availableProcessors() * 2).coerceAtLeast(4)
-        val maxWorkers = minOf(20, profiles.size, deviceWorkerCap)
-        val semaphore = Semaphore(maxWorkers)
-
-        supervisorScope {
-            profiles.map { profile ->
-                async(Dispatchers.IO) {
-                    semaphore.withPermit {
-                        if (!isActive) return@withPermit
-                        val result = try {
-                            XrayBatchPingHelper.measureProfileDelay(
-                                context = applicationContext,
-                                settings = settings,
-                                globalConfig = globalConfig,
-                                profile = profile,
-                            )
-                        } catch (error: Exception) {
-                            error.message ?: getString(R.string.pingFailedGeneric)
-                        }
-                        if (isActive) {
-                            mainViewModel.onAction(MainAction.ProfilePingUpdated(profile.id, result))
-                        }
-                    }
-                }
-            }.awaitAll()
-        }
-    }
-
-    private suspend fun runLegacyBatchPing(profileIds: List<Long>) {
-        profileIds.forEach { profileId ->
-            mainViewModel.onAction(
-                MainAction.SetProfilePingState(
-                    profileId,
-                    io.github.derundevu.yaxc.presentation.main.MainPingState.Loading,
-                )
-            )
-            if (settings.selectedProfile != profileId) {
-                settings.selectedProfile = profileId
-                TProxyService.newConfig(applicationContext)
-                delay(650)
-            }
-            val result = measureDelaySuspend()
-            mainViewModel.onAction(MainAction.ProfilePingUpdated(profileId, result))
-        }
-    }
-
-    private suspend fun measureDelaySuspend(): String {
-        return suspendCancellableCoroutine { continuation ->
-            HttpHelper(lifecycleScope, settings).measureDelay(!settings.transparentProxy) { result ->
-                if (continuation.isActive) {
-                    continuation.resume(result)
-                }
+                mainViewModel.onAction(MainAction.PingFinished(operationId))
             }
         }
     }

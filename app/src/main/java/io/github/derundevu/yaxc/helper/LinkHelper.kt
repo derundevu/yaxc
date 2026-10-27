@@ -470,7 +470,7 @@ class LinkHelper(
     }
 
     private fun decodeUriPart(value: String): String {
-        return URLDecoder.decode(value, StandardCharsets.UTF_8)
+        return URLDecoder.decode(value, StandardCharsets.UTF_8.name())
     }
 
     private fun normalizeNetwork(value: String?): String {

@@ -13,12 +13,9 @@
     <string name="loading">Загрузка…</string>
     <string name="vpnStart">СТАРТ</string>
     <string name="vpnStop">СТОП</string>
-    <string name="pingNotConnected">Не подключено</string>
     <string name="pingConnected">Подключено, нажмите для проверки</string>
     <string name="pingTesting">Проверка…</string>
     <string name="pingFailedGeneric">Пинг не удался</string>
-    <string name="pingIsolatedUnavailable">Изолированный пинг недоступен</string>
-    <string name="pingTypeRequiresCoreUpdate">Для этого типа пинга нужна обновленная сборка XrayCore.</string>
     <string name="pingDelayMs">%1$d мс</string>
     <string name="appUpdateChecking">Проверка обновлений…</string>
     <string name="appUpdateUpToDate">Установлена актуальная версия</string>

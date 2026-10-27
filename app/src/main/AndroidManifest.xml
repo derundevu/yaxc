@@ -98,6 +98,26 @@
             android:name=".activity.SettingsActivity"
             android:parentActivityName=".activity.MainActivity" />
         <service
+            android:name=".service.PingWorker1Service"
+            android:exported="false"
+            android:process=":ping_1" />
+        <service
+            android:name=".service.PingWorker2Service"
+            android:exported="false"
+            android:process=":ping_2" />
+        <service
+            android:name=".service.PingWorker3Service"
+            android:exported="false"
+            android:process=":ping_3" />
+        <service
+            android:name=".service.PingWorker4Service"
+            android:exported="false"
+            android:process=":ping_4" />
+        <service
+            android:name=".service.PingWorker5Service"
+            android:exported="false"
+            android:process=":ping_5" />
+        <service
             android:name=".service.TProxyService"
             android:exported="true"
             android:foregroundServiceType="specialUse"

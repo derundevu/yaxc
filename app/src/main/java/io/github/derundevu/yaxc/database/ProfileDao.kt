@@ -9,6 +9,8 @@ import androidx.room.Update
 import io.github.derundevu.yaxc.dto.ProfileList
 import kotlinx.coroutines.flow.Flow
 
+data class ProfilePosition(val id: Long, val index: Int)
+
 @Dao
 interface ProfileDao {
     @Query(
@@ -37,6 +39,16 @@ interface ProfileDao {
 
     @Query("UPDATE profiles SET `index` = :index WHERE `id` = :id")
     suspend fun updateIndex(index: Int, id: Long)
+
+    @Query("SELECT `id`, `index` FROM profiles ORDER BY `index` ASC, `id` ASC")
+    suspend fun orderedPositions(): List<ProfilePosition>
+
+    @Transaction
+    suspend fun normalizeIndices() {
+        orderedPositions().forEachIndexed { index, profile ->
+            if (profile.index != index) updateIndex(index, profile.id)
+        }
+    }
 
     @Query("UPDATE profiles SET `index` = `index` + 1")
     suspend fun fixInsertIndex()

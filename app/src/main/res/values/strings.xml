@@ -13,12 +13,9 @@
     <string name="loading">Loading…</string>
     <string name="vpnStart">START</string>
     <string name="vpnStop">STOP</string>
-    <string name="pingNotConnected">Not Connected</string>
     <string name="pingConnected">Connected, tap to check connection</string>
     <string name="pingTesting">Testing…</string>
     <string name="pingFailedGeneric">Ping failed</string>
-    <string name="pingIsolatedUnavailable">Isolated ping is unavailable</string>
-    <string name="pingTypeRequiresCoreUpdate">This ping type requires an updated XrayCore build.</string>
     <string name="pingDelayMs">%1$d ms</string>
     <string name="appUpdateChecking">Checking for updates…</string>
     <string name="appUpdateUpToDate">App is up to date</string>
