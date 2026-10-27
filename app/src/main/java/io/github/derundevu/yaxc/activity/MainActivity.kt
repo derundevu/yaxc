@@ -42,6 +42,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -86,9 +87,8 @@ class MainActivity : AppCompatActivity() {
         refreshLinks()
     }
     private var scannerLauncher = registerForActivityResult(StartActivityForResult()) {
-        val link = it.data?.getStringExtra("link")
-        if (it.resultCode != RESULT_OK || link == null) return@registerForActivityResult
-        processLink(link)
+        if (it.resultCode != RESULT_OK) return@registerForActivityResult
+        processLink(it.data?.getStringExtra("link").orEmpty())
     }
     private val vpnLauncher = registerForActivityResult(StartActivityForResult()) {
         if (it.resultCode != RESULT_OK) return@registerForActivityResult
@@ -369,8 +369,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun processLink(link: String) {
-        val uri = runCatching { URI(link) }.getOrNull() ?: return
-        if (uri.scheme == "http") {
+        val normalizedLink = link.trim()
+        // Profile imports also accept JSON and base64, so a URI is not required.
+        val uri = runCatching { URI(normalizedLink) }.getOrNull()
+        if (uri?.scheme == "http") {
             Toast.makeText(
                 applicationContext,
                 getString(R.string.forbiddenHttp),
@@ -378,34 +380,49 @@ class MainActivity : AppCompatActivity() {
             ).show()
             return
         }
-        if (uri.scheme == "https") {
+        if (uri?.scheme == "https") {
             openLink(uri)
             return
         }
-        val linkHelper = LinkHelper(settings, link)
-        if (!linkHelper.isValid()) {
-            Toast.makeText(
-                applicationContext,
-                getString(R.string.invalidLink),
-                Toast.LENGTH_SHORT,
-            ).show()
-            return
-        }
-        val json = linkHelper.json()
-        val name = linkHelper.remark()
-        startActivity(
-            ProfileActivity.getIntent(
-                context = applicationContext,
-                name = name,
-                config = json,
-                linkId = mainViewModel.uiState.value.selectedTabId.takeIf { it != 0L },
+        val linkId = mainViewModel.uiState.value.selectedTabId.takeIf { it != 0L }
+        lifecycleScope.launch {
+            val parsedProfile = withContext(Dispatchers.Default) {
+                try {
+                    val linkHelper = LinkHelper(settings, normalizedLink)
+                    if (linkHelper.isValid()) {
+                        linkHelper.json() to linkHelper.remark()
+                    } else {
+                        null
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (parsedProfile == null) {
+                Toast.makeText(
+                    applicationContext,
+                    getString(R.string.invalidLink),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return@launch
+            }
+            val (json, name) = parsedProfile
+            startActivity(
+                ProfileActivity.getIntent(
+                    context = applicationContext,
+                    name = name,
+                    config = json,
+                    linkId = linkId,
+                )
             )
-        )
+        }
     }
 
     private fun importFromClipboard() {
         runCatching {
-            clipboardManager.primaryClip!!.getItemAt(0).text.toString().trim()
+            clipboardManager.primaryClip!!.getItemAt(0).text.toString()
         }.getOrNull()?.let { processLink(it) }
     }
 

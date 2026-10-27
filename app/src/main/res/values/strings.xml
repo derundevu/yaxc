@@ -3,8 +3,10 @@
     <string name="noValue">-</string>
     <string name="drawerOpen">Open drawer</string>
     <string name="drawerClose">Close drawer</string>
-    <string name="scanQrCode">Scan QrCode</string>
-    <string name="scannerScreenLead">Scan a share link QR code to import a profile directly into the app.</string>
+    <string name="scanQrCode">Scan QR code</string>
+    <string name="scannerScreenLead">Import a subscription or profile from a QR code.</string>
+    <string name="scannerFrameHint">Position the QR code inside the frame.</string>
+    <string name="scannerBack">Back</string>
     <string name="scannerCameraError">Camera initialization error: %1$s</string>
     <string name="scannerCameraPermissionDenied">Camera permission is required to scan QR codes.</string>
     <string name="fromClipboard">From Clipboard</string>
@@ -250,7 +252,7 @@
     <string name="mainQuickActionPing">Ping</string>
     <string name="mainQuickActionPingHint">Measure current route and tunnel responsiveness.</string>
     <string name="mainQuickActionRefreshHint">Refresh subscriptions and source links.</string>
-    <string name="mainQuickActionScanHint">Import a profile directly from a QR code.</string>
+    <string name="mainQuickActionScanHint">Import a subscription or profile from a QR code.</string>
     <string name="mainQuickActionClipboardHint">Read a share link from the clipboard.</string>
     <string name="mainDiagnostics">Diagnostics</string>
     <string name="mainDiagnosticsLead">This block is intentionally expandable for future pings, stats and runtime signals.</string>

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
@@ -16,6 +17,7 @@ import com.budiyev.android.codescanner.CodeScannerView
 import com.budiyev.android.codescanner.DecodeCallback
 import com.budiyev.android.codescanner.ErrorCallback
 import com.budiyev.android.codescanner.ScanMode
+import com.google.zxing.BarcodeFormat
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.scanner.ScannerScreen
@@ -38,6 +40,7 @@ class ScannerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContent {
             YaxcAppTheme {
@@ -56,7 +59,7 @@ class ScannerActivity : AppCompatActivity() {
 
         codeScanner = CodeScanner(this, scannerView).apply {
             camera = CodeScanner.CAMERA_BACK
-            formats = CodeScanner.ALL_FORMATS
+            formats = listOf(BarcodeFormat.QR_CODE)
             autoFocusMode = AutoFocusMode.SAFE
             scanMode = ScanMode.SINGLE
             isAutoFocusEnabled = true
@@ -99,9 +102,11 @@ class ScannerActivity : AppCompatActivity() {
     }
 
     private fun startScannerPreview() {
-        if (!hasCameraPermission()) return
-        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
-        window.decorView.post { codeScanner?.startPreview() }
+        window.decorView.post {
+            if (hasCameraPermission() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                codeScanner?.startPreview()
+            }
+        }
     }
 
     override fun onPause() {
