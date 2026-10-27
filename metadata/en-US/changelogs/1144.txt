@@ -1,0 +1,9 @@
+## What's new in 1.4.0
+
+### JSON code editor
+
+- Added a shared full-height code workspace for profiles, global config sections and routing JSON.
+- Added undo/redo, literal find and replace, replace all, and optional case-sensitive search.
+- Added explicit JSON formatting that preserves member order, unknown fields, duplicate keys, numeric spellings and string escapes.
+- JSON syntax is checked automatically, with line/column diagnostics and a tappable error status that jumps to the problem.
+- Added a punctuation and indentation row, adjustable font size and line wrapping.

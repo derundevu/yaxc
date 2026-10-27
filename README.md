@@ -12,6 +12,7 @@ Based on [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray); maintained as an
 - Keep subscriptions current with automatic refresh.
 - Compare profiles with individual and batch latency checks.
 - Customize per-app routing and routing rules.
+- Edit JSON in a full-screen code workspace with syntax diagnostics, formatting, undo/redo and find/replace.
 - View subscription traffic and expiry when provided by your service.
 - Choose light or dark themes and manage geodata inside the app.
 - Check for app updates without leaving the app.

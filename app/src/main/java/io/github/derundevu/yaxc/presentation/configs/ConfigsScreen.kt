@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.presentation.configs
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,21 +14,24 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SecondaryScrollableTabRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.annotation.StringRes
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditorSurface
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
-import com.blacksquircle.ui.editorkit.widget.TextProcessor
+import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 
 enum class ConfigSection(
     @StringRes val titleRes: Int,
@@ -46,133 +50,86 @@ fun ConfigsScreen(
     selectedSection: ConfigSection,
     currentMode: Config.Mode,
     isLoading: Boolean,
+    isSaving: Boolean,
+    editorState: JsonEditorState,
     onBack: () -> Unit,
     onSave: () -> Unit,
     onSectionSelected: (ConfigSection) -> Unit,
     onModeSelected: (Config.Mode) -> Unit,
-    onEditorReady: (TextProcessor) -> Unit,
 ) {
-    val spacing = YaxcTheme.spacing
-
+    var modeMenuOpen by remember { mutableStateOf(false) }
     YaxcScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(text = textResource(R.string.configs)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = null,
-                        )
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = onSave,
-                        enabled = !isLoading,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Done,
-                            contentDescription = null,
-                        )
+                    Box {
+                        TextButton(onClick = { modeMenuOpen = true }, enabled = !isLoading) {
+                            Text(text = textResource(currentMode.titleRes()))
+                        }
+                        YaxcLiquidDropdownMenu(
+                            expanded = modeMenuOpen,
+                            onDismissRequest = { modeMenuOpen = false },
+                        ) {
+                            Config.Mode.entries.forEach { mode ->
+                                YaxcLiquidDropdownMenuItem(
+                                    text = textResource(mode.titleRes()),
+                                    onClick = {
+                                        modeMenuOpen = false
+                                        onModeSelected(mode)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    IconButton(onClick = onSave, enabled = !isLoading && !isSaving) {
+                        Icon(Icons.Outlined.Done, contentDescription = textResource(R.string.save))
                     }
                 },
             )
         },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = spacing.md)
-                .padding(top = spacing.md, bottom = spacing.xl),
-            verticalArrangement = Arrangement.spacedBy(spacing.md),
-        ) {
-            Text(
-                text = textResource(R.string.configsScreenLead),
-                style = MaterialTheme.typography.bodyLarge,
-                color = YaxcTheme.extendedColors.textMuted,
-            )
-
-            Surface(
+        Column(modifier = Modifier.fillMaxSize()) {
+            SecondaryScrollableTabRow(
+                selectedTabIndex = ConfigSection.entries.indexOf(selectedSection),
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                shape = MaterialTheme.shapes.large,
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
             ) {
-                SecondaryScrollableTabRow(
-                    selectedTabIndex = ConfigSection.entries.indexOf(selectedSection),
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                ) {
-                    ConfigSection.entries.forEach { section ->
-                        Tab(
-                            selected = section == selectedSection,
-                            onClick = { onSectionSelected(section) },
-                            text = { Text(text = textResource(section.titleRes)) },
-                        )
-                    }
-                }
-            }
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                SecondaryScrollableTabRow(
-                    selectedTabIndex = Config.Mode.entries.indexOf(currentMode),
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                ) {
-                    Config.Mode.entries.forEach { mode ->
-                        Tab(
-                            selected = mode == currentMode,
-                            onClick = { onModeSelected(mode) },
-                            text = { Text(text = textResource(mode.titleRes())) },
-                        )
-                    }
-                }
-            }
-
-            YaxcCard(
-                modifier = Modifier.weight(1f),
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    Text(
-                        text = textResource(R.string.profileConfig),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 12.dp),
+                ConfigSection.entries.forEach { section ->
+                    Tab(
+                        selected = section == selectedSection,
+                        onClick = { onSectionSelected(section) },
+                        text = { Text(text = textResource(section.titleRes)) },
                     )
-
-                    if (isLoading) {
-                        Text(
-                            text = textResource(R.string.loadingConfig),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = YaxcTheme.extendedColors.textMuted,
-                        )
-                    } else {
-                        YaxcJsonEditorSurface(
-                            onEditorReady = onEditorReady,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        )
-                    }
                 }
+            }
+            if (isLoading) {
+                Text(
+                    text = textResource(R.string.loadingConfig),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.padding(YaxcTheme.spacing.md),
+                )
+            } else {
+                YaxcJsonEditor(
+                    state = editorState,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun textResource(id: Int): String {
-    return androidx.compose.ui.res.stringResource(id)
-}
+private fun textResource(id: Int): String = androidx.compose.ui.res.stringResource(id)
 
-private fun Config.Mode.titleRes(): Int {
-    return when (this) {
-        Config.Mode.Disable -> R.string.configModeDisable
-        Config.Mode.Replace -> R.string.configModeReplace
-        Config.Mode.Merge -> R.string.configModeMerge
-    }
+private fun Config.Mode.titleRes(): Int = when (this) {
+    Config.Mode.Disable -> R.string.configModeDisable
+    Config.Mode.Replace -> R.string.configModeReplace
+    Config.Mode.Merge -> R.string.configModeMerge
 }

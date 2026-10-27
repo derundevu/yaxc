@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -37,7 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Public
@@ -81,19 +79,17 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.blacksquircle.ui.editorkit.widget.TextProcessor
+import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.CoreRoutingTransport
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditorSurface
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchRow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,11 +100,14 @@ fun CoreRoutingScreen(
     rules: List<CoreRoutingRule>,
     unsupportedRuleCount: Int,
     isLoading: Boolean,
+    isBusy: Boolean,
+    savedRevision: Int,
+    editorState: JsonEditorState,
     antifilterEnabled: Boolean,
     antifilterInstalled: Boolean,
     antifilterRouteCount: Int,
     onBack: () -> Unit,
-    onSave: () -> Boolean,
+    onSave: () -> Unit,
     onAntifilterEnabledChange: (Boolean) -> Unit,
     onImportFromClipboard: () -> Unit,
     onExportJson: () -> Unit,
@@ -118,7 +117,6 @@ fun CoreRoutingScreen(
     onAddRule: () -> Unit,
     onMoveRule: (Int, Int) -> Unit,
     onDeleteRule: (String) -> Unit,
-    onEditorReady: (TextProcessor) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     val density = LocalDensity.current
@@ -135,6 +133,10 @@ fun CoreRoutingScreen(
     var draggingRuleId by remember { mutableStateOf<String?>(null) }
     var draggingOffsetY by remember { mutableFloatStateOf(0f) }
     var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(savedRevision) {
+        if (savedRevision > 0 && editorMode == CoreRoutingEditorMode.Visual) expandedRuleId = null
+    }
 
     LaunchedEffect(rules.size) {
         if (rules.size > previousRulesCount && rules.isNotEmpty()) {
@@ -180,7 +182,10 @@ fun CoreRoutingScreen(
                         )
                     }
                     Box {
-                        IconButton(onClick = { actionsExpanded = true }) {
+                        IconButton(
+                            onClick = { actionsExpanded = true },
+                            enabled = !isLoading && !isBusy,
+                        ) {
                             Icon(
                                 imageVector = Icons.Outlined.MoreVert,
                                 contentDescription = null,
@@ -194,9 +199,7 @@ fun CoreRoutingScreen(
                                 text = textResource(R.string.save),
                                 onClick = {
                                     actionsExpanded = false
-                                    if (onSave() && editorMode == CoreRoutingEditorMode.Visual) {
-                                        expandedRuleId = null
-                                    }
+                                    onSave()
                                 },
                             )
                             YaxcLiquidDropdownMenuItem(
@@ -219,40 +222,36 @@ fun CoreRoutingScreen(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(YaxcTheme.backgroundBrush)
-                .padding(innerPadding)
-                .padding(horizontal = spacing.md)
-                .padding(top = spacing.md),
-            verticalArrangement = Arrangement.spacedBy(spacing.md),
-            contentPadding = PaddingValues(bottom = spacing.xl + reservedBottomInset),
+                .padding(innerPadding),
         ) {
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    TabRow(selectedTabIndex = CoreRoutingEditorMode.entries.indexOf(editorMode)) {
-                        CoreRoutingEditorMode.entries.forEach { mode ->
-                            Tab(
-                                selected = mode == editorMode,
-                                onClick = { onEditorModeChange(mode) },
-                                text = {
-                                    Text(
-                                        text = when (mode) {
-                                            CoreRoutingEditorMode.Visual -> textResource(R.string.routingModeVisual)
-                                            CoreRoutingEditorMode.Json -> textResource(R.string.routingModeJson)
-                                        }
-                                    )
-                                },
-                            )
-                        }
-                    }
+            CoreRoutingModeTabs(
+                editorMode = editorMode,
+                enabled = !isLoading && !isBusy,
+                onEditorModeChange = onEditorModeChange,
+            )
+            if (editorMode == CoreRoutingEditorMode.Json) {
+                if (isLoading) {
+                    LoadingCard(label = textResource(R.string.loadingConfig))
+                } else {
+                    YaxcJsonEditor(
+                        state = editorState,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    )
                 }
-            }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = spacing.md)
+                        .padding(top = spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(spacing.md),
+                    contentPadding = PaddingValues(bottom = spacing.xl + reservedBottomInset),
+                ) {
 
             item {
                 Surface(
@@ -300,31 +299,26 @@ fun CoreRoutingScreen(
                 }
             }
 
-            if (editorMode == CoreRoutingEditorMode.Visual) {
-                item {
-                    FilledTonalButton(
-                        onClick = onAddRule,
-                        modifier = Modifier.widthIn(min = 160.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = null,
-                        )
-                        Text(
-                            text = textResource(R.string.routingAddRule),
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
+            item {
+                FilledTonalButton(
+                    onClick = onAddRule,
+                    enabled = !isLoading && !isBusy,
+                    modifier = Modifier.widthIn(min = 160.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                    )
+                    Text(
+                        text = textResource(R.string.routingAddRule),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
                 }
             }
 
             when {
                 isLoading -> item {
                     LoadingCard(label = textResource(R.string.loadingConfig))
-                }
-
-                editorMode == CoreRoutingEditorMode.Json -> item {
-                    CoreRoutingJsonCard(onEditorReady = onEditorReady)
                 }
 
                 rules.isEmpty() -> item {
@@ -419,6 +413,8 @@ fun CoreRoutingScreen(
                 }
             }
         }
+            }
+        }
 
         if (helpVisible) {
             AlertDialog(
@@ -448,27 +444,25 @@ fun CoreRoutingScreen(
 }
 
 @Composable
-private fun CoreRoutingJsonCard(
-    onEditorReady: (TextProcessor) -> Unit,
+private fun CoreRoutingModeTabs(
+    editorMode: CoreRoutingEditorMode,
+    enabled: Boolean,
+    onEditorModeChange: (CoreRoutingEditorMode) -> Unit,
 ) {
-    YaxcCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(560.dp),
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Text(
-                text = textResource(R.string.coreRoutingJsonTitle),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-
-            YaxcJsonEditorSurface(
-                onEditorReady = onEditorReady,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+    TabRow(selectedTabIndex = CoreRoutingEditorMode.entries.indexOf(editorMode)) {
+        CoreRoutingEditorMode.entries.forEach { mode ->
+            Tab(
+                selected = mode == editorMode,
+                enabled = enabled,
+                onClick = { onEditorModeChange(mode) },
+                text = {
+                    Text(
+                        text = when (mode) {
+                            CoreRoutingEditorMode.Visual -> textResource(R.string.routingModeVisual)
+                            CoreRoutingEditorMode.Json -> textResource(R.string.routingModeJson)
+                        },
+                    )
+                },
             )
         }
     }

@@ -1,7 +1,7 @@
 # Native dependencies and forks
 
 Read this only for native code, dependency or build changes. Commands run from the repository root;
-see [README.md](../README.md#build) for toolchain requirements and ABI-specific builds.
+see [Development](DEVELOPMENT.md#build) for toolchain requirements and ABI-specific builds.
 
 ## Sources and versions
 
@@ -42,19 +42,17 @@ Use `git submodule update --init --recursive` only when safe for local work. Nev
 
 ## Remaining patch flow
 
-Fork migration did not remove these files or their build consumers:
+The remaining compatibility patch is applied outside Gradle:
 
 | Patch | Consumer |
 | --- | --- |
-| [libXray compatibility](../XrayCore/patches/libxray-xray-core-26.3.27.patch) | [`buildXrayCore.sh`](../buildXrayCore.sh) before gomobile bind |
-| [Tunnel hardening](../app/src/main/jni/patches/hev-socks5-tun0-defense.patch) | [`applyHevTunnelPatch.sh`](../applyHevTunnelPatch.sh), explicitly called by [CI](../.github/workflows/release.yml) before Gradle |
+| [Tunnel hardening](../app/src/main/jni/patches/hev-socks5-tun0-defense.patch) | [`applyHevTunnelPatch.sh`](../applyHevTunnelPatch.sh), explicitly called by [push/PR CI](../.github/workflows/ci.yml) and [release CI](../.github/workflows/release.yml) before Gradle |
 
-Both scripts apply a patch when `git apply --check` succeeds, accept an already-applied patch when
-`git apply --reverse --check` succeeds, and fail if neither check succeeds. Gradle alone does not run the tunnel patch script.
-Read-only checks for already-included changes:
+The tunnel script applies the patch when `git apply --check` succeeds, accepts an already-applied patch when
+`git apply --reverse --check` succeeds, and fails if neither check succeeds. Gradle alone does not run it.
+Read-only check for already-included changes:
 
 ```bash
-git -C XrayCore/libXray apply --reverse --check "$PWD/XrayCore/patches/libxray-xray-core-26.3.27.patch"
 git -C app/src/main/jni/hev-socks5-tunnel apply --reverse --check "$PWD/app/src/main/jni/patches/hev-socks5-tun0-defense.patch"
 ```
 
@@ -62,3 +60,19 @@ If a reverse-check fails, try `apply --check` without `--reverse`: success means
 failure of both checks means incompatibility, not an error to suppress.
 Remove patch files and their script/CI consumers together only after a clean build proves the fork revisions contain the required changes.
 Tun hardening remains experimental, not a system Kill Switch guarantee.
+
+The former libXray compatibility patch was already present in pinned fork `96f8125`; a clean archive of that
+revision passed its full reverse-check. The redundant patch and its build-script consumer were removed.
+`buildXrayCore.sh` now builds the fork sources directly.
+
+## Ping worker
+
+Xray initialization replaces process-global dialer/logger state. Android pings therefore use at most five
+non-exported worker services in `:ping_1` through `:ping_5`, with one native core at a time in each process.
+No worker shares the VPN core's process. Services bind on demand; a cancelled or completed request returns its
+pool slot only after native teardown is acknowledged. Queued cancellation must not lose a slot.
+Requests use `PreparePing`, `CancelPing` and `PingPrepared`. GET, HEAD and TCP retain their request context
+and configured deadline, including SOCKS negotiation. Worker-process names must also match the `Yaxc` initialization guard.
+
+The reliability changes modify both `libXray` and `Xray-core` fork working trees. Rebuild the AAR before the APK;
+publishing those fork edits and updating gitlinks is the owner's prerequisite for a reproducible fresh checkout.

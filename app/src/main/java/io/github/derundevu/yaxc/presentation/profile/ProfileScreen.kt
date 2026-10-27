@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,20 +25,20 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditorSurface
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
-import com.blacksquircle.ui.editorkit.widget.TextProcessor
+import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 
 data class ProfileSourceOption(
     val linkId: Long?,
@@ -52,15 +53,17 @@ fun ProfileScreen(
     selectedSourceId: Long?,
     availableSources: List<ProfileSourceOption>,
     isLoading: Boolean,
+    isSaving: Boolean,
+    editorState: JsonEditorState,
     onBack: () -> Unit,
     onSave: () -> Unit,
     onNameChange: (String) -> Unit,
     onSourceChange: (Long?) -> Unit,
-    onEditorReady: (TextProcessor) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
-    var sourcePickerOpen by remember { mutableStateOf(false) }
-    var helpOpen by remember { mutableStateOf(false) }
+    var sourcePickerOpen by rememberSaveable { mutableStateOf(false) }
+    var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
     val selectedSourceName = availableSources.firstOrNull { it.linkId == selectedSourceId }?.name
         ?: availableSources.firstOrNull()?.name.orEmpty()
 
@@ -77,40 +80,60 @@ fun ProfileScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { detailsOpen = true }, enabled = !isLoading) {
+                        Icon(
+                            imageVector = Icons.Outlined.Tune,
+                            contentDescription = textResource(R.string.profileDetails),
+                        )
+                    }
                     IconButton(onClick = { helpOpen = true }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
-                            contentDescription = null,
+                            contentDescription = textResource(R.string.profileHelpTitle),
                         )
                     }
                     IconButton(
                         onClick = onSave,
-                        enabled = !isLoading,
+                        enabled = !isLoading && !isSaving,
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Done,
-                            contentDescription = null,
+                            contentDescription = textResource(R.string.save),
                         )
                     }
                 },
             )
         },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = spacing.md)
-                .padding(top = spacing.md, bottom = spacing.xl),
-            verticalArrangement = Arrangement.spacedBy(spacing.md),
-        ) {
-            YaxcCard {
-                SourceField(
-                    value = selectedSourceName,
-                    onClick = { sourcePickerOpen = true },
-                )
-            }
+        if (isLoading) {
+            Text(
+                text = textResource(R.string.loadingProfile),
+                style = MaterialTheme.typography.bodyMedium,
+                color = YaxcTheme.extendedColors.textMuted,
+                modifier = Modifier.padding(spacing.md),
+            )
+        } else {
+            YaxcJsonEditor(
+                state = editorState,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
 
-            YaxcCard {
+    if (detailsOpen) {
+        ModalBottomSheet(onDismissRequest = { detailsOpen = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = spacing.md)
+                    .padding(bottom = spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(spacing.md),
+            ) {
+                Text(
+                    text = textResource(R.string.profileDetails),
+                    style = MaterialTheme.typography.titleLarge,
+                )
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
@@ -118,36 +141,10 @@ fun ProfileScreen(
                     label = { Text(text = textResource(R.string.profileName)) },
                     singleLine = true,
                 )
-            }
-
-            YaxcCard(
-                modifier = Modifier.weight(1f),
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    Text(
-                        text = textResource(R.string.profileConfig),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-
-                    if (isLoading) {
-                        Text(
-                            text = textResource(R.string.loadingProfile),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = YaxcTheme.extendedColors.textMuted,
-                        )
-                    } else {
-                        YaxcJsonEditorSurface(
-                            onEditorReady = onEditorReady,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                        )
-                    }
-                }
+                SourceField(
+                    value = selectedSourceName,
+                    onClick = { sourcePickerOpen = true },
+                )
             }
         }
     }
@@ -191,7 +188,10 @@ fun ProfileScreen(
                 Text(text = textResource(R.string.profileHelpTitle))
             },
             text = {
-                Text(text = textResource(R.string.profileHelpBody))
+                Text(
+                    text = textResource(R.string.profileHelpBody),
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
             },
             confirmButton = {
                 TextButton(onClick = { helpOpen = false }) {
