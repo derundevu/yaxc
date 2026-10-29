@@ -98,6 +98,10 @@
             android:name=".activity.SettingsActivity"
             android:parentActivityName=".activity.MainActivity" />
         <service
+            android:name=".service.ValidationService"
+            android:exported="false"
+            android:process=":validation" />
+        <service
             android:name=".service.PingWorker1Service"
             android:exported="false"
             android:process=":ping_1" />

@@ -89,8 +89,15 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply hev-socks5-tunnel patch
-        run: ./applyHevTunnelPatch.sh
+      - name: Run native compatibility, ownership and cancellation regressions
+        working-directory: XrayCore
+        run: |
+          go test -mod=readonly -race -count=1 -timeout=90s .
+          go test -mod=readonly -count=1 -timeout=30s github.com/xtls/libxray/nodep
+
+      - name: Run core splice transition regressions
+        working-directory: XrayCore/Xray-core
+        run: go test -mod=readonly -race -count=1 -timeout=90s ./proxy ./common/mux ./proxy/socks ./proxy/http ./proxy/loopback
 
       - name: Build XrayCore (arm64)
         run: bash -e ./buildXrayCore.sh arm64

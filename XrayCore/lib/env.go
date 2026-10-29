@@ -1,7 +1,11 @@
 package lib
 
-import "os"
+import (
+	"os"
+
+	"github.com/xtls/xray-core/common/platform"
+)
 
 func SetEnv(dir string) {
-	os.Setenv("xray.location.asset", dir)
+	os.Setenv(platform.AssetLocation, dir)
 }

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 TARGET="$1"
 ARCHS=(arm arm64 386 amd64)
@@ -32,9 +33,9 @@ prepare_go() {
 build_android() {
   echo "Building XrayHelper for $TARGET"
   local OUTPUT="$DEST/xrayhelper"
-  rm -f $OUTPUT
+  rm -f "$OUTPUT"
   CGO_ENABLED=0 GOOS=linux GOARCH=$TARGET \
-    go build -v -o $OUTPUT \
+    go build -v -o "$OUTPUT" \
     -ldflags "-s -w -buildid=" -buildvcs=false -trimpath ./main
 }
 

@@ -377,7 +377,6 @@ class Settings(private val context: Context) {
     fun baseDir(): File = context.filesDir
     fun xrayCoreFile(): File = File(baseDir(), "xray")
     fun xrayHelperFile(): File = File(baseDir(), "xrayhelper")
-    fun testConfig(): File = File(baseDir(), "test.json")
     fun xrayConfig(): File = File(baseDir(), "config.json")
     fun tun2socksConfig(): File = File(baseDir(), "tun2socks.yml")
     fun xrayHelperConfig(): File = File(baseDir(), "config.yml")

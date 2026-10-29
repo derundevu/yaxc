@@ -1,39 +1,52 @@
 package lib
 
 import (
+	"errors"
+	"sync"
+
 	"github.com/xtls/xray-core/common/cmdarg"
 	"github.com/xtls/xray-core/core"
 	_ "github.com/xtls/xray-core/main/distro/all"
 )
 
-var coreServer *core.Instance
+var (
+	lifecycleMu sync.Mutex
+	coreServer  *core.Instance
+)
 
-func Server(config string) (*core.Instance, error) {
-	file := cmdarg.Arg{config}
-	json, err := core.LoadConfig("json", file)
-	if err != nil {
-		return nil, err
-	}
-	server, err := core.New(json)
-	if err != nil {
-		return nil, err
-	}
-	return server, nil
+func loadConfig(config string) (*core.Config, error) {
+	return core.LoadConfig("json", cmdarg.Arg{config})
 }
 
-func Start(dir string, config string) (err error) {
-	SetEnv(dir)
-	coreServer, err = Server(config)
+func Server(config string) (*core.Instance, error) {
+	json, err := loadConfig(config)
 	if err != nil {
-		return
+		return nil, err
 	}
-	if err = coreServer.Start(); err != nil {
-		return
+	return core.New(json)
+}
+
+func Start(dir string, config string) error {
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
+	if coreServer != nil {
+		return errors.New("Xray is already running")
 	}
+	SetEnv(dir)
+	server, err := Server(config)
+	if err != nil {
+		return err
+	}
+	if err := server.Start(); err != nil {
+		return errors.Join(err, server.Close())
+	}
+	coreServer = server
 	return nil
 }
 
 func Stop() error {
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
 	if coreServer != nil {
 		err := coreServer.Close()
 		coreServer = nil

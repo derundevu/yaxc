@@ -27,7 +27,9 @@ class Yaxc : Application() {
             getSystemService(ActivityManager::class.java).runningAppProcesses
                 ?.firstOrNull { it.pid == Process.myPid() }?.processName
         }
-        if (processName?.startsWith("$packageName:ping_") == true) return
+        if (processName == "$packageName:validation" ||
+            processName?.startsWith("$packageName:ping_") == true
+        ) return
         val settings = Settings(this)
         AppCompatDelegate.setApplicationLocales(settings.appLocales())
         SubscriptionRefreshScheduler.sync(this, settings)

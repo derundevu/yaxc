@@ -1,0 +1,6 @@
+## What's new in 1.5.0
+
+- Updated embedded Xray to 26.10.21 and hev-socks5-tunnel to 2.19.3, preserving app-specific fixes.
+- Isolated configuration validation and fixed concurrent splice-state access to protect active connections.
+- Updated XrayHelper and compatible stable Android dependencies without changing the profile database schema.
+- The separately supplied root-mode Xray is not replaced. Existing large-UDP limits remain.

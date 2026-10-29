@@ -30,7 +30,7 @@
     <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">XTLS/Xray-core</string>
     <string name="tun2socksLabel">heiher/hev-socks5-tunnel</string>
-    <string name="tun2socksVersion">2.14.4</string>
+    <string name="tun2socksVersion">2.19.3</string>
     <string name="madeWithPeople">Сделано с ♥ для людей</string>
     <string name="showcaseTitle">Настройки</string>
     <string name="showcaseLead">Compose-основа для будущего midnight-blue интерфейса.</string>

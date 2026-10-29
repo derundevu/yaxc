@@ -1,23 +1,34 @@
 [versions]
+# AGP 9.0's latest patch; keep Gradle 9.3.1 / JDK 21 and SDK 36.
 agp = "9.0.1"
-parcelize="2.3.20-RC"
-composeCompiler = "2.3.20-RC"
-ksp = "2.3.6"
-androidxActivityKtx = "1.12.4"
-androidxComposeBom = "2026.02.01"
-androidxCoreKtx = "1.17.0"
-androidxAppCompat = "1.7.1"
+# Keep compiler, Compose compiler and Parcelize on the same stable 2.3 line.
+kotlin = "2.3.21"
+ksp = "2.3.12"
+androidxActivityKtx = "1.13.0"
+# Latest 1.10 patches, without the unrelated 1.11 behavior changes or SDK 37 in 1.12.
+androidxComposeBom = "2026.03.01"
+# 1.18's AAR supports compileSdk 36; 1.19 requires 37.
+androidxCoreKtx = "1.18.0"
+androidxAppCompat = "1.8.0"
+# Lifecycle Compose 2.11 requires compileSdk 37.
 androidxLifecycleViewmodelKtx = "2.10.0"
-androidxRoom = "2.8.4"
-androidxWork = "2.11.0"
+androidxRoom = "2.8.5"
+# Network-constraint/rescheduling fixes without the 2.12 scheduler/metrics changes.
+androidxWork = "2.11.2"
+# Latest published EditorKit / JSON-language release.
 blacksquircleUi = "2.9.0"
-googleMaterial = "1.13.0"
-libsuCore = "5.2.2"
+googleMaterial = "1.14.0"
+libsuCore = "6.0.0"
+# Latest upstream scanner release; replacing the camera stack is out of scope.
 codeScanner="2.3.2"
+# 2.x is a multiplatform/effects API migration; 2.0.1 also requires Compose 1.12.
 backdrop = "1.0.6"
+# Latest JUnit 4 release, retained for RobolectricTestRunner.
 junit = "4.13.2"
+robolectric = "4.17"
 
 [libraries]
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "androidxActivityKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "androidxActivityKtx" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }
@@ -44,9 +55,10 @@ topjohnwu-libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref
 yuriy-budiyev-code-scanner = { group = "com.github.yuriy-budiyev", name = "code-scanner", version.ref = "codeScanner" }
 kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
 junit = { module = "junit:junit", version.ref = "junit" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "composeCompiler" }
-kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "parcelize" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
 google-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

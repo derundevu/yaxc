@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 TARGET="$1"
 REFRESH="$2"
@@ -37,8 +38,7 @@ prepare_go() {
     go get golang.org/x/mobile
     go get google.golang.org/genproto
   fi
-  local VERSION=$(awk -F ' ' '/golang.org\/x\/mobile/ {print $2}' go.mod)
-  go install golang.org/x/mobile/cmd/gomobile@$VERSION
+  go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
   go mod download
 }
 
@@ -46,7 +46,8 @@ build_android() {
   echo "Building XrayCore for $TARGET"
   rm -f "$DEST/XrayCore*"
   gomobile init
-  gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "android/$TARGET" -ldflags="-buildid=" -trimpath
+  # Match upstream Android builds: anet requires access to net.zoneCache.
+  gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "android/$TARGET" -ldflags="-buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" -trimpath
 }
 
 refresh_dependencies() {

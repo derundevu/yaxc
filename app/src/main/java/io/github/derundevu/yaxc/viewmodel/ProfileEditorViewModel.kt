@@ -1,6 +1,5 @@
 package io.github.derundevu.yaxc.viewmodel
 
-import XrayCore.XrayCore
 import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.getValue
@@ -15,9 +14,10 @@ import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.helper.ConfigHelper
-import io.github.derundevu.yaxc.helper.FileHelper
+import io.github.derundevu.yaxc.helper.XrayValidationHelper
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.presentation.profile.ProfileSourceOption
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -99,12 +99,18 @@ class ProfileEditorViewModel(application: Application) : AndroidViewModel(applic
         val snapshot = profile.copy(name = name, linkId = selectedSourceId, config = document.text)
         try {
             return withContext(Dispatchers.IO) {
-                val error = runCatching {
-                    val merged = ConfigHelper(settings, config, snapshot.config).toString()
-                    val testConfig = settings.testConfig()
-                    FileHelper.createOrUpdate(testConfig, merged)
-                    XrayCore.test(app.filesDir.absolutePath, testConfig.absolutePath)
-                }.getOrElse { it.message ?: app.getString(R.string.invalidProfile) }
+                val error = if (check) {
+                    try {
+                        val merged = ConfigHelper(settings, config, snapshot.config).toString()
+                        XrayValidationHelper.validate(app, merged)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        error.message ?: app.getString(R.string.invalidProfile)
+                    }
+                } else {
+                    ""
+                }
                 if (check && error.isNotEmpty()) {
                     error
                 } else {
