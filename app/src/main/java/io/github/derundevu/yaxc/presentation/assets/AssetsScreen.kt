@@ -31,17 +31,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import kotlin.math.roundToInt
 
 @Immutable
 data class AssetCardState(
@@ -80,8 +90,20 @@ fun AssetsScreen(
     onAntifilterDelete: () -> Unit,
     onXrayCorePick: () -> Unit,
     onXrayCoreDelete: () -> Unit,
+    focusedAssetFilename: String? = null,
 ) {
     val spacing = YaxcTheme.spacing
+    val scrollState = rememberScrollState()
+    var focusHandled by rememberSaveable(focusedAssetFilename) { mutableStateOf(false) }
+    var focusOffset by remember(focusedAssetFilename) { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(focusedAssetFilename, focusOffset) {
+        val offset = focusOffset ?: return@LaunchedEffect
+        if (!focusHandled) {
+            scrollState.scrollTo(offset)
+            focusHandled = true
+        }
+    }
 
     YaxcScaffold(
         topBar = {
@@ -101,7 +123,8 @@ fun AssetsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .testTag("assets:list")
+                .verticalScroll(scrollState)
                 .padding(horizontal = spacing.md)
                 .padding(top = spacing.md, bottom = spacing.xl),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
@@ -127,12 +150,22 @@ fun AssetsScreen(
                 onPrimaryAction = onGeoIpDownload,
                 onSecondaryAction = onGeoIpPick,
                 onDelete = onGeoIpDelete,
+                modifier = Modifier.testTag("asset:geoip.dat").onGloballyPositioned { coordinates ->
+                    if (focusedAssetFilename == "geoip.dat" && !focusHandled) {
+                        focusOffset = coordinates.positionInParent().y.roundToInt()
+                    }
+                },
             )
             AssetRow(
                 state = geoSiteState,
                 onPrimaryAction = onGeoSiteDownload,
                 onSecondaryAction = onGeoSitePick,
                 onDelete = onGeoSiteDelete,
+                modifier = Modifier.testTag("asset:geosite.dat").onGloballyPositioned { coordinates ->
+                    if (focusedAssetFilename == "geosite.dat" && !focusHandled) {
+                        focusOffset = coordinates.positionInParent().y.roundToInt()
+                    }
+                },
             )
             AssetRow(
                 state = antifilterState,
@@ -157,11 +190,12 @@ private fun AssetRow(
     onPrimaryAction: () -> Unit,
     onSecondaryAction: (() -> Unit)?,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
     primaryIcon: ImageVector = Icons.Outlined.Download,
 ) {
     val spacing = YaxcTheme.spacing
 
-    AssetsCard {
+    AssetsCard(modifier = modifier) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(spacing.sm),
@@ -208,17 +242,20 @@ private fun AssetRow(
                     ActionIcon(
                         icon = primaryIcon,
                         onClick = onPrimaryAction,
+                        modifier = Modifier.testTag("asset:primary"),
                     )
                     onSecondaryAction?.let { secondaryAction ->
                         ActionIcon(
                             icon = Icons.Outlined.FileOpen,
                             onClick = secondaryAction,
+                            modifier = Modifier.testTag("asset:pick"),
                         )
                     }
                     if (state.isInstalled) {
                         ActionIcon(
                             icon = Icons.Outlined.Delete,
                             onClick = onDelete,
+                            modifier = Modifier.testTag("asset:delete"),
                         )
                     }
                 }
@@ -394,9 +431,10 @@ private fun GeoProviderButton(
 private fun ActionIcon(
     icon: ImageVector,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         color = Color.White.copy(alpha = 0.08f),
         shape = MaterialTheme.shapes.large,
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),

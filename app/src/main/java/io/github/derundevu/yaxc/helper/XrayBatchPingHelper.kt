@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.DeadObjectException
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -27,6 +28,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -80,7 +84,8 @@ object XrayBatchPingHelper {
                 if (!payload.optBoolean("success")) {
                     payload.optString("error").ifBlank { context.getString(R.string.pingFailedGeneric) }
                 } else {
-                    val delay = payload.optLong("data", -1L)
+                    // Go's numeric omitempty drops data for a successful sub-millisecond result.
+                    val delay = if (payload.has("data")) payload.optLong("data", -1L) else 0L
                     if (delay >= 0L) context.getString(R.string.pingDelayMs, delay)
                     else context.getString(R.string.pingFailedGeneric)
                 }
@@ -113,14 +118,39 @@ object XrayBatchPingHelper {
         options: Options,
     ): String =
         withContext(Dispatchers.Main.immediate) {
+            val caller = currentCoroutineContext()
             val id = requestIds.incrementAndGet()
             val response = CompletableDeferred<String>()
             val finished = CompletableDeferred<Unit>()
+            val handler = Handler(Looper.getMainLooper())
             var worker: Messenger? = null
+            var linkedBinder: IBinder? = null
             var sent = false
             var active = true
+            var bindingAttempted = false
+            var bound = false
+            var failure: Throwable? = null
+
+            fun died(error: Exception) {
+                worker = null
+                response.completeExceptionally(error)
+                finished.complete(Unit)
+            }
+
+            fun bindingFailed(error: Exception) {
+                response.completeExceptionally(error)
+                // Losing the binding does not prove that native teardown has finished.
+                if (!sent || linkedBinder?.isBinderAlive == false) finished.complete(Unit)
+            }
+
+            val death = IBinder.DeathRecipient {
+                handler.post { died(DeadObjectException()) }
+            }
             val reply = Messenger(Handler(Looper.getMainLooper()) { message ->
-                if (message.what == PingService.RESULT && message.data.getLong(PingService.ID) == id) {
+                if (message.what == PingService.RESULT &&
+                    message.data.containsKey(PingService.ID) &&
+                    message.data.getLong(PingService.ID) == id
+                ) {
                     val error = message.data.getString(PingService.ERROR)
                     if (error != null) response.completeExceptionally(IllegalStateException(error))
                     else response.complete(message.data.getString(PingService.RESPONSE).orEmpty())
@@ -128,16 +158,13 @@ object XrayBatchPingHelper {
                 }
                 true
             })
-            fun disconnected() {
-                worker = null
-                response.completeExceptionally(IllegalStateException(context.getString(R.string.pingFailedGeneric)))
-                finished.complete(Unit)
-            }
             val connection = object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName, service: IBinder) {
-                    if (!active) return
-                    worker = Messenger(service)
+                    if (!active || sent || !caller.isActive || response.isCompleted) return
                     try {
+                        service.linkToDeath(death, 0)
+                        linkedBinder = service
+                        worker = Messenger(service)
                         worker!!.send(Message.obtain(null, PingService.START).apply {
                             replyTo = reply
                             data = Bundle().apply {
@@ -150,34 +177,58 @@ object XrayBatchPingHelper {
                             }
                         })
                         sent = true
-                    } catch (_: RemoteException) {
-                        disconnected()
+                    } catch (error: Exception) {
+                        // A failed one-way send did not submit a native request.
+                        died(error)
                     }
                 }
-                override fun onServiceDisconnected(name: ComponentName) = disconnected()
-                override fun onBindingDied(name: ComponentName) = disconnected()
-                override fun onNullBinding(name: ComponentName) = disconnected()
-            }
-            check(context.bindService(Intent(context, service), connection, Context.BIND_AUTO_CREATE)) {
-                context.getString(R.string.pingFailedGeneric)
+                override fun onServiceDisconnected(name: ComponentName) =
+                    died(IllegalStateException(context.getString(R.string.pingFailedGeneric)))
+
+                override fun onBindingDied(name: ComponentName) =
+                    bindingFailed(IllegalStateException(context.getString(R.string.pingFailedGeneric)))
+
+                override fun onNullBinding(name: ComponentName) =
+                    bindingFailed(IllegalStateException(context.getString(R.string.pingFailedGeneric)))
             }
             try {
+                caller.ensureActive()
+                bindingAttempted = true
+                bound = context.bindService(Intent(context, service), connection, Context.BIND_AUTO_CREATE)
+                check(bound) { context.getString(R.string.pingFailedGeneric) }
                 response.await()
+            } catch (error: Throwable) {
+                failure = error
+                throw error
             } finally {
                 active = false
-                withContext(NonCancellable) {
-                    if (sent && !finished.isCompleted) {
-                        try {
-                            worker?.send(Message.obtain(null, PingService.CANCEL).apply {
-                                data = Bundle().apply { putLong(PingService.ID, id) }
-                            })
-                        } catch (_: RemoteException) {
-                            disconnected()
+                try {
+                    withContext(NonCancellable) {
+                        if (sent && !finished.isCompleted) {
+                            try {
+                                worker?.send(Message.obtain(null, PingService.CANCEL).apply {
+                                    data = Bundle().apply { putLong(PingService.ID, id) }
+                                })
+                            } catch (error: RemoteException) {
+                                if (error is DeadObjectException) died(error) else bindingFailed(error)
+                            }
+                            // Retain the file, binding and slot until matching completion or death.
+                            finished.await()
                         }
-                        // Keep the file, binding and worker slot until native teardown is acknowledged.
-                        finished.await()
+                        try {
+                            linkedBinder?.unlinkToDeath(death, 0)
+                        } finally {
+                            if (bindingAttempted) {
+                                try {
+                                    context.unbindService(connection)
+                                } catch (error: IllegalArgumentException) {
+                                    if (bound) throw error
+                                }
+                            }
+                        }
                     }
-                    context.unbindService(connection)
+                } catch (cleanup: Throwable) {
+                    if (failure != null) failure.addSuppressed(cleanup) else throw cleanup
                 }
             }
         }

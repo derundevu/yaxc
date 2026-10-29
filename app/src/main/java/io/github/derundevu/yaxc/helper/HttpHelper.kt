@@ -4,9 +4,12 @@ import android.os.Build
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
+import java.io.IOException
 import java.net.Authenticator
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -56,31 +59,33 @@ class HttpHelper private constructor() {
             headers: Map<String, String> = emptyMap(),
         ): HttpResponse {
             return withContext(Dispatchers.IO) {
+                currentCoroutineContext().ensureActive()
                 val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
                 val connection = getConnection(
                     link = link,
                     userAgent = userAgent ?: defaultUserAgent,
                     headers = headers,
                 )
-                var responseCode = 0
-                val responseBody = try {
+                try {
                     connection.connect()
-                    responseCode = connection.responseCode
-                    connection.readResponseText()
-                } catch (_: Exception) {
-                    null
+                    val responseCode = connection.responseCode
+                    val responseBody = connection.readResponseText()
+                    currentCoroutineContext().ensureActive()
+                    if (responseCode != HttpURLConnection.HTTP_OK || responseBody == null) {
+                        throw IOException("HTTP Error: $responseCode")
+                    }
+                    HttpResponse(
+                        body = responseBody,
+                        headers = connection.headerFields
+                            .filterKeys { it != null }
+                            .mapKeys { it.key!! },
+                    )
+                } catch (error: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    throw error
+                } finally {
+                    connection.disconnect()
                 }
-                val headers = connection.headerFields
-                    .filterKeys { it != null }
-                    .mapKeys { it.key!! }
-                connection.disconnect()
-                if (responseCode != HttpURLConnection.HTTP_OK || responseBody == null) {
-                    throw Exception("HTTP Error: $responseCode")
-                }
-                HttpResponse(
-                    body = responseBody,
-                    headers = headers,
-                )
             }
         }
 
@@ -104,7 +109,7 @@ class HttpHelper private constructor() {
                         val key = line.substring(0, separatorIndex).trim()
                         val value = line.substring(separatorIndex + 1).trim()
                         if (key.isNotEmpty() && value.isNotEmpty()) {
-                            put(key, value)
+                            putHeader(this, key, value)
                         }
                     }
             }
@@ -261,7 +266,7 @@ class HttpHelper private constructor() {
 
         private fun HttpURLConnection.readResponseText(): String? {
             val stream = responseStream() ?: return null
-            return stream.bufferedReader().use { it.readText() }
+            return stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
         }
 
         private fun HttpURLConnection.responseStream(): InputStream? {

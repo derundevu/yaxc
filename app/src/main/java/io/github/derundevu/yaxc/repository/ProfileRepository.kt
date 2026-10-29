@@ -15,12 +15,12 @@ class ProfileRepository(private val profileDao: ProfileDao) {
         return profileDao.find(id)
     }
 
-    suspend fun update(profile: Profile) {
-        profileDao.update(profile)
+    suspend fun update(profile: Profile): Int {
+        return profileDao.updateContent(profile.id, profile.linkId, profile.name, profile.config)
     }
 
-    suspend fun create(profile: Profile) {
-        profileDao.create(profile)
+    suspend fun create(profile: Profile): Long {
+        return profileDao.create(profile)
     }
 
     suspend fun remove(profile: Profile) {

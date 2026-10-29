@@ -17,7 +17,8 @@ class VpnActionReceiver : BroadcastReceiver() {
             TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME,
         )
         val action = intent.action ?: ""
-        val label = intent.getStringExtra("profile") ?: context.getString(R.string.appName)
+        val label = intent.getStringExtra("profile")?.takeIf(String::isNotBlank)
+            ?: context.getString(R.string.appName)
         if (!allowed.contains(action)) return
         Intent(context, VpnTileService::class.java).also {
             it.putExtra("action", action)

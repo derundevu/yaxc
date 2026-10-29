@@ -134,3 +134,89 @@ jobs:
           path: app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
           if-no-files-found: error
           retention-days: 7
+
+  device-regressions:
+    name: Android x86_64 / ${{ matrix.page-size }} byte pages
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: default
+            page-size: 4096
+          - target: google_apis_ps16k
+            page-size: 16384
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Install pinned Android NDK
+        shell: bash
+        run: |
+          NDK_VERSION=$(awk -F '"' '/ndkVersion/ {print $2}' app/build.gradle.kts)
+          sdkmanager --install "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: XrayCore/go.mod
+          cache-dependency-path: |
+            XrayCore/go.sum
+            XrayCore/libXray/go.sum
+            XrayCore/Xray-core/go.sum
+            XrayHelper/go.sum
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build emulator-native dependencies
+        run: |
+          bash -e ./buildXrayCore.sh amd64
+          bash -e ./buildXrayHelper.sh amd64
+
+      - name: Enable disposable runner KVM access
+        run: sudo chmod a+rw /dev/kvm
+
+      - name: Run isolated native and VPN instrumentation
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: pixel_2
+          emulator-build: '15507667' # 36.6.11; exercised with both page-size images.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-audio -no-boot-anim -feature -Vulkan
+          disable-animations: true
+          script: >-
+            ./gradlew -PabiId=4 -PabiTarget=x86_64
+            -Pandroid.testInstrumentationRunnerArguments.allowVpn=true
+            -Pandroid.testInstrumentationRunnerArguments.expectedPageSize=${{ matrix.page-size }}
+            :app:connectedRegressionAndroidTest
+
+      - name: Upload instrumentation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-device-${{ matrix.page-size }}-reports
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+          if-no-files-found: warn
+          retention-days: 7

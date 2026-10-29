@@ -32,10 +32,13 @@ import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.dto.XrayConfig
 import io.github.derundevu.yaxc.helper.ConfigHelper
+import io.github.derundevu.yaxc.helper.ConnectionFailure
+import io.github.derundevu.yaxc.helper.ConnectionFailureState
 import io.github.derundevu.yaxc.helper.FileHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.helper.XrayValidationHelper
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,17 +47,21 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import java.io.File
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import kotlin.coroutines.CoroutineContext
 import kotlin.reflect.cast
 
 @SuppressLint("VpnServicePolicy")
 class TProxyService : VpnService() {
 
     companion object {
-        init {
-            System.loadLibrary("hev-socks5-tunnel")
+        private object NativeLibrary {
+            init {
+                System.loadLibrary("hev-socks5-tunnel")
+            }
+
+            fun ensureLoaded() = Unit
         }
 
         const val PKG_NAME = BuildConfig.APPLICATION_ID
@@ -83,6 +90,9 @@ class TProxyService : VpnService() {
                     "TProxyService",
                     "Can't start: VpnService#prepare(): needs user permission"
                 )
+                ConnectionFailureState.report(
+                    ConnectionFailure(context.getString(R.string.connectionPermissionRequired))
+                )
                 return
             }
             startCommand(context, START_VPN_SERVICE_ACTION_NAME, true)
@@ -106,7 +116,11 @@ class TProxyService : VpnService() {
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val configRepository by lazy { Yaxc::class.cast(application).configRepository }
     private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal var commandDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val scope by lazy { CoroutineScope(SupervisorJob() + commandDispatcher) }
+    private val runtimeLock = Any()
+    private var commandJob: Job? = null
+    private var stopJob: Job? = null
     @Volatile
     private var configJob: Job? = null
 
@@ -115,7 +129,55 @@ class TProxyService : VpnService() {
     private var cellularCallback: ConnectivityManager.NetworkCallback? = null
     private var toast: Toast? = null
     private val tunOwnerPolicyCache = linkedMapOf<Int, Boolean>()
-    private var activeTransparentProxy: Boolean = false
+    private enum class RuntimeMode { CORE, TUN, TRANSPARENT }
+    private var activeMode: RuntimeMode? = null
+
+    /** Only the platform/native boundary is replaceable; command ownership stays in the service. */
+    internal interface RuntimeBoundary {
+        suspend fun validate(config: String): String
+        fun startCore(config: XrayConfig, transparent: Boolean)
+        fun stopCore(transparent: Boolean)
+        fun establish(builder: Builder): ParcelFileDescriptor?
+        fun startTunnel(configPath: String, fd: Int): Boolean
+        fun stopTunnel(): Boolean
+        fun tunnelRunning(): Boolean
+        fun transparentRunning(): Boolean
+        fun enableTransparent()
+        fun disableTransparent()
+    }
+
+    internal var runtime: RuntimeBoundary = object : RuntimeBoundary {
+        override suspend fun validate(config: String) = XrayValidationHelper.validate(this@TProxyService, config)
+        override fun startCore(config: XrayConfig, transparent: Boolean) {
+            if (transparent) transparentProxyHelper.startService()
+            else {
+                val diagnostic = XrayCore.start(config.dir, config.file)
+                check(diagnostic.isEmpty()) { diagnostic }
+            }
+        }
+        override fun stopCore(transparent: Boolean) {
+            if (transparent) transparentProxyHelper.stopService() else XrayCore.stop()
+        }
+        override fun establish(builder: Builder) = builder.establish()
+        override fun startTunnel(configPath: String, fd: Int): Boolean {
+            NativeLibrary.ensureLoaded()
+            return TProxyStartService(configPath, fd)
+        }
+        override fun stopTunnel(): Boolean {
+            NativeLibrary.ensureLoaded()
+            return TProxyStopService()
+        }
+        override fun tunnelRunning(): Boolean {
+            NativeLibrary.ensureLoaded()
+            return TProxyIsRunning()
+        }
+        override fun transparentRunning() = transparentProxyHelper.isRunning()
+        override fun enableTransparent() {
+            transparentProxyHelper.enableProxy()
+            transparentProxyHelper.monitorNetwork()
+        }
+        override fun disableTransparent() = transparentProxyHelper.disableProxy()
+    }
 
     private external fun TProxyStartService(configPath: String, fd: Int): Boolean
     private external fun TProxyStopService(): Boolean
@@ -125,18 +187,53 @@ class TProxyService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             START_VPN_SERVICE_ACTION_NAME, RESTART_VPN_SERVICE_ACTION_NAME, NEW_CONFIG_SERVICE_ACTION_NAME -> {
+                val previous = commandJob
                 configJob?.cancel()
+                ConnectionFailureState.clear()
+                if (intent.action == START_VPN_SERVICE_ACTION_NAME && !getIsRunning()) {
+                    startForeground(
+                        VPN_SERVICE_NOTIFICATION_ID,
+                        createNotification(getString(R.string.connectionConnecting)),
+                    )
+                }
                 configJob = scope.launch {
-                    when (intent.action) {
-                        START_VPN_SERVICE_ACTION_NAME -> start(getProfile(), globalConfigs())
-                        RESTART_VPN_SERVICE_ACTION_NAME -> restart(getProfile(), globalConfigs())
-                        NEW_CONFIG_SERVICE_ACTION_NAME -> newConfig(getProfile(), globalConfigs())
+                    try {
+                        previous?.join()
+                        currentCoroutineContext().ensureActive()
+                        when (intent.action) {
+                            START_VPN_SERVICE_ACTION_NAME -> start(getProfile(), globalConfigs())
+                            RESTART_VPN_SERVICE_ACTION_NAME -> restart(getProfile(), globalConfigs())
+                            NEW_CONFIG_SERVICE_ACTION_NAME -> newConfig(getProfile(), globalConfigs())
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        Log.e("TProxyService", "Connection operation failed", error)
+                        val failure = ConnectionFailure.fromDiagnostic(
+                            error.message?.takeIf { it.isNotBlank() } ?: getString(R.string.invalidProfile),
+                            applicationContext.filesDir,
+                        )
+                        currentCoroutineContext().ensureActive()
+                        ConnectionFailureState.report(failure)
+                        if (!getIsRunning()) {
+                            stopVpnInternal(notifyStop = false, stopService = true)
+                        }
+                        broadcastStatus()
                     }
                 }
+                commandJob = configJob
             }
             STOP_VPN_SERVICE_ACTION_NAME -> {
+                val previousStop = stopJob
                 configJob?.cancel()
-                scope.launch { stopVPN() }
+                configJob = null
+                // The isolated constructor cannot be interrupted; it must not delay active teardown.
+                stopJob = scope.launch {
+                    previousStop?.join()
+                    stopVpnInternal(notifyStop = true, stopService = true)
+                }
+                commandJob = stopJob
             }
             STATUS_VPN_SERVICE_ACTION_NAME -> scope.launch { broadcastStatus() }
             NETWORK_UPDATE_SERVICE_ACTION_NAME -> scope.launch { transparentProxyHelper.networkUpdate() }
@@ -150,9 +247,10 @@ class TProxyService : VpnService() {
 
     override fun onDestroy() {
         scope.cancel()
+        stopVpnInternal(notifyStop = false, stopService = false)
         cellularCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
         cellularCallback = null
-        serviceRunning = false
+        serviceRunning = getIsRunning()
         toast = null
         synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
         super.onDestroy()
@@ -160,11 +258,12 @@ class TProxyService : VpnService() {
 
     private fun configName(profile: Profile?): String = profile?.name ?: settings.tunName
 
-    private fun getIsRunning(): Boolean {
-        return if (activeTransparentProxy) {
-            transparentProxyHelper.isRunning()
-        } else {
-            isRunning && (!settings.tun2socks || TProxyIsRunning())
+    private fun getIsRunning(): Boolean = synchronized(runtimeLock) {
+        when (activeMode) {
+            RuntimeMode.TRANSPARENT -> isRunning && runtime.transparentRunning()
+            RuntimeMode.TUN -> isRunning && runtime.tunnelRunning()
+            RuntimeMode.CORE -> isRunning
+            null -> false
         }
     }
 
@@ -180,48 +279,45 @@ class TProxyService : VpnService() {
         return configRepository.get()
     }
 
-    private suspend fun getConfig(profile: Profile, globalConfigs: Config): XrayConfig? {
-        val dir: File = applicationContext.filesDir
-        val config: File = settings.xrayConfig()
-        var configText = ""
-        val error = try {
-            configText = ConfigHelper(settings, globalConfigs, profile.config).toString()
-            XrayValidationHelper.validate(this, configText)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            error.message ?: getString(R.string.invalidProfile)
+    private suspend fun getConfig(profile: Profile, globalConfigs: Config): XrayConfig {
+        val dir = applicationContext.filesDir
+        val config = settings.xrayConfig()
+        val configText = ConfigHelper(settings, globalConfigs, profile.config).toString()
+        val diagnostic = runtime.validate(configText)
+        check(diagnostic.isEmpty()) { diagnostic }
+        val context = currentCoroutineContext()
+        synchronized(runtimeLock) {
+            context.ensureActive()
+            FileHelper.createOrUpdate(config, configText)
         }
-        if (error.isNotEmpty()) {
-            Log.e(
-                "TProxyService",
-                "Runtime config validation failed: $error; configPath=${config.absolutePath}; " +
-                    "dns4=${settings.primaryDns},${settings.secondaryDns}; " +
-                    "dns6=${settings.primaryDnsV6},${settings.secondaryDnsV6}; ipv6=${settings.enableIpV6}"
-            )
-            showToast(userFacingConfigError(error))
-            return null
-        }
-        currentCoroutineContext().ensureActive()
-        FileHelper.createOrUpdate(config, configText)
         return XrayConfig(dir.absolutePath, config.absolutePath)
     }
 
-    private fun userFacingConfigError(error: String): String {
-        val normalized = error.lowercase()
-        return when {
-            "geoip.dat" in normalized || "geosite.dat" in normalized ->
-                getString(R.string.installAssetsFirst)
-
-            else -> error
-        }
-    }
 
     private suspend fun start(profile: Profile?, globalConfigs: Config) {
-        if (profile == null) return
-        getConfig(profile, globalConfigs)?.let {
-            startXray(it)
-            startVPN(profile)
+        if (getIsRunning()) return
+        checkNotNull(profile) { getString(R.string.connectionMissingProfile) }
+        startPrepared(profile, getConfig(profile, globalConfigs))
+    }
+
+    private suspend fun startPrepared(profile: Profile, config: XrayConfig) {
+        val context = currentCoroutineContext()
+        synchronized(runtimeLock) {
+            context.ensureActive()
+            check(activeMode == null) { "Previous VPN still owns its runtime" }
+            activeMode = when {
+                settings.transparentProxy -> RuntimeMode.TRANSPARENT
+                settings.tun2socks -> RuntimeMode.TUN
+                else -> RuntimeMode.CORE
+            }
+            try {
+                runtime.startCore(config, activeMode == RuntimeMode.TRANSPARENT)
+                context.ensureActive()
+                startVPN(profile, context)
+            } catch (error: Exception) {
+                stopVpnInternal(notifyStop = false, stopService = false)
+                throw error
+            }
         }
     }
 
@@ -230,44 +326,44 @@ class TProxyService : VpnService() {
             start(profile, globalConfigs)
             return
         }
-        if (profile == null) {
-            stopVPN()
-            return
+        checkNotNull(profile) { getString(R.string.connectionMissingProfile) }
+        val config = getConfig(profile, globalConfigs)
+        currentCoroutineContext().ensureActive()
+        check(stopVpnInternal(notifyStop = false, stopService = false)) {
+            "Failed to stop the previous VPN"
         }
-        stopVpnInternal(notifyStop = false, stopService = false)
-        start(profile, globalConfigs)
+        startPrepared(profile, config)
     }
 
     private suspend fun newConfig(profile: Profile?, globalConfigs: Config) {
-        if (!getIsRunning() || profile == null) return
-        stopXray()
-        getConfig(profile, globalConfigs).also {
-            if (it == null) stopVPN() else startXray(it)
-        }?.let {
-            val name = configName(profile)
-            val notification = createNotification(name)
-            showToast(name)
-            broadcastStart(NEW_CONFIG_SERVICE_ACTION_NAME, name)
-            notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, notification)
+        if (!getIsRunning()) return
+        checkNotNull(profile) { getString(R.string.connectionMissingProfile) }
+        val config = getConfig(profile, globalConfigs)
+        val context = currentCoroutineContext()
+        synchronized(runtimeLock) {
+            context.ensureActive()
+            if (!getIsRunning()) return
+            try {
+                val transparent = activeMode == RuntimeMode.TRANSPARENT
+                runtime.stopCore(transparent)
+                runtime.startCore(config, transparent)
+                context.ensureActive()
+                val name = configName(profile)
+                val notification = createNotification(name)
+                broadcastStart(NEW_CONFIG_SERVICE_ACTION_NAME, name)
+                notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, notification)
+            } catch (error: Exception) {
+                stopVpnInternal(notifyStop = false, stopService = false)
+                throw error
+            }
         }
     }
 
-    private fun startXray(config: XrayConfig) {
-        if (settings.transparentProxy) transparentProxyHelper.startService()
-        else XrayCore.start(config.dir, config.file)
-    }
 
-    private fun stopXray() {
-        if (settings.transparentProxy) transparentProxyHelper.stopService()
-        else XrayCore.stop()
-    }
-
-    private fun startVPN(profile: Profile?) {
-        activeTransparentProxy = settings.transparentProxy
-        if (settings.transparentProxy) {
-            transparentProxyHelper.enableProxy()
-            transparentProxyHelper.monitorNetwork()
-        } else if (settings.tun2socks) {
+    private fun startVPN(profile: Profile?, context: CoroutineContext) {
+        if (activeMode == RuntimeMode.TRANSPARENT) {
+            runtime.enableTransparent()
+        } else if (activeMode == RuntimeMode.TUN) {
             synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
             val result = runCatching {
                 /** Create Tun */
@@ -306,7 +402,7 @@ class TProxyService : VpnService() {
                 applyAppsRouting(tun)
 
                 /** Build tun device */
-                tunDevice = tun.establish()
+                tunDevice = runtime.establish(tun)
 
                 /** Check tun device */
                 if (tunDevice == null) {
@@ -337,7 +433,7 @@ class TProxyService : VpnService() {
                 )
 
                 /** Start tun2socks */
-                check(TProxyStartService(settings.tun2socksConfig().absolutePath, tunDevice!!.fd)) {
+                check(runtime.startTunnel(settings.tun2socksConfig().absolutePath, tunDevice!!.fd)) {
                     "Failed to start tun2socks worker"
                 }
             }
@@ -348,11 +444,10 @@ class TProxyService : VpnService() {
                         "dns6=${settings.primaryDnsV6},${settings.secondaryDnsV6}; ipv6=${settings.enableIpV6}",
                     error
                 )
-                stopVpnInternal(notifyStop = false, stopService = true)
-                showToast(error.message ?: "Failed to start VPN")
-                return
+                throw error
             }
         }
+        context.ensureActive()
 
         /** Service Notification */
         val name = configName(profile)
@@ -365,7 +460,10 @@ class TProxyService : VpnService() {
                 .build()
             cellularCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    this@TProxyService.transparentProxyHelper.networkUpdate()
+                    val transparent = synchronized(runtimeLock) {
+                        activeMode == RuntimeMode.TRANSPARENT && isRunning
+                    }
+                    if (transparent) this@TProxyService.transparentProxyHelper.networkUpdate()
                 }
             }
             connectivityManager.registerNetworkCallback(request, cellularCallback!!)
@@ -375,6 +473,7 @@ class TProxyService : VpnService() {
         showToast("Start VPN")
         isRunning = true
         serviceRunning = true
+        ConnectionFailureState.clear()
         broadcastStart(START_VPN_SERVICE_ACTION_NAME, name)
     }
 
@@ -386,31 +485,33 @@ class TProxyService : VpnService() {
     private fun stopVpnInternal(
         notifyStop: Boolean,
         stopService: Boolean,
-    ) {
+    ): Boolean = synchronized(runtimeLock) {
         synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
-        if (activeTransparentProxy) {
-            transparentProxyHelper.disableProxy()
-        } else {
-            if (!TProxyStopService()) {
+        val mode = activeMode
+        if (mode == RuntimeMode.TRANSPARENT) {
+            runtime.disableTransparent()
+        } else if (tunDevice != null) {
+            if (!runtime.stopTunnel()) {
                 Log.e("TProxyService", "Failed to join tun2socks worker")
-                showToast("Failed to stop VPN")
-                return
+                showToast(getString(R.string.connectionStopFailed))
+                return false
             }
             runCatching { tunDevice?.close() }
             tunDevice = null
         }
         isRunning = false
-        activeTransparentProxy = false
+        activeMode = null
         serviceRunning = false
-        stopXray()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (mode != null) runtime.stopCore(mode == RuntimeMode.TRANSPARENT)
         if (notifyStop) {
             showToast("Stop VPN")
             broadcastStop()
         }
         if (stopService) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+        return true
     }
 
     private fun applyAppsRouting(tun: Builder) {

@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
 class LinkHelperTest : HelperSettingsTest() {
-    // Only VLESS and raw JSON bypass XrayCore.json. Other schemes/base64 imports require Android Go.
+    // Native share-link fallback is exercised on Android; VLESS and full JSON import are host-safe.
     @Test
     fun realityXhttpImportKeepsCredentialsAndDecodedTransportOptions() {
         val extra = """{"xmux":{"maxConcurrency":16},"noSSEHeader":true,"future":{"token":"a+b"}}"""
@@ -156,6 +156,45 @@ class LinkHelperTest : HelperSettingsTest() {
             remove("remark")
         }
         assertJsonEquals(expected, JSONObject(helper.json()))
+    }
+
+    @Test
+    fun encodedFullConfigIsImportedBeforeNativeConversionAndKeepsAllRootSections() {
+        val raw = JSONObject(
+            """{"remarks":"  Кодированный 🌍  ","outbounds":[
+                {"protocol":"freedom","tag":"first","future":{"value":9007199254740993}},
+                {"protocol":"blackhole","tag":"second"}],
+                "routing":{"rules":[{"domain":["full:localhost"],"outboundTag":"second"}]},
+                "futureRoot":{"ordered":["one","two"],"enabled":true}}""",
+        )
+        val encoded = java.util.Base64.getMimeEncoder(24, "\r\n".toByteArray())
+            .encodeToString(raw.toString().toByteArray(StandardCharsets.UTF_8))
+        val helper = LinkHelper(settings, " \r\n$encoded\r\n ")
+
+        assertTrue(helper.isValid())
+        assertEquals("Кодированный 🌍", helper.remark())
+        raw.remove("remarks")
+        assertJsonEquals(raw, JSONObject(helper.json()))
+        assertEquals(2, JSONObject(helper.json()).getJSONArray("outbounds").length())
+    }
+
+    @Test
+    fun clipboardWhitespaceAndBomDoNotChangeVlessCredentialsOrUnicodeRemark() {
+        val helper = LinkHelper(
+            settings,
+            " \uFEFF\r\n\tvless://00000000-0000-4000-8000-000000000006@127.0.0.1:9443" +
+                "?security=tls&type=ws&path=%2Fsynthetic%3Fx%3Da%2Bb#%D0%A2%D0%B5%D1%81%D1%82 \t\r\n",
+        )
+
+        assertTrue(helper.isValid())
+        assertEquals("Тест", helper.remark())
+        val outbound = JSONObject(helper.json()).getJSONArray("outbounds").getJSONObject(0)
+        val endpoint = outbound.getJSONObject("settings").getJSONArray("vnext").getJSONObject(0)
+        assertEquals("127.0.0.1", endpoint.getString("address"))
+        assertEquals(9443, endpoint.getInt("port"))
+        assertEquals("00000000-0000-4000-8000-000000000006", endpoint.getJSONArray("users").getJSONObject(0).getString("id"))
+        assertEquals("/synthetic?x=a+b", outbound.getJSONObject("streamSettings")
+            .getJSONObject("wsSettings").getString("path"))
     }
 
     @Test

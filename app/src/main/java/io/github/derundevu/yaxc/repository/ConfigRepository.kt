@@ -18,35 +18,34 @@ class ConfigRepository(
                 rawJson = config.routing,
                 storedUiRules = storedUiRules,
             )
-            var finalRules = CoreRoutingHelper.migrateLegacyRules(parsed.rules)
-            var finalUiRules = CoreRoutingHelper.migrateLegacyRules(storedUiRules)
+            var finalRules = parsed.rules
 
             if (
                 settings.coreRoutingDefaultsVersion < CoreRoutingHelper.CURRENT_DEFAULT_RULES_VERSION &&
+                parsed.unsupportedRuleCount == 0 &&
                 CoreRoutingHelper.shouldUpgradeSeededDefaults(finalRules)
             ) {
-                finalRules = CoreRoutingHelper.defaultSeededRules()
-                finalUiRules = CoreRoutingHelper.defaultSeededRules()
-            }
-            if (settings.coreRoutingDefaultsVersion < CoreRoutingHelper.CURRENT_DEFAULT_RULES_VERSION) {
-                settings.coreRoutingDefaultsVersion = CoreRoutingHelper.CURRENT_DEFAULT_RULES_VERSION
+                val ruIpRule = CoreRoutingHelper.defaultRuIpRule()
+                finalRules = finalRules.toMutableList().apply { add(2, ruIpRule) }
             }
 
             val migratedRouting = CoreRoutingHelper.buildRoutingJson(
                 domainStrategy = parsed.domainStrategy,
                 rules = finalRules,
-                preservedRules = parsed.preservedRules,
+                ruleOrder = if (finalRules.size == parsed.rules.size) parsed.ruleOrder else emptyList(),
                 preservedTopLevel = parsed.preservedTopLevel,
             )
-            val migratedUiRulesRaw = CoreRoutingHelper.encodeUiRules(finalUiRules)
+            val migratedUiRulesRaw = CoreRoutingHelper.encodeUiRules(finalRules, parsed.ruleOrder)
 
-            if (migratedRouting != config.routing || migratedUiRulesRaw != settings.coreRoutingUiRules) {
-                val updated = config.copy(routing = migratedRouting)
-                settings.coreRoutingUiRules = migratedUiRulesRaw
+            val updated = config.copy(routing = migratedRouting)
+            if (migratedRouting != config.routing) {
                 configDao.update(updated)
-                return updated
             }
-            return config
+            settings.coreRoutingUiRules = migratedUiRulesRaw
+            if (settings.coreRoutingDefaultsVersion < CoreRoutingHelper.CURRENT_DEFAULT_RULES_VERSION) {
+                settings.coreRoutingDefaultsVersion = CoreRoutingHelper.CURRENT_DEFAULT_RULES_VERSION
+            }
+            return updated
         }
         val seededRules = CoreRoutingHelper.defaultSeededRules()
         val seeded = Config(
@@ -56,9 +55,9 @@ class ConfigRepository(
             ),
             routingMode = Config.Mode.Merge,
         )
+        configDao.insert(seeded)
         settings.coreRoutingUiRules = CoreRoutingHelper.encodeUiRules(seededRules)
         settings.coreRoutingDefaultsVersion = CoreRoutingHelper.CURRENT_DEFAULT_RULES_VERSION
-        configDao.insert(seeded)
         return seeded
     }
 

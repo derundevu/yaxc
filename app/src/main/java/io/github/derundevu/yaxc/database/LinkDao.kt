@@ -19,6 +19,12 @@ interface LinkDao {
     @Query("SELECT * FROM links WHERE is_active = 1 ORDER BY position ASC, id ASC")
     suspend fun activeLinks(): List<Link>
 
+    @Query("SELECT * FROM links WHERE id = :id")
+    suspend fun find(id: Long): Link?
+
+    @Query("SELECT id FROM links ORDER BY position ASC, id ASC")
+    suspend fun orderedIds(): List<Long>
+
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM links")
     suspend fun nextPosition(): Int
 
@@ -27,13 +33,22 @@ interface LinkDao {
 
     @Transaction
     suspend fun updatePositions(ids: List<Long>) {
-        ids.forEachIndexed { index, id ->
-            updatePosition(id, index)
+        val remaining = orderedIds().toMutableSet()
+        var position = 0
+        ids.forEach { id ->
+            if (remaining.remove(id)) updatePosition(id, position++)
         }
+        remaining.forEach { id -> updatePosition(id, position++) }
     }
 
     @Insert
     suspend fun insert(link: Link): Long
+
+    @Transaction
+    suspend fun insertAtEnd(link: Link): Long {
+        if (link.id == 0L) link.position = nextPosition()
+        return insert(link)
+    }
 
     @Update
     suspend fun update(link: Link)

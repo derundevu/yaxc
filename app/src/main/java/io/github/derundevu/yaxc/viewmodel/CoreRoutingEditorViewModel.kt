@@ -14,6 +14,7 @@ import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
 import io.github.derundevu.yaxc.helper.CoreRoutingHelper
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
+import io.github.derundevu.yaxc.helper.CoreRoutingRuleSlot
 import io.github.derundevu.yaxc.helper.ParsedCoreRouting
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorTools
@@ -42,7 +43,7 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
     var savedRevision by mutableIntStateOf(0)
         private set
     private lateinit var config: Config
-    private var preservedRules: List<JSONObject> = emptyList()
+    private var ruleOrder: List<CoreRoutingRuleSlot> = emptyList()
     private var preservedTopLevel = JSONObject()
     private var visualDirty = false
     private val defaultRuleName: (Int) -> String = { app.getString(R.string.routingRuleDefaultName, it) }
@@ -148,13 +149,13 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
                         routing = if (routingMode == Config.Mode.Disable) "{}" else json,
                         routingMode = routingMode,
                     )
-                    PreparedRouting(parsed, json, CoreRoutingHelper.encodeUiRules(parsed.rules), updated)
+                    PreparedRouting(parsed, json, CoreRoutingHelper.encodeUiRules(parsed.rules, parsed.ruleOrder), updated)
                 }.getOrNull()
             } ?: return false
             val changed = config.routing != prepared.config.routing || config.routingMode != prepared.config.routingMode
             withContext(Dispatchers.IO) {
-                settings.coreRoutingUiRules = prepared.uiRules
                 app.configRepository.update(prepared.config)
+                settings.coreRoutingUiRules = prepared.uiRules
             }
             config = prepared.config
             // A JSON save validates/persists a snapshot; only Format rewrites the visible source.
@@ -195,17 +196,18 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
         isBusy = true
         val mode = editorMode
         val raw = document.text
-        val fallback = domainStrategy
-        val snapshot = rules
+        val snapshot = visualSnapshot()
         try {
             return withContext(Dispatchers.Default) {
                 runCatching {
-                    val exportRules = if (mode == CoreRoutingEditorMode.Json) {
-                        CoreRoutingHelper.parseImportedRules(raw, fallback, defaultRuleName).rules
+                    val parsed = if (mode == CoreRoutingEditorMode.Json) {
+                        if (JsonEditorTools.validate(raw, document.root) != null) return@runCatching null
+                        CoreRoutingHelper.parseRoutingJson(raw, snapshot.rules, defaultRuleName)
                     } else snapshot
                     CoreRoutingHelper.buildRulesExchangeJson(
-                        exportRules,
+                        parsed.rules,
                         app.getString(R.string.routingRuleDefaultNameShort),
+                        parsed.ruleOrder,
                     )
                 }.getOrNull()
             }
@@ -218,14 +220,14 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
         domainStrategy = parsed.domainStrategy
         rules = parsed.rules
         unsupportedRuleCount = parsed.unsupportedRuleCount
-        preservedRules = parsed.preservedRules
+        ruleOrder = parsed.ruleOrder
         preservedTopLevel = parsed.preservedTopLevel
     }
 
     private fun visualSnapshot() = ParsedCoreRouting(
         domainStrategy = domainStrategy,
         rules = rules,
-        preservedRules = preservedRules,
+        ruleOrder = ruleOrder,
         preservedTopLevel = preservedTopLevel,
         unsupportedRuleCount = unsupportedRuleCount,
     )
@@ -233,7 +235,7 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
     private fun buildJson(parsed: ParsedCoreRouting): String = CoreRoutingHelper.buildRoutingJson(
         domainStrategy = parsed.domainStrategy,
         rules = parsed.rules,
-        preservedRules = parsed.preservedRules,
+        ruleOrder = parsed.ruleOrder,
         preservedTopLevel = parsed.preservedTopLevel,
     )
 

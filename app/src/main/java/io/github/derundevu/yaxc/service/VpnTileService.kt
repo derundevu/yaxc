@@ -18,12 +18,21 @@ class VpnTileService : TileService() {
         requestListeningState(this, ComponentName(this, VpnTileService::class.java))
         val action = intent?.getStringExtra("action") ?: ""
         val label = intent?.getStringExtra("label") ?: ""
-        val sharedPref = sharedPref()
-        sharedPref.edit {
-            putString("action", action)
-            putString("label", label)
+        if (
+            (
+                action == TProxyService.START_VPN_SERVICE_ACTION_NAME ||
+                    action == TProxyService.STOP_VPN_SERVICE_ACTION_NAME ||
+                    action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME
+                ) && label.isNotBlank()
+        ) {
+            sharedPref().edit {
+                putString("action", action)
+                putString("label", label)
+            }
+            handleUpdate(action, label)
+        } else {
+            handleUpdate()
         }
-        handleUpdate(action, label)
         return START_STICKY
     }
 

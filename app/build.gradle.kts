@@ -24,6 +24,7 @@ android {
         targetSdk = 36
         versionCode = calcVersionCode()
         versionName = "1.5.0"
+        testInstrumentationRunner = "io.github.derundevu.yaxc.testing.RegressionTestRunner"
     }
 
     buildFeatures {
@@ -92,14 +93,31 @@ android {
         release {
             signingConfig = signingConfigs.getByName("release")
         }
+        create("regression") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".regression"
+            matchingFallbacks += "debug"
+        }
+    }
+    testBuildType = "regression"
+}
+androidComponents {
+    beforeVariants { variant ->
+        variant.hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]?.enable =
+            variant.buildType == "debug"
     }
 }
+
 
 kotlin {
     compilerOptions {
         languageVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_3
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
     }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -133,5 +151,17 @@ dependencies {
     implementation(libs.yuriy.budiyev.code.scanner)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(composeBom)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.graphics.path)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    "regressionImplementation"(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

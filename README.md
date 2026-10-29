@@ -34,6 +34,13 @@ Based on [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray); maintained as an
    the default routing rules use these files.
 4. Start the VPN. Routing rules are evaluated in order; higher rules take precedence.
 
+If required geodata is missing, damaged or lacks a referenced group, the connection error identifies the problem.
+Use **Resources** to open the relevant file's card, download or import a compatible file, then return and tap **Retry**.
+Nothing downloads or connects automatically. Configurations that do not reference geodata do not need these files.
+
+Subscription refreshes are applied as complete updates. Failed or malformed batches keep the previous profiles,
+as does cancellation before commit. Mixed valid/invalid batches are rejected rather than silently importing a subset.
+
 Standalone configurations still have known limitations. TUN hardening is experimental and is not a guaranteed kill switch.
 
 ## Contributing

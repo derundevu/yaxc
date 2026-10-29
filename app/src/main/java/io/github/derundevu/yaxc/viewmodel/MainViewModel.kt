@@ -9,6 +9,8 @@ import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
+import io.github.derundevu.yaxc.helper.ConnectionFailure
+import io.github.derundevu.yaxc.helper.ConnectionFailureState
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -48,8 +51,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settings = Settings(application)
     private val linkRepository by lazy { getApplication<Yaxc>().linkRepository }
     private val profileRepository by lazy { getApplication<Yaxc>().profileRepository }
-    private var hasResolvedTabsSnapshot = false
-    private var hasResolvedProfilesSnapshot = false
 
     private val selectedTabId = MutableStateFlow(settings.selectedLink)
     private val selectedProfileId = MutableStateFlow(settings.selectedProfile)
@@ -60,7 +61,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
 
     private val tabs = linkRepository.tabs.flowOn(Dispatchers.IO)
-    private val allProfiles = profileRepository.all.flowOn(Dispatchers.IO).stateIn(
+    private val allProfiles = profileRepository.all.flowOn(Dispatchers.IO).onEach { profiles ->
+        // Validate only authoritative Room snapshots, never stateIn's initial empty placeholder.
+        profileRepository.normalizeIndices()
+        val validProfileIds = profiles.map { it.id }.toSet()
+        pingTracker.retain(validProfileIds)
+        pingState.value = pingTracker.snapshot
+        if (selectedProfileId.value != 0L && profiles.none { it.id == selectedProfileId.value }) {
+            clearSelectedProfile()
+        }
+    }.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
         emptyList(),
@@ -83,7 +93,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         profilePresentations,
         selection,
         runtime,
-    ) { tabs: List<Link>, profiles: List<ProfilePresentation>, selection: SelectionState, runtime: RuntimeState ->
+        ConnectionFailureState.failure,
+    ) { tabs: List<Link>, profiles: List<ProfilePresentation>, selection: SelectionState, runtime: RuntimeState, failure: ConnectionFailure? ->
         val selectedPresentation = profiles.firstOrNull { it.profile.id == selection.selectedProfileId }
         val selectedProfile = selectedPresentation?.profile
         val selectedSourceId = selectedProfile?.link?.takeIf { linkId ->
@@ -140,6 +151,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pingAddress = pingAddress,
             profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
+            connectionFailure = failure,
             pingState = selectedProfilePingState,
             activeBatchPingSourceId = runtime.ping.sourceId,
             batchPingCompleted = runtime.ping.completed,
@@ -148,34 +160,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        MainUiState(selectedSourceName = application.getString(R.string.mainNoSourceSelected)),
+        MainUiState(
+            selectedSourceName = application.getString(R.string.mainNoSourceSelected),
+            connectionFailure = ConnectionFailureState.failure.value,
+        ),
     )
     val effects = _effects.asSharedFlow()
 
     init {
         viewModelScope.launch {
             tabs.collect { tabs ->
-                if (!hasResolvedTabsSnapshot) {
-                    hasResolvedTabsSnapshot = true
-                    if (tabs.isEmpty()) return@collect
-                }
-                if (selectedTabId.value != 0L && tabs.isNotEmpty() && tabs.none { it.id == selectedTabId.value }) {
+                if (selectedTabId.value != 0L && tabs.none { it.id == selectedTabId.value }) {
                     selectTab(0L)
-                }
-            }
-        }
-        viewModelScope.launch {
-            allProfiles.collect { profiles ->
-                if (!hasResolvedProfilesSnapshot) {
-                    hasResolvedProfilesSnapshot = true
-                    if (profiles.isEmpty()) return@collect
-                }
-                profileRepository.normalizeIndices()
-                val validProfileIds = profiles.map { it.id }.toSet()
-                pingTracker.retain(validProfileIds)
-                pingState.value = pingTracker.snapshot
-                if (selectedProfileId.value != 0L && profiles.isNotEmpty() && profiles.none { it.id == selectedProfileId.value }) {
-                    clearSelectedProfile()
                 }
             }
         }
@@ -256,6 +252,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         when (action) {
             is MainAction.SelectTab -> selectTab(action.linkId)
             is MainAction.UpdateVpnStatus -> updateVpnRunning(action.isRunning)
+            is MainAction.DismissConnectionFailure -> ConnectionFailureState.clear(action.failure)
+            is MainAction.RetryConnectionFailure -> {
+                if (ConnectionFailureState.clear(action.failure)) {
+                    _effects.tryEmit(MainEffect.RetryConnection)
+                }
+            }
+            is MainAction.OpenConnectionResources -> {
+                if (ConnectionFailureState.failure.value !== action.failure) return
+                val filename = action.failure.geodata?.filename ?: return
+                if (filename == "geoip.dat" || filename == "geosite.dat") {
+                    _effects.tryEmit(MainEffect.OpenConnectionResources(filename))
+                }
+            }
             is MainAction.PingResultReceived -> updatePingResult(action.operationId, action.profileId, action.result)
             is MainAction.PingFinished -> finishPing(action.operationId)
             is MainAction.SelectProfile -> {

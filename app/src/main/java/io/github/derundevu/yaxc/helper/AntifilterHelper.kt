@@ -14,17 +14,15 @@ object AntifilterHelper {
         return parseRules(file.readText())
     }
 
-    fun installValidated(source: File, target: File): Int {
+    fun installValidated(source: File, target: File, beforeCommit: () -> Unit = {}): Int {
         val rules = readRules(source)
         if (rules.isEmpty()) {
             throw IllegalArgumentException("Antifilter list is empty")
         }
 
-        val validated = File(target.parentFile, "${target.name}.validated")
-        validated.writeText(rules.joinToString(separator = "\n", postfix = "\n"))
-        if (!validated.renameTo(target)) {
-            target.writeText(validated.readText())
-            validated.delete()
+        replaceFileAtomically(target) { validated ->
+            validated.writeText(rules.joinToString(separator = "\n", postfix = "\n"))
+            beforeCommit()
         }
         return rules.size
     }
@@ -45,8 +43,8 @@ object AntifilterHelper {
         val prefix = parts.getOrNull(1)?.trim()
 
         return when {
-            address.contains('.') -> normalizeIpv4Rule(address, prefix, value, lineNumber)
             address.contains(':') -> normalizeIpv6Rule(address, prefix, value, lineNumber)
+            address.contains('.') -> normalizeIpv4Rule(address, prefix, value, lineNumber)
             else -> invalid(value, lineNumber)
         }
     }
@@ -59,7 +57,9 @@ object AntifilterHelper {
     ): String {
         if (!isValidIpv4Address(address)) invalid(rawValue, lineNumber)
         val normalizedPrefix = prefix?.toIntOrNull()
-        if (prefix != null && normalizedPrefix !in 0..32) invalid(rawValue, lineNumber)
+        if (prefix != null && (prefix.any { it !in '0'..'9' } || normalizedPrefix !in 0..32)) {
+            invalid(rawValue, lineNumber)
+        }
         return if (prefix == null) address else "$address/$normalizedPrefix"
     }
 
@@ -69,10 +69,13 @@ object AntifilterHelper {
         rawValue: String,
         lineNumber: Int,
     ): String {
+        if (address.contains('%')) invalid(rawValue, lineNumber)
         val parsed = runCatching { InetAddress.getByName(address) }.getOrNull()
         if (parsed !is Inet6Address) invalid(rawValue, lineNumber)
         val normalizedPrefix = prefix?.toIntOrNull()
-        if (prefix != null && normalizedPrefix !in 0..128) invalid(rawValue, lineNumber)
+        if (prefix != null && (prefix.any { it !in '0'..'9' } || normalizedPrefix !in 0..128)) {
+            invalid(rawValue, lineNumber)
+        }
         return if (prefix == null) address else "$address/$normalizedPrefix"
     }
 
@@ -81,6 +84,7 @@ object AntifilterHelper {
         if (parts.size != 4) return false
         return parts.all { part ->
             part.isNotEmpty() &&
+                part.all { it in '0'..'9' } &&
                 !(part.length > 1 && part.startsWith('0')) &&
                 part.toIntOrNull()?.let { it in 0..255 } == true
         }

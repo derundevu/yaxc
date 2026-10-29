@@ -5,6 +5,8 @@ import io.github.derundevu.yaxc.dto.ProfileList
 
 sealed interface MainEffect {
     data object HandleToggleVpn : MainEffect
+    data object RetryConnection : MainEffect
+    data class OpenConnectionResources(val filename: String) : MainEffect
     data class RunPing(val operationId: Long, val profileId: Long) : MainEffect
     data class RunBatchPing(
         val operationId: Long,

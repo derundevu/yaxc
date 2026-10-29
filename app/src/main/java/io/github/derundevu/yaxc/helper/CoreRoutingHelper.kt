@@ -75,12 +75,19 @@ data class CoreRoutingRule(
     val protocolsText: String = "",
     val network: CoreRoutingTransport = CoreRoutingTransport.Any,
     val outboundTag: String = "proxy",
+    /** Disabled drafts are absent from native JSON, so the UI sidecar retains their opaque-rule boundary. */
+    val opaqueRulesBefore: Int? = null,
 )
+
+sealed interface CoreRoutingRuleSlot {
+    data class Editable(val id: String) : CoreRoutingRuleSlot
+    data class Preserved(val json: JSONObject) : CoreRoutingRuleSlot
+}
 
 data class ParsedCoreRouting(
     val domainStrategy: String,
     val rules: List<CoreRoutingRule>,
-    val preservedRules: List<JSONObject>,
+    val ruleOrder: List<CoreRoutingRuleSlot>,
     val preservedTopLevel: JSONObject,
     val unsupportedRuleCount: Int,
 )
@@ -140,11 +147,7 @@ fe80::/10
             network = CoreRoutingTransport.Udp,
             outboundTag = "block",
         ),
-        CoreRoutingRule(
-            name = "RU IP direct",
-            ipsText = DEFAULT_RU_IP_VALUES,
-            outboundTag = "direct",
-        ),
+        defaultRuIpRule(),
         CoreRoutingRule(
             name = "RU domain direct",
             domainsText = DEFAULT_RU_DOMAIN_VALUES,
@@ -155,6 +158,12 @@ fe80::/10
             ipsText = DEFAULT_PRIVATE_IP_VALUES.trimIndent(),
             outboundTag = "block",
         ),
+    )
+
+    internal fun defaultRuIpRule(): CoreRoutingRule = CoreRoutingRule(
+        name = "RU IP direct",
+        ipsText = DEFAULT_RU_IP_VALUES,
+        outboundTag = "direct",
     )
 
     fun parseUiRules(raw: String): List<CoreRoutingRule> {
@@ -177,15 +186,26 @@ fe80::/10
     }
 
     fun shouldUpgradeSeededDefaults(rules: List<CoreRoutingRule>): Boolean {
-        if (containsDefaultRuIpRule(rules)) return false
         if (rules.size != 4) return false
-        return containsDefaultRuDomainRule(rules) &&
-            containsDefaultPrivateRule(rules) &&
-            containsDefaultBitTorrentRule(rules) &&
-            containsDefaultUdp443BlockRule(rules)
+        return matchesDefaultRule(rules[0], protocolsText = "bittorrent", outboundTag = "direct") &&
+            matchesDefaultRule(rules[1], portsText = "443", network = CoreRoutingTransport.Udp, outboundTag = "block") &&
+            matchesDefaultRule(rules[2], domainsText = DEFAULT_RU_DOMAIN_VALUES, outboundTag = "direct") &&
+            matchesDefaultRule(rules[3], ipsText = DEFAULT_PRIVATE_IP_VALUES, outboundTag = "block")
     }
 
-    fun encodeUiRules(rules: List<CoreRoutingRule>): String {
+    fun encodeUiRules(
+        rules: List<CoreRoutingRule>,
+        ruleOrder: List<CoreRoutingRuleSlot> = emptyList(),
+    ): String {
+        val opaquePositions = if (rules.any { !it.enabled } && ruleOrder.any { it is CoreRoutingRuleSlot.Preserved }) {
+            val positions = mutableMapOf<String, Int>()
+            var opaqueCount = 0
+            forEachOrderedRule(rules, ruleOrder,
+                onRule = { if (!it.enabled) positions[it.id] = opaqueCount },
+                onPreserved = { opaqueCount += 1 },
+            )
+            positions
+        } else emptyMap()
         val array = JSONArray()
         rules.forEach { rule ->
             array.put(
@@ -200,6 +220,7 @@ fe80::/10
                     .put("protocolsText", rule.protocolsText)
                     .put("network", rule.network.name)
                     .put("outboundTag", rule.outboundTag)
+                    .apply { opaquePositions[rule.id]?.let { put("opaqueRulesBefore", it) } }
             )
         }
         return array.toString()
@@ -221,30 +242,14 @@ fe80::/10
             }
         }
 
-        val rules = mutableListOf<CoreRoutingRule>()
-        val preservedRules = mutableListOf<JSONObject>()
-        var unsupportedRuleCount = 0
-        for (index in 0 until rulesArray.length()) {
-            val ruleObject = rulesArray.optJSONObject(index) ?: continue
-            val parsedRule = parseRule(ruleObject, index, defaultRuleName)
-            if (parsedRule != null) {
-                rules.add(parsedRule)
-            } else {
-                unsupportedRuleCount += 1
-                preservedRules.add(JSONObject(ruleObject.toString()))
-            }
-        }
-
-        val finalRules = applyStoredUiState(
-            parsedRules = migrateLegacyRules(rules),
-            storedUiRules = migrateLegacyRules(storedUiRules),
+        val parsed = parseImportedRulesArray(
+            rulesArray,
+            json.optString("domainStrategy").ifBlank { DEFAULT_DOMAIN_STRATEGY },
+            defaultRuleName,
         )
-        return ParsedCoreRouting(
-            domainStrategy = json.optString("domainStrategy").ifBlank { DEFAULT_DOMAIN_STRATEGY },
-            rules = finalRules,
-            preservedRules = preservedRules,
-            preservedTopLevel = preservedTopLevel,
-            unsupportedRuleCount = unsupportedRuleCount,
+        return applyStoredUiState(
+            parsed = parsed.copy(preservedTopLevel = preservedTopLevel),
+            storedUiRules = migrateLegacyRules(storedUiRules),
         )
     }
 
@@ -258,6 +263,9 @@ fe80::/10
             is JSONArray -> parseImportedRulesArray(root, fallbackDomainStrategy, defaultRuleName)
             is JSONObject -> {
                 if (root.has("rules") || root.has("domainStrategy")) {
+                    if (root.optString("domainStrategy").isBlank()) {
+                        root.put("domainStrategy", fallbackDomainStrategy)
+                    }
                     parseRoutingJson(
                         rawJson = root.toString(),
                         defaultRuleName = defaultRuleName,
@@ -278,17 +286,13 @@ fe80::/10
     fun buildRoutingJson(
         domainStrategy: String,
         rules: List<CoreRoutingRule>,
-        preservedRules: List<JSONObject> = emptyList(),
+        ruleOrder: List<CoreRoutingRuleSlot> = emptyList(),
         preservedTopLevel: JSONObject = JSONObject(),
     ): String {
         val routing = JSONObject(preservedTopLevel.toString())
         routing.put("domainStrategy", domainStrategy.ifBlank { DEFAULT_DOMAIN_STRATEGY })
 
-        val rulesArray = JSONArray()
-        rules.forEach { rule ->
-            buildRule(rule)?.let(rulesArray::put)
-        }
-        preservedRules.forEach { rulesArray.put(JSONObject(it.toString())) }
+        val rulesArray = buildOrderedRules(rules, ruleOrder, ::buildRule)
 
         if (rulesArray.length() > 0 || routing.length() > 0) {
             routing.put("rules", rulesArray)
@@ -300,12 +304,50 @@ fe80::/10
     fun buildRulesExchangeJson(
         rules: List<CoreRoutingRule>,
         defaultRuleName: String = "Rule",
+        ruleOrder: List<CoreRoutingRuleSlot> = emptyList(),
     ): String {
-        val array = JSONArray()
-        rules.forEach { rule ->
-            buildExchangeRule(rule, defaultRuleName)?.let(array::put)
-        }
+        val array = buildOrderedRules(rules, ruleOrder) { buildExchangeRule(it, defaultRuleName) }
         return array.toString(4)
+    }
+
+    private inline fun buildOrderedRules(
+        rules: List<CoreRoutingRule>,
+        ruleOrder: List<CoreRoutingRuleSlot>,
+        build: (CoreRoutingRule) -> JSONObject?,
+    ): JSONArray {
+        val array = JSONArray()
+        forEachOrderedRule(rules, ruleOrder,
+            onRule = { build(it)?.let(array::put) },
+            onPreserved = { array.put(it) },
+        )
+        return array
+    }
+
+    private inline fun forEachOrderedRule(
+        rules: List<CoreRoutingRule>,
+        ruleOrder: List<CoreRoutingRuleSlot>,
+        onRule: (CoreRoutingRule) -> Unit,
+        onPreserved: (JSONObject) -> Unit,
+    ) {
+        if (ruleOrder.none { it is CoreRoutingRuleSlot.Preserved }) {
+            rules.forEach(onRule)
+            return
+        }
+        // Opaque slots keep their priority while surviving editable slots follow the visual order.
+        val remainingSlots = rules.mapTo(mutableSetOf()) { it.id }
+        val orderedIds = mutableSetOf<String>()
+        ruleOrder.forEach { if (it is CoreRoutingRuleSlot.Editable) orderedIds.add(it.id) }
+        var nextRuleIndex = 0
+        ruleOrder.forEach { slot ->
+            when (slot) {
+                is CoreRoutingRuleSlot.Editable -> if (remainingSlots.remove(slot.id)) {
+                    while (rules[nextRuleIndex].id !in orderedIds) nextRuleIndex += 1
+                    onRule(rules[nextRuleIndex++])
+                }
+                is CoreRoutingRuleSlot.Preserved -> onPreserved(slot.json)
+            }
+        }
+        rules.forEach { if (it.id !in orderedIds) onRule(it) }
     }
 
     fun isMeaningfulRoutingJson(json: String): Boolean {
@@ -313,7 +355,8 @@ fe80::/10
         if (routing.length() == 0) return false
         if (routing.optJSONArray("rules")?.length() ?: 0 > 0) return true
         val domainStrategy = routing.optString("domainStrategy").ifBlank { DEFAULT_DOMAIN_STRATEGY }
-        return routing.length() > 1 || domainStrategy != DEFAULT_DOMAIN_STRATEGY
+        return domainStrategy != DEFAULT_DOMAIN_STRATEGY ||
+            routing.keys().asSequence().any { it != "domainStrategy" && it != "rules" }
     }
 
     private fun parseUiRuleItem(item: JSONObject): CoreRoutingRule {
@@ -354,6 +397,7 @@ fe80::/10
                     ?.let { rawTransport -> CoreRoutingTransport.entries.firstOrNull { it.name == rawTransport } }
                 ?: CoreRoutingTransport.Any,
             outboundTag = item.optString("outboundTag", "proxy").ifBlank { "proxy" },
+            opaqueRulesBefore = item.optInt("opaqueRulesBefore", -1).takeIf { it >= 0 },
         )
     }
 
@@ -363,6 +407,7 @@ fe80::/10
         defaultRuleName: (Int) -> String,
     ): CoreRoutingRule? {
         if (hasUnsupportedKeys(rule)) return null
+        if (!isSupportedNetwork(rule.opt("network"))) return null
 
         val domainsText = migrateDomains(extractValues(rule.opt("domain")))
         val ipsText = migrateIps(extractValues(rule.opt("ip")))
@@ -397,6 +442,21 @@ fe80::/10
             if (keys.next() !in supportedRuleKeys) return true
         }
         return false
+    }
+
+    private fun isSupportedNetwork(value: Any?): Boolean {
+        val entries = when (value) {
+            null, JSONObject.NULL -> return true
+            is String -> value.split(',').map(String::trim)
+            is JSONArray -> (0 until value.length()).map { index ->
+                value.opt(index) as? String ?: return false
+            }
+            else -> return false
+        }
+        return entries.all {
+            val normalized = it.trim().lowercase()
+            normalized.isEmpty() || normalized == "tcp" || normalized == "udp"
+        }
     }
 
     private fun extractValues(value: Any?): String {
@@ -457,7 +517,7 @@ fe80::/10
         defaultRuleName: (Int) -> String,
     ): ParsedCoreRouting {
         val rules = mutableListOf<CoreRoutingRule>()
-        val preservedRules = mutableListOf<JSONObject>()
+        val ruleOrder = mutableListOf<CoreRoutingRuleSlot>()
         var unsupportedRuleCount = 0
 
         for (index in 0 until rulesArray.length()) {
@@ -465,34 +525,39 @@ fe80::/10
             val parsedRule = parseRule(ruleObject, index, defaultRuleName)
             if (parsedRule != null) {
                 rules.add(parsedRule)
+                ruleOrder.add(CoreRoutingRuleSlot.Editable(parsedRule.id))
             } else {
                 unsupportedRuleCount += 1
-                preservedRules.add(JSONObject(ruleObject.toString()))
+                ruleOrder.add(CoreRoutingRuleSlot.Preserved(JSONObject(ruleObject.toString())))
             }
         }
 
         return ParsedCoreRouting(
             domainStrategy = domainStrategy.ifBlank { DEFAULT_DOMAIN_STRATEGY },
             rules = rules,
-            preservedRules = preservedRules,
+            ruleOrder = ruleOrder,
             preservedTopLevel = JSONObject(),
             unsupportedRuleCount = unsupportedRuleCount,
         )
     }
 
     private fun applyStoredUiState(
-        parsedRules: List<CoreRoutingRule>,
+        parsed: ParsedCoreRouting,
         storedUiRules: List<CoreRoutingRule>,
-    ): List<CoreRoutingRule> {
-        if (storedUiRules.isEmpty()) return parsedRules
+    ): ParsedCoreRouting {
+        if (storedUiRules.isEmpty()) return parsed
 
         val unmatchedStoredRules = storedUiRules.toMutableList()
-        val mappedRules = parsedRules.map { rule ->
-            val matchIndex = unmatchedStoredRules.indexOfFirst { stored -> sameRuleShape(rule, stored) }
+        val restoredIds = mutableMapOf<String, String>()
+        val mappedRules = parsed.rules.map { rule ->
+            val matchIndex = unmatchedStoredRules.indexOfFirst { stored ->
+                stored.enabled == rule.enabled && sameRuleShape(rule, stored)
+            }
             if (matchIndex == -1) {
                 rule
             } else {
                 val stored = unmatchedStoredRules.removeAt(matchIndex)
+                restoredIds[rule.id] = stored.id
                 rule.copy(
                     id = stored.id,
                     name = stored.name.ifBlank { rule.name },
@@ -500,8 +565,58 @@ fe80::/10
                 )
             }
         }
-        val disabledOnlyRules = unmatchedStoredRules.filterNot { it.enabled }
-        return mappedRules + disabledOnlyRules
+        val mappedIds = mappedRules.mapTo(mutableSetOf()) { it.id }
+        val disabledBefore = mutableMapOf<String?, MutableList<CoreRoutingRule>>()
+        var nextId: String? = null
+        storedUiRules.asReversed().forEach { stored ->
+            if (stored.id in mappedIds) {
+                nextId = stored.id
+            } else if (!stored.enabled) {
+                disabledBefore.getOrPut(nextId) { mutableListOf() }.add(stored)
+            }
+        }
+        val rules = buildList {
+            mappedRules.forEach { rule ->
+                disabledBefore[rule.id]?.asReversed()?.let(::addAll)
+                add(rule)
+            }
+            disabledBefore[null]?.asReversed()?.let(::addAll)
+        }
+        val order = mutableListOf<CoreRoutingRuleSlot>()
+        parsed.ruleOrder.forEach { slot ->
+            if (slot is CoreRoutingRuleSlot.Editable) {
+                val id = restoredIds[slot.id] ?: slot.id
+                disabledBefore[id]?.asReversed()?.forEach { order.add(CoreRoutingRuleSlot.Editable(it.id)) }
+                order.add(CoreRoutingRuleSlot.Editable(id))
+            } else {
+                order.add(slot)
+            }
+        }
+        disabledBefore[null]?.asReversed()?.forEach { order.add(CoreRoutingRuleSlot.Editable(it.id)) }
+        if (rules.any { !it.enabled && it.opaqueRulesBefore != null }) {
+            val positions = mutableMapOf<String, Int>()
+            rules.forEachIndexed { index, rule -> positions[rule.id] = index }
+            rules.forEach { rule ->
+                if (rule.enabled || rule.id in mappedIds) return@forEach
+                val boundary = rule.opaqueRulesBefore?.coerceAtMost(parsed.unsupportedRuleCount) ?: return@forEach
+                order.removeAll { it is CoreRoutingRuleSlot.Editable && it.id == rule.id }
+                var opaqueCount = 0
+                var insertion = order.size
+                for ((index, slot) in order.withIndex()) {
+                    if (slot is CoreRoutingRuleSlot.Preserved) {
+                        if (opaqueCount == boundary) { insertion = index; break }
+                        opaqueCount += 1
+                    } else if (opaqueCount == boundary &&
+                        positions.getValue((slot as CoreRoutingRuleSlot.Editable).id) > positions.getValue(rule.id)
+                    ) {
+                        insertion = index
+                        break
+                    }
+                }
+                order.add(insertion, CoreRoutingRuleSlot.Editable(rule.id))
+            }
+        }
+        return parsed.copy(rules = rules, ruleOrder = order)
     }
 
     private fun sameRuleShape(first: CoreRoutingRule, second: CoreRoutingRule): Boolean {
@@ -568,47 +683,28 @@ fe80::/10
             .filter(String::isNotEmpty)
     }
 
-    private fun containsDefaultRuIpRule(rules: List<CoreRoutingRule>): Boolean {
-        return rules.any { rule ->
-            normalizeList(rule.ipsText) == listOf(DEFAULT_RU_IP_VALUES) &&
-                rule.outboundTag.trim() == "direct"
-        }
-    }
-
-    private fun containsDefaultRuDomainRule(rules: List<CoreRoutingRule>): Boolean {
-        return rules.any { rule ->
-            normalizeList(rule.domainsText) == listOf(DEFAULT_RU_DOMAIN_VALUES) &&
-                rule.outboundTag.trim() == "direct"
-        }
-    }
-
-    private fun containsDefaultPrivateRule(rules: List<CoreRoutingRule>): Boolean {
-        return rules.any { rule ->
-            normalizeList(rule.ipsText) == normalizeList(DEFAULT_PRIVATE_IP_VALUES) &&
-                rule.outboundTag.trim() == "block"
-        }
-    }
-
-    private fun containsDefaultBitTorrentRule(rules: List<CoreRoutingRule>): Boolean {
-        return rules.any { rule ->
-            normalizeList(rule.protocolsText) == listOf("bittorrent") &&
-                rule.outboundTag.trim() == "direct"
-        }
-    }
-
-    private fun containsDefaultUdp443BlockRule(rules: List<CoreRoutingRule>): Boolean {
-        return rules.any { rule ->
-            normalizePortList(rule.portsText) == listOf("443") &&
-                rule.network == CoreRoutingTransport.Udp &&
-                rule.outboundTag.trim() == "block"
-        }
-    }
+    private fun matchesDefaultRule(
+        rule: CoreRoutingRule,
+        domainsText: String = "",
+        ipsText: String = "",
+        portsText: String = "",
+        protocolsText: String = "",
+        network: CoreRoutingTransport = CoreRoutingTransport.Any,
+        outboundTag: String,
+    ): Boolean = rule.enabled &&
+        rule.network == network &&
+        rule.outboundTag.trim() == outboundTag &&
+        normalizeList(rule.domainsText) == normalizeList(domainsText) &&
+        normalizeList(rule.ipsText) == normalizeList(ipsText) &&
+        normalizePortList(rule.portsText) == normalizePortList(portsText) &&
+        normalizePortList(rule.sourcePortsText).isEmpty() &&
+        normalizeList(rule.protocolsText) == normalizeList(protocolsText)
 }
 
 private fun CoreRoutingRule.hasAnyMatchers(): Boolean {
     return domainsText.isNotBlank() ||
         ipsText.isNotBlank() ||
-        portsText.isNotBlank() ||
-        sourcePortsText.isNotBlank() ||
+        portsText.any { !it.isWhitespace() && it != ',' } ||
+        sourcePortsText.any { !it.isWhitespace() && it != ',' } ||
         protocolsText.isNotBlank()
 }

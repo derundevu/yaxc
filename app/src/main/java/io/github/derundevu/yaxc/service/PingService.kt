@@ -26,7 +26,7 @@ abstract class PingService : Service() {
         val id = message.data.getLong(ID)
         when (message.what) {
             START -> startMeasurement(id, message.data, message.replyTo)
-            CANCEL -> XrayCore.cancelPing(id)
+            CANCEL -> if (id in requests) cancelMeasurement(id)
         }
         true
     })
@@ -35,25 +35,25 @@ abstract class PingService : Service() {
 
     private fun startMeasurement(id: Long, data: Bundle, reply: Messenger?) {
         if (reply == null) return
+        // A duplicate START must not acknowledge an ID whose native request is still running.
+        if (id in requests) return
         // The client waits for cancellation acknowledgement before submitting its next request.
         if (requests.isNotEmpty()) {
             sendResult(reply, id, error = getString(R.string.pingFailedGeneric))
             return
         }
         requests.add(id)
-        XrayCore.preparePing(id)
+        try {
+            prepareMeasurement(id)
+        } catch (error: Exception) {
+            requests.remove(id)
+            sendResult(reply, id, error = error.message ?: getString(R.string.pingFailedGeneric))
+            return
+        }
         scope.launch {
             try {
                 val result = withContext(nativeDispatcher) {
-                    XrayCore.pingPrepared(
-                        id,
-                        filesDir.absolutePath,
-                        data.getString(CONFIG).orEmpty(),
-                        data.getInt(TIMEOUT).toLong(),
-                        data.getString(URL).orEmpty(),
-                        data.getString(PROXY).orEmpty(),
-                        data.getString(TYPE).orEmpty(),
-                    )
+                    measurePrepared(id, data)
                 }
                 sendResult(reply, id, result = result)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -65,6 +65,20 @@ abstract class PingService : Service() {
             }
         }
     }
+
+    protected open fun prepareMeasurement(id: Long) = XrayCore.preparePing(id)
+
+    protected open fun measurePrepared(id: Long, data: Bundle): String = XrayCore.pingPrepared(
+        id,
+        filesDir.absolutePath,
+        data.getString(CONFIG).orEmpty(),
+        data.getInt(TIMEOUT).toLong(),
+        data.getString(URL).orEmpty(),
+        data.getString(PROXY).orEmpty(),
+        data.getString(TYPE).orEmpty(),
+    )
+
+    protected open fun cancelMeasurement(id: Long) = XrayCore.cancelPing(id)
 
     private fun sendResult(reply: Messenger, id: Long, result: String? = null, error: String? = null) {
         val message = Message.obtain(null, RESULT).apply {
@@ -82,12 +96,12 @@ abstract class PingService : Service() {
     }
 
     override fun onUnbind(intent: Intent): Boolean {
-        requests.forEach(XrayCore::cancelPing)
+        requests.forEach(::cancelMeasurement)
         return false
     }
 
     override fun onDestroy() {
-        requests.forEach(XrayCore::cancelPing)
+        requests.forEach(::cancelMeasurement)
         scope.cancel()
         super.onDestroy()
     }

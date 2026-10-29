@@ -13,17 +13,11 @@ class LinkRepository(private val linkDao: LinkDao) {
     }
 
     suspend fun insert(link: Link) {
-        if (link.id == 0L) {
-            link.position = linkDao.nextPosition()
-        }
-        linkDao.insert(link)
+        linkDao.insertAtEnd(link)
     }
 
     suspend fun insertAndGetId(link: Link): Long {
-        if (link.id == 0L) {
-            link.position = linkDao.nextPosition()
-        }
-        return linkDao.insert(link)
+        return linkDao.insertAtEnd(link)
     }
 
     suspend fun update(link: Link) {

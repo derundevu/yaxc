@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -54,12 +55,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.outlined.Subject
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
@@ -71,19 +76,24 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.ToggleOn
 import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -109,17 +119,21 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.shape.CircleShape
@@ -130,6 +144,8 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
+import io.github.derundevu.yaxc.helper.ConnectionFailure
+import io.github.derundevu.yaxc.helper.GeodataProblem
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
@@ -168,6 +184,7 @@ fun MainScreen(
     selectedTabId: Long,
     selectedSourceId: Long,
     isRunning: Boolean,
+    connectionFailure: ConnectionFailure?,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
     selectedSourceLastRefreshedAt: Long?,
@@ -365,6 +382,110 @@ fun MainScreen(
             }
         }
     }
+
+    connectionFailure?.let { failure ->
+        key(failure) {
+            ConnectionFailureDialog(failure = failure, onAction = onAction)
+        }
+    }
+}
+
+@Composable
+private fun ConnectionFailureDialog(
+    failure: ConnectionFailure,
+    onAction: (MainAction) -> Unit,
+) {
+    val geodata = failure.geodata?.takeIf {
+        it.filename == "geoip.dat" || it.filename == "geosite.dat"
+    }
+    var showDiagnostic by rememberSaveable(failure) { mutableStateOf(geodata == null) }
+    val geodataMessage = when (geodata?.problem) {
+        GeodataProblem.Missing -> stringResource(
+            R.string.connectionGeodataMissing,
+            geodata.filename,
+        )
+        GeodataProblem.Invalid -> stringResource(
+            R.string.connectionGeodataInvalid,
+            geodata.filename,
+        )
+        GeodataProblem.MissingGroup -> {
+            val group = geodata.group?.takeIf { it.isNotBlank() }
+            if (group != null) {
+                stringResource(R.string.connectionGeodataMissingGroup, geodata.filename, group)
+            } else {
+                stringResource(R.string.connectionGeodataMissingUnknownGroup, geodata.filename)
+            }
+        }
+        GeodataProblem.Unreadable -> stringResource(
+            R.string.connectionGeodataUnreadable,
+            geodata.filename,
+        )
+        null -> null
+    }
+
+    AlertDialog(
+        onDismissRequest = {},
+        icon = {
+            Icon(
+                imageVector = Icons.Outlined.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+        },
+        title = { Text(text = stringResource(R.string.connectionFailedTitle)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 360.dp)
+                    .testTag("connection-failure:body")
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.sm),
+            ) {
+                if (geodataMessage != null) {
+                    Text(
+                        text = geodataMessage,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(R.string.connectionGeodataRecovery),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    FilledTonalButton(
+                        onClick = { onAction(MainAction.OpenConnectionResources(failure)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(text = stringResource(R.string.connectionResources))
+                    }
+                    TextButton(onClick = { showDiagnostic = !showDiagnostic }) {
+                        Text(text = stringResource(R.string.connectionDiagnostic))
+                    }
+                }
+                if (showDiagnostic) {
+                    SelectionContainer {
+                        Text(
+                            text = failure.diagnostic,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onAction(MainAction.RetryConnectionFailure(failure)) }) {
+                Text(text = stringResource(R.string.connectionRetry))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onAction(MainAction.DismissConnectionFailure(failure)) }) {
+                Text(text = stringResource(R.string.connectionDismiss))
+            }
+        },
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+        ),
+    )
 }
 
 private fun reorderedSourceIds(
@@ -633,7 +754,7 @@ private fun ConnectContent(
             )
         }
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag("main:profiles"),
             state = listState,
             overscrollEffect = scrollOnlyEffect,
             contentPadding = PaddingValues(
@@ -1742,6 +1863,7 @@ private fun SourceGroupHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .testTag("source:${source.id}")
             .onSizeChanged { onHeaderHeight(it.height) }
             .yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onToggleExpanded)
             .padding(vertical = 4.dp),
@@ -1751,7 +1873,8 @@ private fun SourceGroupHeader(
         Row(
             modifier = Modifier
                 .weight(1f)
-                .then(dragModifier),
+                .then(dragModifier)
+                .testTag("source:${source.id}:drag"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -1855,6 +1978,8 @@ private fun ProfileCard(
 
     YaxcGlassPanel(
         modifier = Modifier
+            .testTag("profile:${profile.profile.id}")
+            .semantics { selected = isSelected }
             .scale(pressScale)
             .clickable(
                 interactionSource = interactionSource,
@@ -1906,6 +2031,7 @@ private fun ProfileCard(
                     onClick = { actionsExpanded = true },
                     containerSize = 34.dp,
                     iconSize = 16.dp,
+                    modifier = Modifier.testTag("profile:${profile.profile.id}:menu"),
                 )
                 YaxcLiquidDropdownMenu(
                     expanded = actionsExpanded,
@@ -2023,9 +2149,10 @@ private fun ActionBubble(
     iconSize: androidx.compose.ui.unit.Dp = 20.dp,
     loading: Boolean = false,
     contentDescription: String? = null,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = Modifier.yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onClick),
+        modifier = modifier.yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onClick),
         color = yaxcSoftFill(darkAlpha = 0.08f, lightAlpha = 0.84f),
         shape = MaterialTheme.shapes.large,
         tonalElevation = 0.dp,

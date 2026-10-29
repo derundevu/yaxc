@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -42,6 +43,7 @@ data class AppUpdateUiState(
 class AppUpdateManager(
     private val context: Context,
     private val settings: Settings,
+    private val releasesUrl: String = RELEASES_LATEST_URL,
 ) {
 
     companion object {
@@ -59,9 +61,12 @@ class AppUpdateManager(
         syncPendingDownloadState()
         uiState = uiState.copy(isChecking = true, errorMessage = null)
 
-        val release = runCatching {
+        val release = try {
             fetchLatestRelease()
-        }.getOrElse { error ->
+        } catch (cancelled: CancellationException) {
+            uiState = uiState.copy(isChecking = false)
+            throw cancelled
+        } catch (error: Exception) {
             uiState = uiState.copy(
                 isChecking = false,
                 isUpToDate = false,
@@ -128,7 +133,7 @@ class AppUpdateManager(
         }
 
         if (downloadId == 0L || pendingVersion == null) {
-            if (downloadId != 0L) clearPendingDownload(removeFromDownloadManager = true)
+            clearPendingDownload(removeFromDownloadManager = downloadId != 0L)
             uiState = uiState.copy(
                 pendingVersion = null,
                 isDownloading = false,
@@ -174,6 +179,8 @@ class AppUpdateManager(
     }
 
     fun installDownloadedUpdate(): Intent? {
+        syncPendingDownloadState()
+        if (!uiState.isReadyToInstall) return null
         val downloadId = settings.appUpdateDownloadId
         if (downloadId == 0L) return null
         val uri = downloadManager.getUriForDownloadedFile(downloadId) ?: return null
@@ -185,7 +192,7 @@ class AppUpdateManager(
     }
 
     private suspend fun fetchLatestRelease(): AppUpdateRelease? = withContext(Dispatchers.IO) {
-        val connection = URL(RELEASES_LATEST_URL).openConnection() as HttpURLConnection
+        val connection = URL(releasesUrl).openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.connectTimeout = 5000
         connection.readTimeout = 5000
@@ -238,7 +245,8 @@ class AppUpdateManager(
 
         val preferredAbis = Build.SUPPORTED_ABIS.mapNotNull(::normalizeAbi)
         preferredAbis.forEach { abi ->
-            assetList.firstOrNull { it.name.contains(abi, ignoreCase = true) }?.let { return it }
+            val token = Regex("(^|[^a-z0-9_])${Regex.escape(abi)}([^a-z0-9_]|$)", RegexOption.IGNORE_CASE)
+            assetList.firstOrNull { token.containsMatchIn(it.name) }?.let { return it }
         }
         return null
     }
@@ -291,23 +299,21 @@ class AppUpdateManager(
 }
 
 internal fun isVersionNewer(candidate: String, current: String): Boolean {
-    val left = parseVersionParts(candidate)
-    val right = parseVersionParts(current)
+    val left = parseVersionParts(candidate) ?: return false
+    val right = parseVersionParts(current) ?: return false
     val maxSize = maxOf(left.size, right.size)
     for (index in 0 until maxSize) {
-        val leftPart = left.getOrElse(index) { 0 }
-        val rightPart = right.getOrElse(index) { 0 }
+        val leftPart = left.getOrElse(index) { "0" }
+        val rightPart = right.getOrElse(index) { "0" }
+        if (leftPart.length != rightPart.length) return leftPart.length > rightPart.length
         if (leftPart != rightPart) return leftPart > rightPart
     }
     return false
 }
 
-private fun parseVersionParts(version: String): List<Int> {
-    return version
-        .trim()
-        .removePrefix("v")
-        .split('.')
-        .mapNotNull { part ->
-            part.takeWhile(Char::isDigit).takeIf(String::isNotBlank)?.toIntOrNull()
-        }
+private fun parseVersionParts(version: String): List<String>? {
+    val core = version.trim().removePrefix("v").substringBefore('-').substringBefore('+')
+    val parts = core.split('.')
+    if (parts.any { it.isEmpty() || it.any { char -> char !in '0'..'9' } }) return null
+    return parts.map { it.trimStart('0').ifEmpty { "0" } }
 }

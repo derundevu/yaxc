@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Profile::class,
     ],
     version = 9,
-    exportSchema = false,
+    exportSchema = true,
 )
 @TypeConverters(
     Link.Type.Convertor::class,
@@ -131,6 +131,17 @@ abstract class YaxcDatabase : RoomDatabase() {
             }
         }
 
+        internal val migrations: Array<Migration> = arrayOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+        )
+
         @Volatile
         private var db: YaxcDatabase? = null
 
@@ -138,16 +149,6 @@ abstract class YaxcDatabase : RoomDatabase() {
             if (db == null) {
                 synchronized(this) {
                     if (db == null) {
-                        val migrations = arrayOf(
-                            MIGRATION_1_2,
-                            MIGRATION_2_3,
-                            MIGRATION_3_4,
-                            MIGRATION_4_5,
-                            MIGRATION_5_6,
-                            MIGRATION_6_7,
-                            MIGRATION_7_8,
-                            MIGRATION_8_9,
-                        )
                         db = Room.databaseBuilder(
                             context.applicationContext,
                             YaxcDatabase::class.java,

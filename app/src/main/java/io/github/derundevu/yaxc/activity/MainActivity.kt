@@ -71,7 +71,7 @@ class MainActivity : AppCompatActivity() {
         scannerLauncher.launch(Intent(applicationContext, ScannerActivity::class.java))
     }
     private val notificationPermission = registerForActivityResult(RequestPermission()) {
-        handleToggleVpnRequest()
+        requestVpnStart()
     }
     private val linksManager = registerForActivityResult(StartActivityForResult()) {
         if (it.resultCode != RESULT_OK) return@registerForActivityResult
@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
     }
     private val vpnLauncher = registerForActivityResult(StartActivityForResult()) {
         if (it.resultCode != RESULT_OK) return@registerForActivityResult
-        toggleVpnService()
+        startVpnService()
     }
 
     private val vpnServiceEventReceiver: BroadcastReceiver = object : BroadcastReceiver() {
@@ -129,6 +129,7 @@ class MainActivity : AppCompatActivity() {
                     selectedTabId = uiState.selectedTabId,
                     selectedSourceId = uiState.selectedSourceId,
                     isRunning = uiState.isRunning,
+                    connectionFailure = uiState.connectionFailure,
                     selectedSourceName = uiState.selectedSourceName,
                     selectedSourceMetadata = uiState.selectedSourceMetadata,
                     selectedSourceLastRefreshedAt = uiState.selectedSourceLastRefreshedAt,
@@ -251,24 +252,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleToggleVpnRequest() {
+        if (mainViewModel.uiState.value.isRunning) {
+            TProxyService.stop(applicationContext)
+        } else {
+            requestVpnStart()
+        }
+    }
+
+    private fun requestVpnStart() {
         if (!settings.tun2socks || settings.transparentProxy) {
-            toggleVpnService()
+            startVpnService()
             return
         }
 
         if (!hasPostNotification()) return
-        VpnService.prepare(this).also {
-            if (it == null) {
-                toggleVpnService()
-                return
-            }
-            vpnLauncher.launch(it)
+        val permission = VpnService.prepare(this)
+        if (permission == null) {
+            startVpnService()
+        } else {
+            vpnLauncher.launch(permission)
         }
     }
 
     private fun handleEffect(effect: MainEffect) {
         when (effect) {
             MainEffect.HandleToggleVpn -> handleToggleVpnRequest()
+            MainEffect.RetryConnection -> {
+                if (TProxyService.isActive()) {
+                    TProxyService.newConfig(applicationContext)
+                } else {
+                    requestVpnStart()
+                }
+            }
+            is MainEffect.OpenConnectionResources -> {
+                startActivity(
+                    Intent(applicationContext, AssetsActivity::class.java)
+                        .putExtra(AssetsActivity.EXTRA_FOCUS_ASSET, effect.filename)
+                )
+            }
             is MainEffect.RunPing -> runPing(effect.operationId, listOf(effect.profileId))
             is MainEffect.RunBatchPing -> runPing(effect.operationId, effect.profileIds)
             MainEffect.RefreshLinks -> refreshLinks()
@@ -343,11 +364,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun toggleVpnService() {
-        if (mainViewModel.uiState.value.isRunning) {
-            TProxyService.stop(applicationContext)
-            return
-        }
+    private fun startVpnService() {
         TProxyService.start(applicationContext, false)
     }
 

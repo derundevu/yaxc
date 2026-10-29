@@ -1,14 +1,15 @@
 package io.github.derundevu.yaxc.helper
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -19,53 +20,54 @@ class DownloadHelper(
     private val callback: DownloadListener,
 ) {
 
-    fun start() {
-        scope.launch(Dispatchers.IO) {
-            var input: InputStream? = null
-            var output: OutputStream? = null
-            var connection: HttpURLConnection? = null
+    fun start(): Job = scope.launch(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
+        try {
+            connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.connect()
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                throw IOException("Expected HTTP ${HttpURLConnection.HTTP_OK} but received HTTP ${connection.responseCode}")
+            }
 
-            try {
-                connection = URL(url).openConnection() as HttpURLConnection
-                connection.connect()
-
-                if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                    throw Exception("Expected HTTP ${HttpURLConnection.HTTP_OK} but received HTTP ${connection.responseCode}")
-                }
-
-                input = connection.inputStream
-                output = FileOutputStream(file)
-
-                val fileLength = connection.contentLength
-                val data = ByteArray(4096)
-                var total: Long = 0
-                var count: Int
-                while (input.read(data).also { count = it } != -1) {
-                    total += count.toLong()
-                    if (fileLength > 0) {
-                        val progress = (total * 100 / fileLength).toInt()
-                        withContext(Dispatchers.Main) {
-                            callback.onProgress(progress)
+            val fileLength = connection.contentLengthLong
+            replaceFileAtomically(file) { staged ->
+                connection.inputStream.use { input ->
+                    staged.outputStream().use { output ->
+                        val data = ByteArray(4096)
+                        var total = 0L
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val count = input.read(data)
+                            if (count == -1) break
+                            output.write(data, 0, count)
+                            total += count
+                            if (fileLength > 0) {
+                                val progress = (total * 100 / fileLength).coerceIn(0, 100).toInt()
+                                withContext(Dispatchers.Main) {
+                                    callback.onProgress(progress)
+                                }
+                            }
+                        }
+                        if (fileLength >= 0 && total != fileLength) {
+                            throw IOException("Incomplete download: expected $fileLength bytes, received $total")
                         }
                     }
-                    output.write(data, 0, count)
                 }
-                withContext(Dispatchers.Main) {
-                    callback.onComplete()
-                }
-            } catch (exception: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback.onError(exception)
-                }
-            } finally {
-                try {
-                    output?.close()
-                    input?.close()
-                } catch (_: IOException) {
-                }
-
-                connection?.disconnect()
+                currentCoroutineContext().ensureActive()
             }
+            withContext(Dispatchers.Main) {
+                callback.onComplete()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (exception: Exception) {
+            withContext(Dispatchers.Main) {
+                callback.onError(exception)
+            }
+        } finally {
+            connection?.disconnect()
         }
     }
 

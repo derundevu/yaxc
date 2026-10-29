@@ -12,7 +12,7 @@ import io.github.derundevu.yaxc.repository.ConfigRepository
 import io.github.derundevu.yaxc.repository.LinkRepository
 import io.github.derundevu.yaxc.repository.ProfileRepository
 
-class Yaxc : Application() {
+open class Yaxc : Application() {
 
     private val yaxcDatabase by lazy { YaxcDatabase.ref(this) }
     val configRepository by lazy { ConfigRepository(yaxcDatabase.configDao(), Settings(this)) }

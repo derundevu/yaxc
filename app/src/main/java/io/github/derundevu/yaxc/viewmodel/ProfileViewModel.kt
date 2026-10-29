@@ -40,7 +40,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     }
 
     suspend fun create(profile: Profile) {
-        return profileRepository.create(profile)
+        profileRepository.create(profile)
     }
 
     suspend fun update(profile: Profile) {

@@ -3,6 +3,7 @@ package io.github.derundevu.yaxc.presentation.main
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
+import io.github.derundevu.yaxc.helper.ConnectionFailure
 
 sealed interface MainPingState {
     data object Idle : MainPingState
@@ -35,6 +36,7 @@ data class MainUiState(
     val pingAddress: String = "",
     val profilesCount: Int = 0,
     val isRunning: Boolean = false,
+    val connectionFailure: ConnectionFailure? = null,
     val pingState: MainPingState = MainPingState.Idle,
     val activeBatchPingSourceId: Long? = null,
     val batchPingCompleted: Int = 0,

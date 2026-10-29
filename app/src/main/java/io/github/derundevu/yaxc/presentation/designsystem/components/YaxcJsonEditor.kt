@@ -69,6 +69,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.doOnLayout
 import com.blacksquircle.ui.editorkit.model.SyntaxHighlightSpan
 import com.blacksquircle.ui.editorkit.plugin.autoindent.autoIndentation
 import com.blacksquircle.ui.editorkit.plugin.base.PluginSupplier
@@ -451,13 +452,25 @@ private class JsonTextProcessor(context: Context) : TextProcessor(context) {
         val y = state.scrollY
         synchronizing = true
         setTextContent(state.text)
+        clearUndoHistory()
         text?.setSpan(syntaxRedrawWatcher, 0, length(), Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         state.undoStack?.let { undoStack = it }
         state.redoStack?.let { redoStack = it }
         setSelection(start, end)
         syncedText = state.text
         synchronizing = false
-        post { if (document === state) scrollTo(x, y) }
+        doOnLayout {
+            if (document === state) {
+                val currentLayout = layout ?: return@doOnLayout
+                val maxX = if (isHorizontallyScrollableCompat()) {
+                    (currentLayout.width - width + paddingLeft + paddingRight).coerceAtLeast(0)
+                } else 0
+                val maxY = (currentLayout.height - height + paddingTop + paddingBottom).coerceAtLeast(0)
+                scrollTo(x.coerceIn(0, maxX), y.coerceIn(0, maxY))
+                state.scrollX = scrollX
+                state.scrollY = scrollY
+            }
+        }
     }
 }
 

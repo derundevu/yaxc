@@ -1,5 +1,6 @@
 package io.github.derundevu.yaxc.presentation.editor
 
+import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -173,6 +174,56 @@ class JsonEditorToolsTest {
         """.trimIndent()
 
         assertEquals(expected, JsonEditorTools.format(input, JsonRoot.Array))
+    }
+
+    @Test
+    fun boundedGeneratedDocumentsKeepEveryNonWhitespaceTokenAndFormatIdempotently() {
+        val random = Random(0x4A534F4E)
+        val atoms = listOf(
+            "null", "true", "false", "0", "-0", "1e+007", "-0.000E-999",
+            "900719925474099312345678901234567890", "\"spaces inside strings stay\"",
+            "\"quote:\\\" slash:\\/ backslash:\\\\\"", "\"\\u0061\\n\\t😀\"",
+        )
+        fun value(depth: Int): String {
+            if (depth == 0 || random.nextInt(3) == 0) return atoms.random(random)
+            val children = List(random.nextInt(4)) { value(depth - 1) }
+            return if (random.nextBoolean()) children.joinToString(", \r\n\t", "[ ", " ]")
+            else children.mapIndexed { index, child -> "\"unknown${index % 2}\" \t: $child" }
+                .joinToString(",\r\n", "{ ", " }")
+        }
+
+        repeat(200) { iteration ->
+            val payload = value(4)
+            val input = if (iteration % 2 == 0) {
+                """{ "unknown":$payload, "duplicate":1e+007,"duplicate":-0 }"""
+            } else {
+                "[ $payload, {}, [] ]"
+            }
+            val root = if (iteration % 2 == 0) JsonRoot.Object else JsonRoot.Array
+            val formatted = JsonEditorTools.format(input, root)
+
+            assertEquals("Generated case $iteration", withoutJsonWhitespace(input), withoutJsonWhitespace(formatted))
+            assertNull("Generated case $iteration", JsonEditorTools.validate(formatted, root))
+            assertEquals("Generated case $iteration", formatted, JsonEditorTools.format(formatted, root))
+        }
+    }
+
+    private fun withoutJsonWhitespace(text: String): String = buildString {
+        var inString = false
+        var escaped = false
+        for (char in text) {
+            if (inString) {
+                append(char)
+                when {
+                    escaped -> escaped = false
+                    char == '\\' -> escaped = true
+                    char == '"' -> inString = false
+                }
+            } else if (char == '"') {
+                append(char)
+                inString = true
+            } else if (char !in " \t\r\n") append(char)
+        }
     }
 
     private data class InvalidInput(val text: String, val root: JsonRoot, val offset: Int)

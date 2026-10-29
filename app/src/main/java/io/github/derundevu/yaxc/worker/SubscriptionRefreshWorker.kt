@@ -5,6 +5,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 class SubscriptionRefreshWorker(
     appContext: Context,
@@ -14,11 +17,14 @@ class SubscriptionRefreshWorker(
         val settings = Settings(applicationContext)
         if (!settings.refreshLinksOnOpen) return Result.success()
 
-        return runCatching {
+        return try {
             SubscriptionRefreshHelper(applicationContext, settings).refreshDueLinks()
-        }.fold(
-            onSuccess = { Result.success() },
-            onFailure = { Result.retry() },
-        )
+            Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            currentCoroutineContext().ensureActive()
+            Result.retry()
+        }
     }
 }

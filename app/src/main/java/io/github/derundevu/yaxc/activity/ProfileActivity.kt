@@ -15,6 +15,7 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
 import io.github.derundevu.yaxc.viewmodel.ProfileEditorViewModel
+import io.github.derundevu.yaxc.viewmodel.ProfileSaveResult
 import kotlinx.coroutines.launch
 
 class ProfileActivity : AppCompatActivity() {
@@ -80,8 +81,11 @@ class ProfileActivity : AppCompatActivity() {
     private fun save(check: Boolean = true) {
         if (draft.isLoading || draft.isSaving) return
         lifecycleScope.launch {
-            val error = draft.save(check)
-            if (error == null) finish() else showError(error)
+            when (val result = draft.save(check)) {
+                ProfileSaveResult.Saved -> finish()
+                ProfileSaveResult.NotReady -> Unit
+                is ProfileSaveResult.Invalid -> showError(result.message)
+            }
         }
     }
 

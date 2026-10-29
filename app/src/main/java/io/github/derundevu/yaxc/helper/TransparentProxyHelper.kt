@@ -19,7 +19,10 @@ class TransparentProxyHelper(
 
     fun startService() {
         makeConfig()
-        Shell.cmd("${cmd()} service start").exec()
+        val result = Shell.cmd("${cmd()} service start").exec()
+        check(result.isSuccess) {
+            result.err.joinToString("\n").ifBlank { "Failed to start the root Xray service" }
+        }
     }
 
     fun stopService() {
@@ -62,24 +65,30 @@ class TransparentProxyHelper(
 
     fun bypassWiFi(state: NetworkStateHelper.NetworkState): Boolean {
         val tproxyBypassWiFi = settings.tproxyBypassWiFi
-        val ssid = state.wifi ?: ""
-        return tproxyBypassWiFi.isNotEmpty() && tproxyBypassWiFi.contains(ssid)
+        val ssid = state.wifi ?: return false
+        return ssid in tproxyBypassWiFi
+    }
+
+    internal enum class NetworkAction { NONE, STOP, START, REFRESH }
+
+    internal fun networkAction(
+        state: NetworkStateHelper.NetworkState,
+        running: Boolean,
+    ): NetworkAction = when {
+        !settings.transparentProxy || !settings.tproxyAutoConnect -> NetworkAction.NONE
+        !networkStateHelper.isOnline(state) || bypassWiFi(state) -> NetworkAction.STOP
+        !running -> NetworkAction.START
+        else -> NetworkAction.REFRESH
     }
 
     fun networkUpdate(value: NetworkStateHelper.NetworkState? = null) {
-        if (!settings.tproxyAutoConnect) return
-        val state = value ?: networkState()
-        val isOnline = networkStateHelper.isOnline(state)
-        val isRunning = settings.xrayCorePid().exists()
-        if (!isOnline || bypassWiFi(state)) {
-            TProxyService.stop(context)
-            return
+        if (!settings.transparentProxy || !settings.tproxyAutoConnect) return
+        when (networkAction(value ?: networkState(), isRunning())) {
+            NetworkAction.NONE -> Unit
+            NetworkAction.STOP -> TProxyService.stop(context)
+            NetworkAction.START -> TProxyService.start(context, false)
+            NetworkAction.REFRESH -> refreshProxy()
         }
-        if (!isRunning) {
-            TProxyService.start(context, false)
-            return
-        }
-        refreshProxy()
     }
 
     fun install() {

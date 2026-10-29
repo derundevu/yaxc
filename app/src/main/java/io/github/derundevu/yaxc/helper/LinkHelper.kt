@@ -32,6 +32,7 @@ class LinkHelper(
     private var remark: String = defaultRemark()
 
     init {
+        val link = link.trim().removePrefix("\uFEFF").trim()
         val inlineConfig = parseInlineConfig(link)
         if (inlineConfig != null) {
             success = true
@@ -49,13 +50,8 @@ class LinkHelper(
                 outbound = parsedOutbound
                 remark = remark(uri, defaultRemark())
             } else {
-                val parsedFromXray = parseOutboundFromXray(link)
                 val decodedInlineConfig = parseBase64InlineConfig(link)
-                if (parsedFromXray.success && parsedFromXray.outbound != null) {
-                    success = true
-                    importedConfig = null
-                    outbound = parsedFromXray.outbound
-                } else if (decodedInlineConfig != null) {
+                if (decodedInlineConfig != null) {
                     success = true
                     importedConfig = decodedInlineConfig.config
                     outbound = decodedInlineConfig.config.optJSONArray("outbounds")
@@ -63,6 +59,7 @@ class LinkHelper(
                         ?.let(::sanitizeObject)
                     decodedInlineConfig.remark?.takeIf { it.isNotBlank() }?.let { remark = it }
                 } else {
+                    val parsedFromXray = parseOutboundFromXray(link)
                     success = parsedFromXray.success
                     importedConfig = null
                     outbound = parsedFromXray.outbound
@@ -80,7 +77,7 @@ class LinkHelper(
         fun tryDecodeBase64(value: String): String {
             return runCatching {
                 val byteArray = Base64.decode(value, Base64.DEFAULT)
-                String(byteArray)
+                byteArray.toString(StandardCharsets.UTF_8)
             }.getOrNull() ?: value
         }
     }

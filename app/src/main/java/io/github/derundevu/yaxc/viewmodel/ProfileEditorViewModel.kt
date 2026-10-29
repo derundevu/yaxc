@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,8 +24,19 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+sealed interface ProfileSaveResult {
+    data object Saved : ProfileSaveResult
+    data object NotReady : ProfileSaveResult
+    data class Invalid(val message: String) : ProfileSaveResult
+}
+
 /** Owns the raw document and metadata, never the editor View or an Activity. */
-class ProfileEditorViewModel(application: Application) : AndroidViewModel(application) {
+class ProfileEditorViewModel internal constructor(
+    application: Application,
+    private val validate: suspend (Context, String) -> String,
+) : AndroidViewModel(application) {
+    constructor(application: Application) : this(application, XrayValidationHelper::validate)
+
     private val app = getApplication<Yaxc>()
     private val settings = Settings(application)
     val document = JsonEditorState()
@@ -92,9 +104,9 @@ class ProfileEditorViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    /** Returns the real Xray validation error; null means the draft was persisted. */
-    suspend fun save(check: Boolean): String? {
-        if (isLoading || isSaving) return null
+    /** A save is successful only after the captured draft has been persisted. */
+    suspend fun save(check: Boolean): ProfileSaveResult {
+        if (isLoading || isSaving) return ProfileSaveResult.NotReady
         isSaving = true
         val snapshot = profile.copy(name = name, linkId = selectedSourceId, config = document.text)
         try {
@@ -102,7 +114,7 @@ class ProfileEditorViewModel(application: Application) : AndroidViewModel(applic
                 val error = if (check) {
                     try {
                         val merged = ConfigHelper(settings, config, snapshot.config).toString()
-                        XrayValidationHelper.validate(app, merged)
+                        validate(app, merged)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
@@ -112,11 +124,18 @@ class ProfileEditorViewModel(application: Application) : AndroidViewModel(applic
                     ""
                 }
                 if (check && error.isNotEmpty()) {
-                    error
+                    ProfileSaveResult.Invalid(error)
                 } else {
-                    if (snapshot.id == 0L) app.profileRepository.create(snapshot)
-                    else app.profileRepository.update(snapshot)
-                    null
+                    if (snapshot.id == 0L) {
+                        snapshot.id = app.profileRepository.create(snapshot)
+                        profile = snapshot
+                    } else {
+                        if (app.profileRepository.update(snapshot) == 0) {
+                            return@withContext ProfileSaveResult.Invalid(app.getString(R.string.invalidProfile))
+                        }
+                        profile = snapshot
+                    }
+                    ProfileSaveResult.Saved
                 }
             }
         } finally {

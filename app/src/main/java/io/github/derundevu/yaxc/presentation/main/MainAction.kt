@@ -1,10 +1,14 @@
 package io.github.derundevu.yaxc.presentation.main
 
 import io.github.derundevu.yaxc.dto.ProfileList
+import io.github.derundevu.yaxc.helper.ConnectionFailure
 
 sealed interface MainAction {
     data class SelectTab(val linkId: Long) : MainAction
     data class UpdateVpnStatus(val isRunning: Boolean) : MainAction
+    data class DismissConnectionFailure(val failure: ConnectionFailure) : MainAction
+    data class RetryConnectionFailure(val failure: ConnectionFailure) : MainAction
+    data class OpenConnectionResources(val failure: ConnectionFailure) : MainAction
     data class PingResultReceived(val operationId: Long, val profileId: Long, val result: String) : MainAction
     data class PingFinished(val operationId: Long) : MainAction
     data class SelectProfile(val profileId: Long, val reloadRuntime: Boolean = true) : MainAction

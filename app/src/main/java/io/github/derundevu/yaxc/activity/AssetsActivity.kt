@@ -1,5 +1,6 @@
 package io.github.derundevu.yaxc.activity
 
+import android.content.ContentResolver
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
@@ -15,17 +16,24 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.AntifilterHelper
 import io.github.derundevu.yaxc.helper.DownloadHelper
+import io.github.derundevu.yaxc.helper.replaceFileAtomically
 import io.github.derundevu.yaxc.presentation.assets.AssetCardState
 import io.github.derundevu.yaxc.presentation.assets.AssetsScreen
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.service.TProxyService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.UUID
 
 class AssetsActivity : AppCompatActivity() {
 
@@ -37,6 +45,7 @@ class AssetsActivity : AppCompatActivity() {
     }
 
     private val settings by lazy { Settings(applicationContext) }
+    private val assetJobs = mutableMapOf<AssetKind, Job>()
 
     private var geoIpState by mutableStateOf(AssetCardState(title = ""))
     private var geoSiteState by mutableStateOf(AssetCardState(title = ""))
@@ -47,14 +56,14 @@ class AssetsActivity : AppCompatActivity() {
     private var customGeoSiteUrl by mutableStateOf("")
 
     private val geoIpLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
-        writeToFile(it, geoIpFile()) {
+        writeToFile(it, geoIpFile(), AssetKind.GeoIp) {
             settings.installedGeoIpSourceLabel = getString(R.string.assetsSourceLocalFile)
             settings.installedGeoIpSourceUrl = LOCAL_ASSET_SOURCE_URL
             setAssetStatus()
         }
     }
     private val geoSiteLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
-        writeToFile(it, geoSiteFile()) {
+        writeToFile(it, geoSiteFile(), AssetKind.GeoSite) {
             settings.installedGeoSiteSourceLabel = getString(R.string.assetsSourceLocalFile)
             settings.installedGeoSiteSourceUrl = LOCAL_ASSET_SOURCE_URL
             setAssetStatus()
@@ -65,7 +74,7 @@ class AssetsActivity : AppCompatActivity() {
     }
     private val xrayCoreLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) {
         val file = settings.xrayCoreFile()
-        writeToFile(it, file) {
+        writeToFile(it, file, AssetKind.XrayCore) {
             makeExeFile(file)
             setAssetStatus()
         }
@@ -74,7 +83,8 @@ class AssetsActivity : AppCompatActivity() {
     private fun geoIpFile(): File = File(applicationContext.filesDir, "geoip.dat")
     private fun geoSiteFile(): File = File(applicationContext.filesDir, "geosite.dat")
     private fun antifilterFile(): File = settings.antifilterFile()
-    private fun antifilterTempFile(): File = File(applicationContext.filesDir, "antifilter.lst.tmp")
+    private fun newAntifilterTempFile(): File =
+        File(cacheDir, "antifilter-${UUID.randomUUID()}.lst")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,6 +103,7 @@ class AssetsActivity : AppCompatActivity() {
                     selectedGeoProvider = selectedGeoProvider,
                     customGeoIpUrl = customGeoIpUrl,
                     customGeoSiteUrl = customGeoSiteUrl,
+                    focusedAssetFilename = intent.getStringExtra(EXTRA_FOCUS_ASSET),
                     onBack = ::finish,
                     onGeoProviderSelected = { provider ->
                         selectedGeoProvider = provider
@@ -151,7 +162,7 @@ class AssetsActivity : AppCompatActivity() {
                         download(
                             AssetKind.Antifilter,
                             settings.antifilterAddress.trim(),
-                            antifilterTempFile(),
+                            newAntifilterTempFile(),
                         )
                     },
                     onAntifilterPick = { antifilterLauncher.launch(MIME_TYPE_TEXT) },
@@ -304,7 +315,7 @@ class AssetsActivity : AppCompatActivity() {
 
         setDownloadState(kind, isLoading = true, progress = 0)
 
-        DownloadHelper(lifecycleScope, url, file, object : DownloadHelper.DownloadListener {
+        val job = DownloadHelper(lifecycleScope, url, file, object : DownloadHelper.DownloadListener {
             override fun onProgress(progress: Int) {
                 updateProgress(kind, progress)
             }
@@ -312,14 +323,16 @@ class AssetsActivity : AppCompatActivity() {
             override fun onError(exception: Exception) {
                 setDownloadState(kind, isLoading = false, progress = 0)
                 if (kind == AssetKind.Antifilter) {
-                    antifilterTempFile().delete()
+                    file.delete()
                 }
                 Toast.makeText(applicationContext, exception.message, Toast.LENGTH_SHORT).show()
                 setAssetStatus()
             }
 
             override fun onComplete() {
-                setDownloadState(kind, isLoading = false, progress = 0)
+                if (kind != AssetKind.Antifilter) {
+                    setDownloadState(kind, isLoading = false, progress = 0)
+                }
                 when (kind) {
                     AssetKind.GeoIp -> {
                         settings.installedGeoIpSourceLabel = currentGeoProviderLabel()
@@ -333,6 +346,7 @@ class AssetsActivity : AppCompatActivity() {
 
                     AssetKind.Antifilter -> {
                         installAntifilterTemp(
+                            file = file,
                             sourceLabel = getString(R.string.assetsAntifilterSource),
                             sourceUrl = url.trim(),
                         )
@@ -344,6 +358,12 @@ class AssetsActivity : AppCompatActivity() {
                 setAssetStatus()
             }
         }).start()
+        assetJobs[kind] = job
+        if (kind == AssetKind.Antifilter) {
+            job.invokeOnCompletion { cause ->
+                if (cause != null) file.delete()
+            }
+        }
     }
 
     private fun updateProgress(kind: AssetKind, progress: Int) {
@@ -355,7 +375,7 @@ class AssetsActivity : AppCompatActivity() {
             AssetKind.GeoIp -> geoIpState = geoIpState.copy(isLoading = isLoading, progress = progress)
             AssetKind.GeoSite -> geoSiteState = geoSiteState.copy(isLoading = isLoading, progress = progress)
             AssetKind.Antifilter -> antifilterState = antifilterState.copy(isLoading = isLoading, progress = progress)
-            AssetKind.XrayCore -> Unit
+            AssetKind.XrayCore -> xrayCoreState = xrayCoreState.copy(isLoading = isLoading, progress = progress)
         }
     }
 
@@ -368,55 +388,84 @@ class AssetsActivity : AppCompatActivity() {
         }
     }
 
-    private fun writeToFile(uri: Uri?, file: File, cb: (() -> Unit)? = null) {
-        if (uri == null) return
-        lifecycleScope.launch {
-            contentResolver.openInputStream(uri).use { input ->
-                FileOutputStream(file).use { output ->
-                    input?.copyTo(output)
-                }
-            }
-            cb?.invoke()
-            withContext(Dispatchers.Main) {
+    private fun writeToFile(uri: Uri?, file: File, kind: AssetKind, cb: (() -> Unit)? = null) {
+        if (uri == null || isDownloadActive(kind)) return
+        setDownloadState(kind, isLoading = true, progress = 0)
+        assetJobs[kind] = lifecycleScope.launch {
+            try {
+                importAssetFromUri(contentResolver, uri, file)
+                cb?.invoke()
                 setAssetStatus()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Toast.makeText(applicationContext, error.message, Toast.LENGTH_SHORT).show()
+            } finally {
+                if (assetJobs[kind] === currentCoroutineContext().job) {
+                    setDownloadState(kind, isLoading = false, progress = 0)
+                }
             }
         }
     }
 
     private fun installAntifilterFromUri(uri: Uri?) {
         if (uri == null) return
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val tempFile = antifilterTempFile()
-                    contentResolver.openInputStream(uri).use { input ->
-                        FileOutputStream(tempFile).use { output ->
-                            (input ?: error("Could not open file")).copyTo(output)
-                        }
-                    }
-                    AntifilterHelper.installValidated(tempFile, antifilterFile()).also {
+        if (isDownloadActive(AssetKind.Antifilter)) return
+        setDownloadState(AssetKind.Antifilter, isLoading = true, progress = 0)
+        val tempFile = newAntifilterTempFile()
+        assetJobs[AssetKind.Antifilter] = lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    try {
+                        importAssetFromUri(contentResolver, uri, tempFile)
+                        val job = currentCoroutineContext().job
+                        Result.success(AntifilterHelper.installValidated(tempFile, antifilterFile()) {
+                            job.ensureActive()
+                        })
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Result.failure(error)
+                    } finally {
                         tempFile.delete()
                     }
                 }
+                handleAntifilterInstallResult(
+                    result = result,
+                    sourceLabel = getString(R.string.assetsSourceLocalFile),
+                    sourceUrl = LOCAL_ASSET_SOURCE_URL,
+                )
+            } finally {
+                if (assetJobs[AssetKind.Antifilter] === currentCoroutineContext().job) {
+                    setDownloadState(AssetKind.Antifilter, isLoading = false, progress = 0)
+                }
             }
-            handleAntifilterInstallResult(
-                result = result,
-                sourceLabel = getString(R.string.assetsSourceLocalFile),
-                sourceUrl = LOCAL_ASSET_SOURCE_URL,
-            )
         }
     }
 
-    private fun installAntifilterTemp(sourceLabel: String, sourceUrl: String) {
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    AntifilterHelper.installValidated(antifilterTempFile(), antifilterFile()).also {
-                        antifilterTempFile().delete()
+    private fun installAntifilterTemp(file: File, sourceLabel: String, sourceUrl: String) {
+        assetJobs[AssetKind.Antifilter] = lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    try {
+                        val job = currentCoroutineContext().job
+                        Result.success(AntifilterHelper.installValidated(file, antifilterFile()) {
+                            job.ensureActive()
+                        })
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Result.failure(error)
+                    } finally {
+                        file.delete()
                     }
                 }
+                handleAntifilterInstallResult(result, sourceLabel, sourceUrl)
+            } finally {
+                if (assetJobs[AssetKind.Antifilter] === currentCoroutineContext().job) {
+                    setDownloadState(AssetKind.Antifilter, isLoading = false, progress = 0)
+                }
             }
-            handleAntifilterInstallResult(result, sourceLabel, sourceUrl)
         }
     }
 
@@ -431,7 +480,6 @@ class AssetsActivity : AppCompatActivity() {
             settings.installedAntifilterRouteCount = count
             restartIfAntifilterEnabled()
         }.onFailure { error ->
-            antifilterTempFile().delete()
             Toast.makeText(applicationContext, error.message, Toast.LENGTH_SHORT).show()
         }
         setAssetStatus()
@@ -443,12 +491,18 @@ class AssetsActivity : AppCompatActivity() {
     }
 
     private fun delete(file: File, cb: (() -> Unit)? = null) {
+        val kind = when (file) {
+            geoIpFile() -> AssetKind.GeoIp
+            geoSiteFile() -> AssetKind.GeoSite
+            antifilterFile() -> AssetKind.Antifilter
+            else -> AssetKind.XrayCore
+        }
+        assetJobs.remove(kind)?.cancel()
+        setDownloadState(kind, isLoading = false, progress = 0)
         lifecycleScope.launch {
-            file.delete()
+            withContext(Dispatchers.IO) { file.delete() }
             cb?.invoke()
-            withContext(Dispatchers.Main) {
-                setAssetStatus()
-            }
+            setAssetStatus()
         }
     }
 
@@ -476,8 +530,30 @@ class AssetsActivity : AppCompatActivity() {
     }
 
     companion object {
+        const val EXTRA_FOCUS_ASSET = "io.github.derundevu.yaxc.extra.FOCUS_ASSET"
         private const val MIME_TYPE_OCTET_STREAM = "application/octet-stream"
         private const val MIME_TYPE_TEXT = "text/*"
         private const val LOCAL_ASSET_SOURCE_URL = "file://local"
+    }
+}
+
+/** Shared by all local resource pickers; provider IO and commit never run on the main thread. */
+internal suspend fun importAssetFromUri(resolver: ContentResolver, uri: Uri, target: File) {
+    withContext(Dispatchers.IO) {
+        replaceFileAtomically(target) { staged ->
+            resolver.openInputStream(uri).use { input ->
+                if (input == null) throw IOException("Could not open file")
+                staged.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count == -1) break
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            currentCoroutineContext().ensureActive()
+        }
     }
 }
