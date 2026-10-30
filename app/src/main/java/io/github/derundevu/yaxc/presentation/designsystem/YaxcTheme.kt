@@ -23,9 +23,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.presentation.designsystem.components.LocalYaxcFeedback
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackHost
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 
 enum class YaxcThemeStyle {
     System,
@@ -207,6 +211,7 @@ fun yaxcSoftOnSurface(darkAlpha: Float, lightAlpha: Float = darkAlpha): Color {
 @Composable
 fun YaxcTheme(
     style: YaxcThemeStyle = YaxcThemeStyle.System,
+    feedback: YaxcFeedbackState = remember { YaxcFeedbackState() },
     content: @Composable () -> Unit,
 ) {
     val resolvedStyle = when (style) {
@@ -251,13 +256,17 @@ fun YaxcTheme(
             LocalYaxcSpacing provides spacing,
             LocalYaxcShapes provides DefaultYaxcShapes,
             LocalYaxcContentPaddings provides DefaultYaxcContentPaddings,
-            content = content,
-        )
+            LocalYaxcFeedback provides feedback,
+        ) {
+            YaxcFeedbackHost(feedback)
+            content()
+        }
     }
 }
 
 @Composable
 fun YaxcAppTheme(
+    feedback: YaxcFeedbackState = remember { YaxcFeedbackState() },
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current.applicationContext
@@ -276,7 +285,11 @@ fun YaxcAppTheme(
         }
     }
 
-    YaxcTheme(style = themeStyle, content = content)
+    YaxcTheme(
+        style = themeStyle,
+        feedback = feedback,
+        content = content,
+    )
 }
 
 private fun midnightBlueColorScheme() = darkColorScheme(

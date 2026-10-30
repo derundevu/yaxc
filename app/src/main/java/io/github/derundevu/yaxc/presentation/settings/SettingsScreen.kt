@@ -47,7 +47,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,6 +56,8 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.LocalYaxcFeedback
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
@@ -522,16 +523,15 @@ private fun BasicSettingsTab(
     onPingTypeClick: () -> Unit,
 ) {
     val clipboardManager = LocalClipboardManager.current
-    val context = LocalContext.current
+    val feedback = LocalYaxcFeedback.current
     val resources = LocalResources.current
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     val copyToClipboard: (Int, String) -> Unit = { labelRes, value ->
         clipboardManager.setText(AnnotatedString(value))
-        android.widget.Toast.makeText(
-            context,
+        feedback.show(
             resources.getString(R.string.settingsValueCopied, resources.getString(labelRes)),
-            android.widget.Toast.LENGTH_SHORT,
-        ).show()
+            FeedbackKind.Success,
+        )
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {

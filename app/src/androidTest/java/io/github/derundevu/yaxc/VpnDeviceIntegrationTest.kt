@@ -20,16 +20,23 @@ import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.database.YaxcDatabase
 import io.github.derundevu.yaxc.helper.ConnectionFailureState
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.XrayValidationHelper
 import io.github.derundevu.yaxc.service.TProxyService
+import io.github.derundevu.yaxc.testing.ChainedStreamTarget
 import io.github.derundevu.yaxc.testing.LoopbackTarget
+import io.github.derundevu.yaxc.testing.ReloadSubscriptionTarget
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.Closeable
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.FileDescriptor
 import java.net.InetAddress
@@ -158,6 +165,101 @@ class VpnDeviceIntegrationTest {
     }
 
     @Test
+    fun oneEstablishedTcpFlowSurvivesUnchangedMetadataAndUnselectedNetworkRefreshes() = runBlocking {
+        ChainedStreamTarget(frames = 4).use { peer ->
+            profile = profile.copy(config = profileConfig(peer.port))
+            db.profileDao().update(profile)
+            start()
+            val applied = settings.xrayConfig().readBytes()
+            assertTrue(settings.xrayConfig().setLastModified(1_600_000_000_000L))
+            val timestamp = settings.xrayConfig().lastModified()
+            ShellTcpFlow(peer.port).use { flow ->
+                fun exchange(stage: String) {
+                    val payload = byteArrayOf(0, 1, 0x7f, 0xff.toByte()) + "$stage 東京\n".toByteArray()
+                    flow.assertNextChainedResponse(payload)
+                    assertArrayEquals(payload, peer.received.poll(5, TimeUnit.SECONDS))
+                    assertArrayEquals(applied, settings.xrayConfig().readBytes())
+                    assertEquals(timestamp, settings.xrayConfig().lastModified())
+                }
+
+                exchange("established-before-reload")
+                TProxyService.newConfig(context)
+                awaitUnchangedAcknowledgement(profile.name)
+                exchange("after-actual-unchanged-command")
+
+                val renamed = "Renamed by real subscription refresh"
+                ReloadSubscriptionTarget(JSONObject(profile.config).put("remarks", renamed).toString()).use { subscription ->
+                    source.address = subscription.url
+                    db.linkDao().update(source)
+                    assertEquals(
+                        SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
+                        SubscriptionRefreshHelper(context, settings).refreshLinks(source.id),
+                    )
+                    subscription.awaitServed()
+                    awaitUnchangedAcknowledgement(renamed)
+                    profile = db.profileDao().find(profile.id)
+                    source = db.linkDao().find(source.id)!!
+                    assertEquals(renamed, profile.name)
+                    assertEquals(profile.id, settings.selectedProfile)
+                    assertNotNull(source.subscriptionMetadata)
+                    assertTrue(source.lastRefreshedAt > 0L)
+                }
+                exchange("after-selected-metadata-network-refresh")
+
+                val otherSource = Link(name = "unselected-refresh-${UUID.randomUUID()}")
+                otherSource.id = db.linkDao().insertAtEnd(otherSource)
+                try {
+                    val other = Profile(linkId = otherSource.id, name = "Old unselected", config = """{"outbounds":[{"protocol":"blackhole"}]}""")
+                    other.id = db.profileDao().create(other)
+                    val refreshed = """{"remarks":"Refreshed unselected","outbounds":[{"protocol":"freedom"}]}"""
+                    ReloadSubscriptionTarget(refreshed).use { subscription ->
+                        otherSource.address = subscription.url
+                        db.linkDao().update(otherSource)
+                        assertEquals(
+                            SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
+                            SubscriptionRefreshHelper(context, settings).refreshLinks(otherSource.id),
+                        )
+                        subscription.awaitServed()
+                        awaitUnchangedAcknowledgement(renamed)
+                        val stored = db.profileDao().linkProfiles(otherSource.id).single()
+                        assertEquals(other.id, stored.id)
+                        assertEquals("Refreshed unselected", stored.name)
+                        assertEquals("freedom", JSONObject(stored.config).getJSONArray("outbounds").getJSONObject(0).getString("protocol"))
+                        assertEquals(profile.id, settings.selectedProfile)
+                    }
+                    exchange("after-unselected-network-refresh")
+                } finally {
+                    db.linkDao().delete(otherSource)
+                }
+                peer.awaitFinished()
+            }
+        }
+        // A real effective change must still replace the core and apply the new destination.
+        ReloadSubscriptionTarget(JSONObject(profileConfig()).put("remarks", profile.name).toString()).use { subscription ->
+            source.address = subscription.url
+            db.linkDao().update(source)
+            assertEquals(
+                SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
+                SubscriptionRefreshHelper(context, settings).refreshLinks(source.id),
+            )
+            subscription.awaitServed()
+            await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+            requireTunTransfer("after-effective-config-refresh")
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            assertFalse(events.any {
+                it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME ||
+                    it.action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME ||
+                    it.action == TProxyService.STOP_VPN_SERVICE_ACTION_NAME
+            })
+        }
+        assertNull(ConnectionFailureState.failure.value)
+        assertTrue(TProxyService.isActive())
+        TProxyService.stop(context)
+        await(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        requireSocksListenerReleased()
+    }
+
+    @Test
     fun stopTearsDownTunWhileNativeValidationWaitsForItsLogSink() = runBlocking {
         start()
         requireTunTransfer("before-blocked-validation")
@@ -251,17 +353,62 @@ class VpnDeviceIntegrationTest {
         assertEquals("/vpn-$stage", request.path)
     }
 
-    private fun profileConfig(): String = """{
+    private fun profileConfig(destinationPort: Int = target.port): String = """{
         "log":{"loglevel":"none"},
         "outbounds":[
-            {"tag":"proxy","protocol":"freedom","settings":{"redirect":"127.0.0.1:${target.port}","finalRules":[{"action":"allow","ip":["127.0.0.1/32"],"port":"${target.port}"}]}},
+            {"tag":"proxy","protocol":"freedom","settings":{"redirect":"127.0.0.1:$destinationPort","finalRules":[{"action":"allow","ip":["127.0.0.1/32"],"port":"$destinationPort"}]}},
             {"tag":"fixture-blocked","protocol":"blackhole"}
         ],
         "routing":{"domainStrategy":"AsIs","rules":[
-            {"ip":["198.18.0.1/32"],"port":"${target.port}","network":"tcp","outboundTag":"proxy"},
+            {"ip":["198.18.0.1/32"],"port":"$destinationPort","network":"tcp","outboundTag":"proxy"},
             {"network":"tcp,udp","outboundTag":"fixture-blocked"}
         ]}
     }"""
+
+    private fun awaitUnchangedAcknowledgement(profileName: String) {
+        val event = events.poll(15, TimeUnit.SECONDS)
+            ?: error("Conditional reload was not acknowledged; failure=${ConnectionFailureState.failure.value}")
+        assertEquals("Unchanged reload must not publish a reconnect event", TProxyService.STATUS_VPN_SERVICE_ACTION_NAME, event.action)
+        assertTrue(event.getBooleanExtra("isRunning", false))
+        assertEquals(profileName, event.getStringExtra("profile"))
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertFalse(events.any {
+            it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME ||
+                it.action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME ||
+                it.action == TProxyService.STOP_VPN_SERVICE_ACTION_NAME
+        })
+    }
+
+    private class ShellTcpFlow(port: Int) : Closeable {
+        // This one nc process owns one socket for all four exchanges. Cumulative replies from
+        // a peer that accepts exactly once make a reconnect incapable of satisfying the test.
+        private val pipes = InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommandRw("toybox nc -w 15 -W 15 198.18.0.1 $port")
+        private val input = DataInputStream(ParcelFileDescriptor.AutoCloseInputStream(pipes[0]))
+        private val output = DataOutputStream(ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]))
+        private val executor = Executors.newSingleThreadExecutor()
+        private var expected = byteArrayOf()
+
+        fun assertNextChainedResponse(payload: ByteArray) {
+            expected += payload
+            val reply = executor.submit<ByteArray> {
+                output.writeInt(payload.size)
+                output.write(payload)
+                output.flush()
+                val size = input.readInt()
+                check(size in 1..16_384) { "Invalid chained response length: $size" }
+                ByteArray(size).also(input::readFully)
+            }.get(15, TimeUnit.SECONDS)
+            assertArrayEquals("Established TCP connection lost or payload chain changed", expected, reply)
+        }
+
+        override fun close() {
+            output.close()
+            input.close()
+            executor.shutdownNow()
+            check(executor.awaitTermination(5, TimeUnit.SECONDS)) { "Shell stream reader did not stop" }
+        }
+    }
 
     private fun await(action: String): Intent {
         val deadline = SystemClock.elapsedRealtime() + 15_000

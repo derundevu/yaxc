@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="feedbackConnected">Connected: %1$s</string>
+    <string name="feedbackDisconnected">Disconnected.</string>
+    <string name="feedbackConfigApplied">Configuration applied: %1$s</string>
+    <string name="feedbackOperationFailed">Operation failed.</string>
+    <string name="feedbackRefreshingSubscriptions">Refreshing subscriptions…</string>
+    <string name="feedbackSavingSource">Saving source…</string>
+    <string name="feedbackDeletingSource">Deleting source…</string>
+    <plurals name="feedbackRefreshSummary">
+        <item quantity="one">Refreshed %1$d source out of %2$d.</item>
+        <item quantity="other">Refreshed %1$d of %2$d sources.</item>
+    </plurals>
+    <plurals name="feedbackRefreshPartial">
+        <item quantity="one">Refreshed %1$d of %2$d source; %3$d failed.</item>
+        <item quantity="other">Refreshed %1$d of %2$d sources; %3$d failed.</item>
+    </plurals>
+    <string name="feedbackRefreshEmpty">No subscription sources to refresh.</string>
+    <string name="feedbackSourceSaved">Source saved.</string>
+    <string name="feedbackSourceDeleted">Source deleted.</string>
+</resources>

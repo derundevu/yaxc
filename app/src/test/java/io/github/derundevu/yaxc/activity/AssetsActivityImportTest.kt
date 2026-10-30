@@ -27,7 +27,6 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import org.robolectric.shadows.ShadowToast
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
@@ -52,7 +51,6 @@ class AssetsActivityImportTest : HelperSettingsTest() {
         target.writeText("installed")
         settings.installedGeoIpSourceLabel = "Synthetic installed source"
         settings.installedGeoIpSourceUrl = "http://127.0.0.1/previous-resource"
-        ShadowToast.reset()
     }
 
     @After
@@ -97,7 +95,7 @@ class AssetsActivityImportTest : HelperSettingsTest() {
         })
         openActivity()
         deliverPickedUri()
-        compose.waitForAsyncState(5000) { ShadowToast.getLatestToast() != null }
+        compose.waitForAsyncState(5000) { closed.get() && noResourceStagingFiles() }
         assertTrue(closed.get())
         assertEquals("installed", target.readText())
         assertOriginalSourceMetadata()
@@ -122,7 +120,6 @@ class AssetsActivityImportTest : HelperSettingsTest() {
         compose.waitForAsyncState(5000) { closed.get() && noResourceStagingFiles() }
         assertEquals("installed", target.readText())
         assertOriginalSourceMetadata()
-        assertEquals(0, ShadowToast.shownToastCount())
     }
 
     @Test

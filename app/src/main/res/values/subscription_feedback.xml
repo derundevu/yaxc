@@ -1,0 +1,8 @@
+<resources>
+    <string name="subscriptionSourceLoadFailed">Could not load usable profiles. Check the address and request headers, then try again. Your source has not been saved.</string>
+    <string name="subscriptionSourceSaveFailed">Could not save the source. Your draft is still here; try again.</string>
+    <plurals name="subscriptionRefreshAllFailed">
+        <item quantity="one">Could not refresh %1$d source. Try again or edit its settings.</item>
+        <item quantity="other">Could not refresh any of %1$d sources. Try again or edit the source settings.</item>
+    </plurals>
+</resources>

@@ -3,7 +3,6 @@ package io.github.derundevu.yaxc.activity
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +16,8 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
 import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
@@ -28,6 +29,7 @@ import java.net.InetAddress
 
 class SettingsActivity : AppCompatActivity() {
 
+    private val feedback = YaxcFeedbackState()
     private val settings by lazy { Settings(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,7 +49,7 @@ class SettingsActivity : AppCompatActivity() {
                 mutableStateOf(settings.tunRoutes.toList())
             }
 
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 SettingsScreen(
                     formState = formState,
                     generatedXHwid = settings.generatedXHwid,
@@ -66,11 +68,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun applySettings(formState: SettingsFormState) {
         if (formState.transparentProxy && !settings.xrayCoreFile().exists()) {
-            Toast.makeText(
-                applicationContext,
-                getString(R.string.installAssetsFirst),
-                Toast.LENGTH_SHORT,
-            ).show()
+            feedback.show(getString(R.string.installAssetsFirst), FeedbackKind.Warning)
             return
         }
 
@@ -248,19 +246,17 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showInvalidNumber(labelRes: Int) {
-        Toast.makeText(
-            applicationContext,
+        feedback.show(
             getString(R.string.invalidNumberValue, getString(labelRes)),
-            Toast.LENGTH_SHORT,
-        ).show()
+            FeedbackKind.Warning,
+        )
     }
 
     private fun showInvalidIpAddress(labelRes: Int) {
-        Toast.makeText(
-            applicationContext,
+        feedback.show(
             getString(R.string.invalidIpAddressValue, getString(labelRes)),
-            Toast.LENGTH_SHORT,
-        ).show()
+            FeedbackKind.Warning,
+        )
     }
 
     private fun isValidIpv4Address(value: String): Boolean {

@@ -241,7 +241,6 @@
     <string name="invalidProfile">Invalid Profile</string>
     <string name="invalidLink">Invalid Link</string>
     <string name="subscriptionAddressRequired">Enter an HTTPS subscription address</string>
-    <string name="invalidSourceContent">Could not parse the source</string>
     <string name="linkSavedWithoutRefresh">Saved, but profiles were not refreshed</string>
     <string name="forbiddenHttp">HTTP is forbidden</string>
     <string name="onlyHttps">Only HTTPS is acceptable</string>

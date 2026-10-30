@@ -32,5 +32,5 @@ sealed interface MainEffect {
     data class ConfirmDeleteProfile(val profile: ProfileList) : MainEffect
     data class ShowRenameSourceDialog(val source: Link) : MainEffect
     data class ConfirmDeleteSourceDialog(val source: Link) : MainEffect
-    data class ShowToast(val message: String) : MainEffect
+    data class ShowMessage(val message: String) : MainEffect
 }

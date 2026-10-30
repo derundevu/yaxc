@@ -108,6 +108,15 @@ class SubscriptionRefreshHelper(
         parsed: ParsedLinkSource,
         now: Long = System.currentTimeMillis(),
     ) {
+        applyResolvedLink(link, parsed, now, notifyRuntime = true)
+    }
+
+    private suspend fun applyResolvedLink(
+        link: Link,
+        parsed: ParsedLinkSource,
+        now: Long,
+        notifyRuntime: Boolean,
+    ) {
         try {
             withContext(Dispatchers.IO) {
                 check(parsed.profiles.isNotEmpty()) { "No profiles detected" }
@@ -148,6 +157,7 @@ class SubscriptionRefreshHelper(
                     link.name = saved.name
                     link.subscriptionMetadata = saved.subscriptionMetadata
                     link.lastRefreshedAt = saved.lastRefreshedAt
+                    if (notifyRuntime) reconcileRuntime()
                 }
             }
         } finally {
@@ -171,27 +181,36 @@ class SubscriptionRefreshHelper(
     ): RefreshResult {
         var refreshed = 0
         var failed = 0
-        links.forEach { link ->
-            currentCoroutineContext().ensureActive()
-            try {
-                val parsed = resolveProfiles(link)
-                saveResolvedLink(link, parsed, now)
-                refreshed += 1
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
+        var applyAttempted = false
+        try {
+            links.forEach { link ->
                 currentCoroutineContext().ensureActive()
-                failed += 1
+                try {
+                    val parsed = resolveProfiles(link)
+                    // A cancellation can arrive after Room commits but before the caller resumes.
+                    // Reconcile committed state once for the batch, including partial cancellation.
+                    applyAttempted = true
+                    applyResolvedLink(link, parsed, now, notifyRuntime = false)
+                    refreshed += 1
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    failed += 1
+                }
             }
-        }
-        if (refreshed > 0 && TProxyService.isActive()) {
-            TProxyService.newConfig(context.applicationContext)
+        } finally {
+            if (applyAttempted) reconcileRuntime()
         }
         return RefreshResult(
             attempted = links.size,
             refreshed = refreshed,
             failed = failed,
         )
+    }
+
+    private fun reconcileRuntime() {
+        if (TProxyService.isActive()) TProxyService.newConfig(context.applicationContext)
     }
 
     private fun isRefreshDue(link: Link, now: Long): Boolean {

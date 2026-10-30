@@ -3,7 +3,6 @@ package io.github.derundevu.yaxc.activity
 import android.content.ContentResolver
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -20,6 +19,8 @@ import io.github.derundevu.yaxc.helper.replaceFileAtomically
 import io.github.derundevu.yaxc.presentation.assets.AssetCardState
 import io.github.derundevu.yaxc.presentation.assets.AssetsScreen
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,7 @@ class AssetsActivity : AppCompatActivity() {
         XrayCore,
     }
 
+    private val feedback = YaxcFeedbackState()
     private val settings by lazy { Settings(applicationContext) }
     private val assetJobs = mutableMapOf<AssetKind, Job>()
 
@@ -94,7 +96,7 @@ class AssetsActivity : AppCompatActivity() {
         customGeoSiteUrl = settings.customGeoSiteAddress
 
         setContent {
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 AssetsScreen(
                     geoIpState = geoIpState,
                     geoSiteState = geoSiteState,
@@ -118,11 +120,7 @@ class AssetsActivity : AppCompatActivity() {
                         val geoIpUrl = customGeoIpUrl.trim()
                         val geoSiteUrl = customGeoSiteUrl.trim()
                         if (geoIpUrl.isBlank() || geoSiteUrl.isBlank()) {
-                            Toast.makeText(
-                                applicationContext,
-                                getString(R.string.assetsUrlEmpty),
-                                Toast.LENGTH_SHORT,
-                            ).show()
+                            feedback.show(getString(R.string.assetsUrlEmpty), FeedbackKind.Warning)
                         } else {
                             settings.updateCustomGeoResources(
                                 geoIpAddress = geoIpUrl,
@@ -296,20 +294,12 @@ class AssetsActivity : AppCompatActivity() {
 
     private fun download(kind: AssetKind, url: String, file: File) {
         if (isDownloadActive(kind)) {
-            Toast.makeText(
-                applicationContext,
-                getString(R.string.anotherDownloadRunning),
-                Toast.LENGTH_SHORT,
-            ).show()
+            feedback.show(getString(R.string.anotherDownloadRunning), FeedbackKind.Info)
             return
         }
 
         if (url.isBlank()) {
-            Toast.makeText(
-                applicationContext,
-                getString(R.string.assetsUrlEmpty),
-                Toast.LENGTH_SHORT,
-            ).show()
+            feedback.show(getString(R.string.assetsUrlEmpty), FeedbackKind.Warning)
             return
         }
 
@@ -325,7 +315,10 @@ class AssetsActivity : AppCompatActivity() {
                 if (kind == AssetKind.Antifilter) {
                     file.delete()
                 }
-                Toast.makeText(applicationContext, exception.message, Toast.LENGTH_SHORT).show()
+                feedback.show(
+                    exception.message?.takeIf(String::isNotBlank) ?: getString(R.string.feedbackOperationFailed),
+                    FeedbackKind.Error,
+                )
                 setAssetStatus()
             }
 
@@ -399,7 +392,10 @@ class AssetsActivity : AppCompatActivity() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Toast.makeText(applicationContext, error.message, Toast.LENGTH_SHORT).show()
+                feedback.show(
+                    error.message?.takeIf(String::isNotBlank) ?: getString(R.string.feedbackOperationFailed),
+                    FeedbackKind.Error,
+                )
             } finally {
                 if (assetJobs[kind] === currentCoroutineContext().job) {
                     setDownloadState(kind, isLoading = false, progress = 0)
@@ -480,7 +476,10 @@ class AssetsActivity : AppCompatActivity() {
             settings.installedAntifilterRouteCount = count
             restartIfAntifilterEnabled()
         }.onFailure { error ->
-            Toast.makeText(applicationContext, error.message, Toast.LENGTH_SHORT).show()
+            feedback.show(
+                error.message?.takeIf(String::isNotBlank) ?: getString(R.string.feedbackOperationFailed),
+                FeedbackKind.Error,
+            )
         }
         setAssetStatus()
     }
@@ -518,7 +517,7 @@ class AssetsActivity : AppCompatActivity() {
             cb()
             return
         }
-        Toast.makeText(this, getString(R.string.rootRequired), Toast.LENGTH_SHORT).show()
+        feedback.show(getString(R.string.rootRequired), FeedbackKind.Warning)
     }
 
     private fun currentGeoProviderLabel(): String {

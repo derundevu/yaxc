@@ -241,7 +241,6 @@
     <string name="invalidProfile">Неверный профиль</string>
     <string name="invalidLink">Неверная ссылка</string>
     <string name="subscriptionAddressRequired">Укажите HTTPS-адрес подписки</string>
-    <string name="invalidSourceContent">Не удалось распарсить источник</string>
     <string name="linkSavedWithoutRefresh">Сохранено, но профили не обновились</string>
     <string name="forbiddenHttp">HTTP запрещен</string>
     <string name="onlyHttps">Допустим только HTTPS</string>

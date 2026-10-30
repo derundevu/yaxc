@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="feedbackConnected">Подключено: %1$s</string>
+    <string name="feedbackDisconnected">Отключено.</string>
+    <string name="feedbackConfigApplied">Конфигурация применена: %1$s</string>
+    <string name="feedbackOperationFailed">Не удалось выполнить операцию.</string>
+    <string name="feedbackRefreshingSubscriptions">Обновление подписок…</string>
+    <string name="feedbackSavingSource">Сохранение источника…</string>
+    <string name="feedbackDeletingSource">Удаление источника…</string>
+    <plurals name="feedbackRefreshSummary">
+        <item quantity="one">Обновлено источников: %1$d из %2$d.</item>
+        <item quantity="few">Обновлено источников: %1$d из %2$d.</item>
+        <item quantity="many">Обновлено источников: %1$d из %2$d.</item>
+        <item quantity="other">Обновлено источников: %1$d из %2$d.</item>
+    </plurals>
+    <plurals name="feedbackRefreshPartial">
+        <item quantity="one">Обновлено источников: %1$d из %2$d; с ошибкой: %3$d.</item>
+        <item quantity="few">Обновлено источников: %1$d из %2$d; с ошибкой: %3$d.</item>
+        <item quantity="many">Обновлено источников: %1$d из %2$d; с ошибкой: %3$d.</item>
+        <item quantity="other">Обновлено источников: %1$d из %2$d; с ошибкой: %3$d.</item>
+    </plurals>
+    <string name="feedbackRefreshEmpty">Нет источников подписок для обновления.</string>
+    <string name="feedbackSourceSaved">Источник сохранён.</string>
+    <string name="feedbackSourceDeleted">Источник удалён.</string>
+</resources>

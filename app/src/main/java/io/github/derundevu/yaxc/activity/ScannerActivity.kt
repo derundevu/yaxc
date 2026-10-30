@@ -4,11 +4,13 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import com.budiyev.android.codescanner.AutoFocusMode
@@ -20,19 +22,19 @@ import com.budiyev.android.codescanner.ScanMode
 import com.google.zxing.BarcodeFormat
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.scanner.ScannerScreen
 
 class ScannerActivity : AppCompatActivity() {
 
+    private val feedback = YaxcFeedbackState()
+    private var cameraError by mutableStateOf<String?>(null)
     private var codeScanner: CodeScanner? = null
     private val cameraPermission = registerForActivityResult(RequestPermission()) { granted ->
         if (!granted) {
-            Toast.makeText(
-                this,
-                getString(R.string.scannerCameraPermissionDenied),
-                Toast.LENGTH_LONG,
-            ).show()
-            finish()
+            showCameraError(getString(R.string.scannerCameraPermissionDenied))
             return@registerForActivityResult
         }
         startScannerPreview()
@@ -41,17 +43,28 @@ class ScannerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        cameraError = savedInstanceState?.getString(STATE_CAMERA_ERROR)
 
         setContent {
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 ScannerScreen(
                     onBack = ::finish,
                     onScannerViewReady = ::setupScanner,
                 )
+                cameraError?.let { message ->
+                    YaxcMessageDialog(
+                        title = getString(R.string.scanQrCode),
+                        message = message,
+                        confirmLabel = getString(R.string.close),
+                        onConfirm = ::finish,
+                        onDismiss = ::finish,
+                        kind = FeedbackKind.Error,
+                    )
+                }
             }
         }
 
-        ensureCameraPermission()
+        if (cameraError == null) ensureCameraPermission()
     }
 
     private fun setupScanner(scannerView: CodeScannerView) {
@@ -67,6 +80,7 @@ class ScannerActivity : AppCompatActivity() {
 
             decodeCallback = DecodeCallback {
                 runOnUiThread {
+                    if (cameraError != null || isFinishing || isDestroyed) return@runOnUiThread
                     val intent = Intent().also { result ->
                         result.putExtra("link", it.text)
                     }
@@ -74,19 +88,23 @@ class ScannerActivity : AppCompatActivity() {
                     finish()
                 }
             }
-            errorCallback = ErrorCallback {
+            errorCallback = ErrorCallback { error ->
                 runOnUiThread {
-                    Toast.makeText(
-                        this@ScannerActivity,
-                        getString(R.string.scannerCameraError, it.message.orEmpty()),
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    val detail = error.message?.takeIf { it.isNotBlank() }
+                        ?: getString(R.string.feedbackOperationFailed)
+                    showCameraError(getString(R.string.scannerCameraError, detail))
                 }
             }
         }
 
-        scannerView.setOnClickListener { codeScanner?.startPreview() }
+        scannerView.setOnClickListener { startScannerPreview() }
         startScannerPreview()
+    }
+
+    private fun showCameraError(message: String) {
+        cameraError = message
+        codeScanner?.releaseResources()
     }
 
     private fun ensureCameraPermission() {
@@ -103,10 +121,21 @@ class ScannerActivity : AppCompatActivity() {
 
     private fun startScannerPreview() {
         window.decorView.post {
-            if (hasCameraPermission() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            if (
+                cameraError == null &&
+                !isFinishing &&
+                !isDestroyed &&
+                hasCameraPermission() &&
+                lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            ) {
                 codeScanner?.startPreview()
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_CAMERA_ERROR, cameraError)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onPause() {
@@ -117,5 +146,9 @@ class ScannerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         startScannerPreview()
+    }
+
+    companion object {
+        private const val STATE_CAMERA_ERROR = "camera_error"
     }
 }

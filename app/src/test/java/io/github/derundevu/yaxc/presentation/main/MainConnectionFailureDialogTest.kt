@@ -130,7 +130,7 @@ class MainConnectionFailureDialogTest {
     private fun LargeFontTheme(content: @androidx.compose.runtime.Composable () -> Unit) {
         val density = LocalDensity.current
         CompositionLocalProvider(LocalDensity provides Density(density.density, 1.5f)) {
-            YaxcTheme(style.value, content)
+            YaxcTheme(style = style.value, content = content)
         }
     }
 

@@ -5,6 +5,7 @@ import com.topjohnwu.superuser.Shell
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.Settings.AppsRoutingMode
+import io.github.derundevu.yaxc.service.RuntimeOptions
 import io.github.derundevu.yaxc.service.TProxyService
 import java.io.FileOutputStream
 
@@ -17,8 +18,8 @@ class TransparentProxyHelper(
 
     fun isRunning(): Boolean = settings.xrayCorePid().exists()
 
-    fun startService() {
-        makeConfig()
+    internal fun startService(options: RuntimeOptions.Transparent) {
+        makeConfig(options)
         val result = Shell.cmd("${cmd()} service start").exec()
         check(result.isSuccess) {
             result.err.joinToString("\n").ifBlank { "Failed to start the root Xray service" }
@@ -115,7 +116,7 @@ class TransparentProxyHelper(
         ).joinToString(" ")
     }
 
-    private fun makeConfig() {
+    private fun makeConfig(options: RuntimeOptions.Transparent) {
         val yml = arrayListOf(
             "xrayHelper:",
             "  coreType: xray",
@@ -125,29 +126,22 @@ class TransparentProxyHelper(
             "  runDir: ${settings.baseDir().absolutePath}",
             "proxy:",
             "  method: tproxy",
-            "  tproxyPort: ${settings.tproxyPort}",
-            "  enableIPv6: ${settings.enableIpV6}",
-            "  mode: ${settings.appsRoutingMode.xrayHelperMode()}",
+            "  tproxyPort: ${options.port}",
+            "  enableIPv6: ${options.ipv6}",
+            "  mode: ${options.appsRoutingMode.xrayHelperMode()}",
         )
 
-        val appsList = if (settings.appsRoutingMode == AppsRoutingMode.Disabled) {
-            emptyList()
-        } else {
-            settings.appsRouting.split("\n")
-                .map { it.trim() }
-                .filter { it.trim().isNotBlank() }
-        }
-        if (appsList.isNotEmpty()) {
+        if (options.appsRouting.isNotEmpty()) {
             yml.add("  pkgList:")
-            appsList.forEach { yml.add("    - $it") }
+            options.appsRouting.forEach { yml.add("    - $it") }
         }
 
         val includedInterfaces = arrayListOf<String>()
         val excludedInterfaces = arrayListOf<String>()
-        if (settings.tproxyHotspot) includedInterfaces.add(settings.hotspotInterface)
-        else excludedInterfaces.add(settings.hotspotInterface)
-        if (settings.tproxyTethering) includedInterfaces.add(settings.tetheringInterface)
-        else excludedInterfaces.add(settings.tetheringInterface)
+        if (options.hotspot) includedInterfaces.add(options.hotspotInterface)
+        else excludedInterfaces.add(options.hotspotInterface)
+        if (options.tethering) includedInterfaces.add(options.tetheringInterface)
+        else excludedInterfaces.add(options.tetheringInterface)
         if (includedInterfaces.isNotEmpty()) {
             yml.add("  apList:")
             includedInterfaces.forEach { yml.add("    - $it") }

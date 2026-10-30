@@ -10,20 +10,28 @@ import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.text.InputType
-import android.widget.Toast
-import android.widget.EditText
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
@@ -38,6 +46,10 @@ import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
@@ -65,24 +77,41 @@ class MainActivity : AppCompatActivity() {
     private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
     private var pingJob: Job? = null
     private var subscriptionRefreshJob: Job? = null
+    private val feedback = YaxcFeedbackState()
+    private var linksOperationActive = false
+    private var pendingDialog by mutableStateOf<MainDialog?>(null)
+
+    private sealed interface MainDialog {
+        data class DeleteProfile(val profile: ProfileList) : MainDialog
+        data class RenameSource(val source: Link) : MainDialog
+        data class DeleteSource(val source: Link) : MainDialog
+    }
 
     private var cameraPermission = registerForActivityResult(RequestPermission()) {
-        if (!it) return@registerForActivityResult
+        if (!it) {
+            feedback.show(getString(R.string.scannerCameraPermissionDenied), FeedbackKind.Error)
+            return@registerForActivityResult
+        }
         scannerLauncher.launch(Intent(applicationContext, ScannerActivity::class.java))
     }
     private val notificationPermission = registerForActivityResult(RequestPermission()) {
         requestVpnStart()
     }
     private val linksManager = registerForActivityResult(StartActivityForResult()) {
-        if (it.resultCode != RESULT_OK) return@registerForActivityResult
-        refreshLinks()
+        linksOperationActive = false
+        LinksManagerActivity.readFeedback(it.data)?.let { message ->
+            feedback.show(message.message, message.kind)
+        }
     }
     private var scannerLauncher = registerForActivityResult(StartActivityForResult()) {
         if (it.resultCode != RESULT_OK) return@registerForActivityResult
         processLink(it.data?.getStringExtra("link").orEmpty())
     }
     private val vpnLauncher = registerForActivityResult(StartActivityForResult()) {
-        if (it.resultCode != RESULT_OK) return@registerForActivityResult
+        if (it.resultCode != RESULT_OK) {
+            feedback.show(getString(R.string.connectionPermissionRequired), FeedbackKind.Error)
+            return@registerForActivityResult
+        }
         startVpnService()
     }
 
@@ -123,7 +152,7 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             val uiState = mainViewModel.uiState.collectAsStateWithLifecycle().value
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 MainScreen(
                     tabs = uiState.tabs,
                     selectedTabId = uiState.selectedTabId,
@@ -156,6 +185,7 @@ class MainActivity : AppCompatActivity() {
                     onInstallAppUpdate = ::installAppUpdate,
                     onAction = mainViewModel::onAction,
                 )
+                MainDialogs()
             }
         }
 
@@ -243,11 +273,7 @@ class MainActivity : AppCompatActivity() {
     private fun startInstallerIntent(intent: Intent) {
         runCatching { startActivity(intent) }
             .onFailure {
-                Toast.makeText(
-                    applicationContext,
-                    getString(R.string.appUpdateInstallUnavailable),
-                    Toast.LENGTH_SHORT,
-                ).show()
+                feedback.show(getString(R.string.appUpdateInstallUnavailable), FeedbackKind.Error)
             }
     }
 
@@ -303,7 +329,7 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             MainEffect.OpenNewSource -> {
-                linksManager.launch(LinksManagerActivity.openLink(applicationContext))
+                openLinksManager(LinksManagerActivity.openLink(applicationContext))
             }
             MainEffect.RequestQrCodeScanner -> {
                 cameraPermission.launch(android.Manifest.permission.CAMERA)
@@ -337,12 +363,10 @@ class MainActivity : AppCompatActivity() {
             is MainEffect.OpenProfileEditor -> {
                 startActivity(ProfileActivity.getIntent(applicationContext, effect.profileId))
             }
-            is MainEffect.ConfirmDeleteProfile -> showDeleteProfileDialog(effect.profile)
-            is MainEffect.ShowRenameSourceDialog -> showRenameSourceDialog(effect.source)
-            is MainEffect.ConfirmDeleteSourceDialog -> showDeleteSourceDialog(effect.source)
-            is MainEffect.ShowToast -> {
-                Toast.makeText(this, effect.message, Toast.LENGTH_SHORT).show()
-            }
+            is MainEffect.ConfirmDeleteProfile -> pendingDialog = MainDialog.DeleteProfile(effect.profile)
+            is MainEffect.ShowRenameSourceDialog -> pendingDialog = MainDialog.RenameSource(effect.source)
+            is MainEffect.ConfirmDeleteSourceDialog -> pendingDialog = MainDialog.DeleteSource(effect.source)
+            is MainEffect.ShowMessage -> feedback.show(effect.message)
         }
     }
 
@@ -368,26 +392,13 @@ class MainActivity : AppCompatActivity() {
         TProxyService.start(applicationContext, false)
     }
 
-    private fun showDeleteProfileDialog(profile: ProfileList) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.deleteProfileDialogTitle, profile.index + 1))
-            .setMessage(getString(R.string.deleteProfileDialogMessage, profile.name))
-            .setNegativeButton(getString(R.string.cancel), null)
-            .setPositiveButton(getString(R.string.deleteProfile)) { _, _ ->
-                mainViewModel.onAction(MainAction.ConfirmDeleteProfile(profile))
-            }.show()
-    }
 
     private fun processLink(link: String) {
         val normalizedLink = link.trim()
         // Profile imports also accept JSON and base64, so a URI is not required.
         val uri = runCatching { URI(normalizedLink) }.getOrNull()
         if (uri?.scheme == "http") {
-            Toast.makeText(
-                applicationContext,
-                getString(R.string.forbiddenHttp),
-                Toast.LENGTH_SHORT,
-            ).show()
+            feedback.show(getString(R.string.forbiddenHttp), FeedbackKind.Error)
             return
         }
         if (uri?.scheme == "https") {
@@ -411,11 +422,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             if (parsedProfile == null) {
-                Toast.makeText(
-                    applicationContext,
-                    getString(R.string.invalidLink),
-                    Toast.LENGTH_SHORT,
-                ).show()
+                feedback.show(getString(R.string.invalidLink), FeedbackKind.Error)
                 return@launch
             }
             val (json, name) = parsedProfile
@@ -437,7 +444,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshLinks() {
-        startActivity(LinksManagerActivity.refreshLinks(applicationContext))
+        openLinksManager(LinksManagerActivity.refreshLinks(applicationContext))
+    }
+
+    private fun openLinksManager(intent: Intent) {
+        if (linksOperationActive) return
+        linksOperationActive = true
+        try {
+            linksManager.launch(intent)
+        } catch (error: Exception) {
+            linksOperationActive = false
+            throw error
+        }
     }
 
     private fun refreshDueSubscriptions() {
@@ -450,39 +468,68 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshSource(linkId: Long) {
-        startActivity(LinksManagerActivity.refreshLink(applicationContext, linkId))
+        openLinksManager(LinksManagerActivity.refreshLink(applicationContext, linkId))
     }
 
-    private fun showRenameSourceDialog(source: Link) {
-        val input = EditText(this).apply {
-            setText(source.name)
-            setSelection(source.name.length)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        }
-        MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.renameSource))
-            .setView(input)
-            .setNegativeButton(getString(R.string.cancel), null)
-            .setPositiveButton(getString(R.string.save)) { _, _ ->
-                mainViewModel.onAction(
-                    MainAction.ConfirmRenameSource(
-                        sourceId = source.id,
-                        name = input.text?.toString().orEmpty(),
-                    )
+    @Composable
+    private fun MainDialogs() {
+        when (val dialog = pendingDialog) {
+            is MainDialog.DeleteProfile -> YaxcMessageDialog(
+                title = getString(R.string.deleteProfileDialogTitle, dialog.profile.index + 1),
+                message = getString(R.string.deleteProfileDialogMessage, dialog.profile.name),
+                confirmLabel = getString(R.string.deleteProfile),
+                dismissLabel = getString(R.string.cancel),
+                kind = FeedbackKind.Warning,
+                onDismiss = { pendingDialog = null },
+                onConfirm = {
+                    pendingDialog = null
+                    mainViewModel.onAction(MainAction.ConfirmDeleteProfile(dialog.profile))
+                },
+            )
+            is MainDialog.DeleteSource -> YaxcMessageDialog(
+                title = getString(R.string.deleteSource),
+                message = getString(R.string.deleteSourceDialogMessage, dialog.source.name),
+                confirmLabel = getString(R.string.deleteSource),
+                dismissLabel = getString(R.string.cancel),
+                kind = FeedbackKind.Warning,
+                onDismiss = { pendingDialog = null },
+                onConfirm = {
+                    pendingDialog = null
+                    mainViewModel.onAction(MainAction.ConfirmDeleteSource(dialog.source.id))
+                },
+            )
+            is MainDialog.RenameSource -> {
+                var name by rememberSaveable(dialog.source.id) { mutableStateOf(dialog.source.name) }
+                AlertDialog(
+                    onDismissRequest = { pendingDialog = null },
+                    shape = YaxcTheme.shapes.extraLarge,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    title = { Text(getString(R.string.renameSource)) },
+                    text = {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text(getString(R.string.profileName)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = name.isNotBlank(),
+                            onClick = {
+                                pendingDialog = null
+                                mainViewModel.onAction(MainAction.ConfirmRenameSource(dialog.source.id, name))
+                            },
+                        ) { Text(getString(R.string.save)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingDialog = null }) { Text(getString(R.string.cancel)) }
+                    },
                 )
             }
-            .show()
-    }
-
-    private fun showDeleteSourceDialog(source: Link) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.deleteSource))
-            .setMessage(getString(R.string.deleteSourceDialogMessage, source.name))
-            .setNegativeButton(getString(R.string.cancel), null)
-            .setPositiveButton(getString(R.string.deleteSource)) { _, _ ->
-                mainViewModel.onAction(MainAction.ConfirmDeleteSource(source.id))
-            }
-            .show()
+            null -> Unit
+        }
     }
 
     private fun openLink(uri: URI) {
@@ -490,7 +537,7 @@ class MainActivity : AppCompatActivity() {
         link.name = LinkHelper.remark(uri, getString(R.string.newLink))
         link.address = uri.toString()
         val intent = LinksManagerActivity.openLink(applicationContext, link)
-        linksManager.launch(intent)
+        openLinksManager(intent)
     }
 
     private fun runPing(operationId: Long, profileIds: List<Long>) {

@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -18,12 +17,15 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.routing.CoreRoutingScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.CoreRoutingEditorViewModel
 import kotlinx.coroutines.launch
 
 class CoreRoutingActivity : AppCompatActivity() {
+    private val feedback = YaxcFeedbackState()
     private val settings by lazy { Settings(applicationContext) }
     private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
     private val draft: CoreRoutingEditorViewModel by viewModels()
@@ -41,7 +43,7 @@ class CoreRoutingActivity : AppCompatActivity() {
         }
         syncAntifilterState()
         setContent {
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 CoreRoutingScreen(
                     editorMode = draft.editorMode,
                     domainStrategy = draft.domainStrategy,
@@ -78,14 +80,15 @@ class CoreRoutingActivity : AppCompatActivity() {
     private fun switchCoreEditorMode(mode: CoreRoutingEditorMode) {
         if (draft.isLoading || draft.isBusy) return
         lifecycleScope.launch {
-            if (!draft.switchMode(mode)) showMessage(R.string.invalidConfig)
+            if (!draft.switchMode(mode)) showMessage(R.string.invalidConfig, FeedbackKind.Error)
         }
     }
 
     private fun saveCoreRouting() {
         if (draft.isLoading || draft.isBusy) return
         lifecycleScope.launch {
-            showMessage(if (draft.save()) R.string.routingSaved else R.string.invalidConfig)
+            if (draft.save()) showMessage(R.string.routingSaved, FeedbackKind.Success)
+            else showMessage(R.string.invalidConfig, FeedbackKind.Error)
         }
     }
 
@@ -95,17 +98,13 @@ class CoreRoutingActivity : AppCompatActivity() {
             clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
         }.getOrDefault("")
         if (raw.isBlank()) {
-            showMessage(R.string.routingClipboardEmpty)
+            showMessage(R.string.routingClipboardEmpty, FeedbackKind.Warning)
             return
         }
         lifecycleScope.launch {
             val count = draft.importRules(raw)
-            if (count == null) showMessage(R.string.routingImportFailed)
-            else Toast.makeText(
-                this@CoreRoutingActivity,
-                getString(R.string.routingImportedCount, count),
-                Toast.LENGTH_SHORT,
-            ).show()
+            if (count == null) showMessage(R.string.routingImportFailed, FeedbackKind.Error)
+            else feedback.show(getString(R.string.routingImportedCount, count), FeedbackKind.Success)
         }
     }
 
@@ -114,17 +113,17 @@ class CoreRoutingActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val json = draft.exportRules()
             if (json == null) {
-                showMessage(R.string.routingExportFailed)
+                showMessage(R.string.routingExportFailed, FeedbackKind.Error)
             } else {
                 clipboardManager.setPrimaryClip(ClipData.newPlainText(null, json))
-                showMessage(R.string.routingExported)
+                showMessage(R.string.routingExported, FeedbackKind.Success)
             }
         }
     }
 
     private fun updateAntifilterEnabled(enabled: Boolean) {
         if (enabled && !settings.antifilterFile().exists()) {
-            showMessage(R.string.installAssetsFirst)
+            showMessage(R.string.installAssetsFirst, FeedbackKind.Warning)
             syncAntifilterState()
             return
         }
@@ -140,7 +139,7 @@ class CoreRoutingActivity : AppCompatActivity() {
         antifilterRouteCount = if (antifilterInstalled) settings.installedAntifilterRouteCount else 0
     }
 
-    private fun showMessage(message: Int) {
-        Toast.makeText(this, getString(message), Toast.LENGTH_SHORT).show()
+    private fun showMessage(message: Int, kind: FeedbackKind) {
+        feedback.show(getString(message), kind)
     }
 }

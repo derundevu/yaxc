@@ -9,7 +9,6 @@ import android.content.IntentFilter
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -21,6 +20,8 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.helper.AppUpdateManager
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.root.RootDestination
 import io.github.derundevu.yaxc.presentation.root.SettingsHomeScreen
 import kotlinx.coroutines.delay
@@ -29,6 +30,7 @@ import kotlinx.coroutines.launch
 
 class SettingsHomeActivity : AppCompatActivity() {
 
+    private val feedback = YaxcFeedbackState()
     private val settings by lazy { Settings(applicationContext) }
     private val appUpdateManager by lazy { AppUpdateManager(applicationContext, settings) }
 
@@ -49,7 +51,7 @@ class SettingsHomeActivity : AppCompatActivity() {
         }
 
         setContent {
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 SettingsHomeScreen(
                     appVersion = BuildConfig.VERSION_NAME,
                     xrayVersion = XrayCore.version(),
@@ -127,11 +129,7 @@ class SettingsHomeActivity : AppCompatActivity() {
     private fun startInstallerIntent(intent: Intent) {
         runCatching { startActivity(intent) }
             .onFailure {
-                Toast.makeText(
-                    applicationContext,
-                    getString(R.string.appUpdateInstallUnavailable),
-                    Toast.LENGTH_SHORT,
-                ).show()
+                feedback.show(getString(R.string.appUpdateInstallUnavailable), FeedbackKind.Error)
             }
     }
 

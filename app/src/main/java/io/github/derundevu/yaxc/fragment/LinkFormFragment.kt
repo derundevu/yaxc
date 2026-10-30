@@ -7,12 +7,13 @@ import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.view.Window
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.ComponentDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -38,23 +39,40 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.DialogFragment
+import androidx.lifecycle.ViewModelProvider
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.viewmodel.LinksManagerViewModel
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcProgressDialog
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-class LinkFormFragment(
-    private val link: Link,
-    private val onConfirm: () -> Unit,
-) : DialogFragment() {
+class LinkFormFragment : DialogFragment() {
+    companion object {
+        private const val LINK_ARGUMENT = "source"
+
+        fun newInstance(link: Link) = LinkFormFragment().apply {
+            arguments = Bundle().apply { putParcelable(LINK_ARGUMENT, link) }
+        }
+    }
+
+    private val state by lazy { ViewModelProvider(requireActivity())[LinksManagerViewModel::class.java] }
+
+    @Suppress("DEPRECATION")
+    private val link: Link by lazy {
+        requireNotNull(requireArguments().getParcelable<Link>(LINK_ARGUMENT))
+    }
 
     private enum class SourceMode {
         Subscription,
@@ -64,7 +82,7 @@ class LinkFormFragment(
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         return ComponentDialog(requireContext()).apply {
             requestWindowFeature(Window.FEATURE_NO_TITLE)
-            setCanceledOnTouchOutside(true)
+            setCanceledOnTouchOutside(false)
             window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setContentView(
                 ComposeView(context).apply {
@@ -75,23 +93,29 @@ class LinkFormFragment(
                         YaxcAppTheme {
                             LinkFormDialogContent(
                                 link = link,
-                                onDismiss = {
-                                    dismissAllowingStateLoss()
-                                    requireActivity().finish()
-                                },
+                                busy = state.busy,
+                                formError = state.formError,
+                                onDismiss = state::cancel,
                                 onConfirm = { updated ->
-                                    link.name = updated.name
-                                    link.address = updated.address
-                                    link.userAgent = updated.userAgent
-                                    link.xHwid = updated.xHwid
-                                    link.customHeaders = updated.customHeaders
-                                    if (link.id == 0L) {
-                                        link.isActive = true
-                                    }
-                                    dismissAllowingStateLoss()
-                                    onConfirm()
+                                    state.save(link.copy(
+                                        name = updated.name,
+                                        address = updated.address,
+                                        userAgent = updated.userAgent,
+                                        xHwid = updated.xHwid,
+                                        customHeaders = updated.customHeaders,
+                                        isActive = if (link.id == 0L) true else link.isActive,
+                                    ))
                                 },
                             )
+                            LaunchedEffect(state.busy) {
+                                isCancelable = !state.busy
+                            }
+                            if (state.busy) {
+                                YaxcProgressDialog(
+                                    title = textResource(R.string.feedbackSavingSource),
+                                    onCancel = if (state.canCancel) ({ state.cancel() }) else null,
+                                )
+                            }
                         }
                     }
                 }
@@ -109,12 +133,15 @@ class LinkFormFragment(
 
     override fun onCancel(dialog: DialogInterface) {
         super.onCancel(dialog)
-        requireActivity().finish()
+        state.cancel()
     }
 
+    @OptIn(ExperimentalLayoutApi::class)
     @Composable
     private fun LinkFormDialogContent(
         link: Link,
+        busy: Boolean,
+        formError: Int?,
         onDismiss: () -> Unit,
         onConfirm: (UpdatedLinkForm) -> Unit,
     ) {
@@ -140,14 +167,15 @@ class LinkFormFragment(
         var customHeaders by rememberSaveable(link.id) {
             mutableStateOf(link.customHeaders.orEmpty())
         }
+        var addressError by rememberSaveable { mutableStateOf<String?>(null) }
 
         fun shouldAutofillName(): Boolean {
             val trimmed = name.trim()
             return trimmed.isEmpty() || trimmed == defaultLinkName
         }
 
-        LaunchedEffect(sourceMode, address, userAgent, xHwid, customHeaders) {
-            if (sourceMode != SourceMode.Subscription || !shouldAutofillName()) return@LaunchedEffect
+        LaunchedEffect(sourceMode, address, userAgent, xHwid, customHeaders, busy) {
+            if (busy || sourceMode != SourceMode.Subscription || !shouldAutofillName()) return@LaunchedEffect
 
             val trimmedAddress = address.trim()
             val uri = runCatching { URI(trimmedAddress) }.getOrNull() ?: return@LaunchedEffect
@@ -182,6 +210,7 @@ class LinkFormFragment(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
+                .imePadding()
                 .navigationBarsPadding(),
         ) {
             Surface(
@@ -233,7 +262,11 @@ class LinkFormFragment(
                             SourceMode.entries.forEachIndexed { index, mode ->
                                 SegmentedButton(
                                     selected = sourceMode == mode,
-                                    onClick = { sourceMode = mode },
+                                    onClick = {
+                                        sourceMode = mode
+                                        addressError = null
+                                    },
+                                    enabled = !busy,
                                     shape = SegmentedButtonDefaults.itemShape(
                                         index = index,
                                         count = SourceMode.entries.size,
@@ -270,6 +303,7 @@ class LinkFormFragment(
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
+                        enabled = !busy,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text(text = textResource(R.string.linkName)) },
                         singleLine = true,
@@ -278,11 +312,16 @@ class LinkFormFragment(
                     if (sourceMode == SourceMode.Subscription) {
                         OutlinedTextField(
                             value = address,
-                            onValueChange = { address = it },
+                            onValueChange = {
+                                address = it
+                                addressError = null
+                            },
+                            enabled = !busy,
+                            isError = addressError != null,
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text(text = textResource(R.string.linkAddress)) },
                             supportingText = {
-                                Text(text = textResource(R.string.sourceAddressRemoteLead))
+                                Text(text = addressError ?: textResource(R.string.sourceAddressRemoteLead))
                             },
                             singleLine = true,
                         )
@@ -290,6 +329,7 @@ class LinkFormFragment(
                         OutlinedTextField(
                             value = userAgent,
                             onValueChange = { userAgent = it },
+                            enabled = !busy,
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text(text = textResource(R.string.linkUserAgent)) },
                             supportingText = {
@@ -302,6 +342,7 @@ class LinkFormFragment(
                             value = xHwid,
                             onValueChange = { xHwid = it },
                             modifier = Modifier.fillMaxWidth(),
+                            enabled = !busy,
                             label = { Text(text = textResource(R.string.linkXHwid)) },
                             supportingText = {
                                 Text(text = textResource(R.string.sourceXHwidLead))
@@ -312,6 +353,7 @@ class LinkFormFragment(
                         OutlinedTextField(
                             value = customHeaders,
                             onValueChange = { customHeaders = it },
+                            enabled = !busy,
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text(text = textResource(R.string.linkCustomHeaders)) },
                             supportingText = {
@@ -321,15 +363,24 @@ class LinkFormFragment(
                             maxLines = 8,
                         )
                     }
+                    if (formError != null) {
+                        Text(
+                            text = textResource(formError),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    }
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        TextButton(onClick = onDismiss) {
+                        TextButton(onClick = onDismiss, enabled = !busy) {
                             Text(text = textResource(R.string.close))
                         }
                         Button(
+                            enabled = !busy,
                             onClick = {
                                 val trimmedAddress = address.trim()
                                 val modeAddress = if (sourceMode == SourceMode.Subscription) {
@@ -338,28 +389,16 @@ class LinkFormFragment(
                                     ""
                                 }
                                 if (sourceMode == SourceMode.Subscription && modeAddress.isBlank()) {
-                                    Toast.makeText(
-                                        context,
-                                        subscriptionAddressRequiredText,
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
+                                    addressError = subscriptionAddressRequiredText
                                     return@Button
                                 }
                                 val uri = runCatching { URI(modeAddress) }.getOrNull()
                                 if (modeAddress.isNotBlank() && uri == null) {
-                                    Toast.makeText(
-                                        context,
-                                        invalidLinkText,
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
+                                    addressError = invalidLinkText
                                     return@Button
                                 }
                                 if (modeAddress.isNotBlank() && uri?.scheme != "https") {
-                                    Toast.makeText(
-                                        context,
-                                        onlyHttpsText,
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
+                                    addressError = onlyHttpsText
                                     return@Button
                                 }
                                 onConfirm(

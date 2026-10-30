@@ -15,6 +15,7 @@ Based on [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray); maintained as an
 - Edit JSON in a full-screen code workspace with syntax diagnostics, formatting, undo/redo and find/replace.
 - View subscription traffic and expiry when provided by your service.
 - Choose light or dark themes and manage geodata inside the app.
+- In-app messages, confirmations and loading dialogs follow the selected theme.
 - Check for app updates without leaving the app.
 - Use optional root/transparent-proxy mode for advanced setups.
 
@@ -40,6 +41,14 @@ Nothing downloads or connects automatically. Configurations that do not referenc
 
 Subscription refreshes are applied as complete updates. Failed or malformed batches keep the previous profiles,
 as does cancellation before commit. Mixed valid/invalid batches are rejected rather than silently importing a subset.
+Refreshes that leave the active configuration unchanged keep the existing connection running, including updates
+to subscription metadata or other profiles. Changed configurations are validated before replacing the active core;
+an invalid replacement keeps the previous connection and reports an error. If the selected profile is removed,
+the VPN stops instead of silently keeping a deleted profile connected.
+
+Manual subscription refresh shows a summary on return, including partial failures. Loading can be cancelled while
+the request is pending; cancellation is not reported as success. Once a source save or deletion is committing,
+it finishes before reporting its result.
 
 Standalone configurations still have known limitations. TUN hardening is experimental and is not a guaranteed kill switch.
 

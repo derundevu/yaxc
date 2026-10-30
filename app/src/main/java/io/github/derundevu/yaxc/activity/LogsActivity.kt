@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
@@ -16,6 +15,8 @@ import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.logs.LogsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,6 +32,7 @@ class LogsActivity : AppCompatActivity() {
         private const val MAX_BUFFERED_LINES = (1 shl 14) - 1
     }
 
+    private val feedback = YaxcFeedbackState()
     private val settings by lazy { Settings(applicationContext) }
     private var logsText by mutableStateOf("")
 
@@ -38,7 +40,7 @@ class LogsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 LogsScreen(
                     logsText = logsText,
                     onBack = ::finish,
@@ -72,7 +74,7 @@ class LogsActivity : AppCompatActivity() {
             val clipData = ClipData.newPlainText(null, text)
             val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboardManager.setPrimaryClip(clipData)
-            Toast.makeText(applicationContext, getString(R.string.logsCopied), Toast.LENGTH_SHORT).show()
+            feedback.show(getString(R.string.logsCopied), FeedbackKind.Success)
         } catch (error: Exception) {
             error.printStackTrace()
         }

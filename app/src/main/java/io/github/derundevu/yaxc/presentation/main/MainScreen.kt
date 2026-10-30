@@ -4,7 +4,6 @@ import XrayCore.XrayCore
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
@@ -152,6 +151,9 @@ import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.LocalYaxcFeedback
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
@@ -1940,6 +1942,7 @@ private fun ProfileCard(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val feedback = LocalYaxcFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
@@ -2051,6 +2054,7 @@ private fun ProfileCard(
                             copyProfileJson(
                                 context = context,
                                 config = profile.profile.config,
+                                feedback = feedback,
                             )
                         },
                     )
@@ -2062,6 +2066,7 @@ private fun ProfileCard(
                                 context = context,
                                 scope = scope,
                                 config = profile.profile.config,
+                                feedback = feedback,
                             )
                         },
                     )
@@ -2213,44 +2218,34 @@ private fun VersionRow(
 private fun copyProfileJson(
     context: Context,
     config: String,
+    feedback: YaxcFeedbackState,
 ) {
-    val clipboardManager = context.getSystemService(ClipboardManager::class.java)
-    clipboardManager?.setPrimaryClip(
+    val clipboardManager = context.getSystemService(ClipboardManager::class.java) ?: return
+    clipboardManager.setPrimaryClip(
         ClipData.newPlainText("profile-json", config),
     )
-    Toast.makeText(
-        context,
-        context.getString(R.string.profileJsonCopied),
-        Toast.LENGTH_SHORT,
-    ).show()
+    feedback.show(context.getString(R.string.profileJsonCopied), FeedbackKind.Success)
 }
 
 private fun copyProfileDeepLink(
     context: Context,
     scope: CoroutineScope,
     config: String,
+    feedback: YaxcFeedbackState,
 ) {
     scope.launch {
         val shareLink = withContext(Dispatchers.Default) {
             XrayCore.share(config).trim()
         }
         if (shareLink.isBlank()) {
-            Toast.makeText(
-                context,
-                context.getString(R.string.profileDeepLinkUnavailable),
-                Toast.LENGTH_SHORT,
-            ).show()
+            feedback.show(context.getString(R.string.profileDeepLinkUnavailable), FeedbackKind.Error)
             return@launch
         }
-        val clipboardManager = context.getSystemService(ClipboardManager::class.java)
-        clipboardManager?.setPrimaryClip(
+        val clipboardManager = context.getSystemService(ClipboardManager::class.java) ?: return@launch
+        clipboardManager.setPrimaryClip(
             ClipData.newPlainText("profile-deep-link", shareLink),
         )
-        Toast.makeText(
-            context,
-            context.getString(R.string.profileDeepLinkCopied),
-            Toast.LENGTH_SHORT,
-        ).show()
+        feedback.show(context.getString(R.string.profileDeepLinkCopied), FeedbackKind.Success)
     }
 }
 

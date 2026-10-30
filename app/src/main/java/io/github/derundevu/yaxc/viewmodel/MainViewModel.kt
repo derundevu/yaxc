@@ -232,7 +232,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun requestBatchPing(sourceId: Long?, profileIds: List<Long>) {
         if (profileIds.isEmpty()) {
             _effects.tryEmit(
-                MainEffect.ShowToast(
+                MainEffect.ShowMessage(
                     getApplication<Application>().getString(R.string.mainNoProfilesInSource)
                 )
             )
@@ -302,6 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val profile = profileRepository.find(action.profile.id)
                     profileRepository.remove(profile)
                     if (selectedProfileId.value == profile.id) clearSelectedProfile()
+                    _effects.tryEmit(MainEffect.ReloadCurrentConfig)
                 }
             }
             is MainAction.RequestRenameSource -> {
@@ -324,6 +325,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val source = uiState.value.tabs.firstOrNull { it.id == action.sourceId } ?: return
                 viewModelScope.launch {
                     linkRepository.delete(source)
+                    _effects.tryEmit(MainEffect.ReloadCurrentConfig)
                 }
             }
             is MainAction.CommitSourceOrder -> {

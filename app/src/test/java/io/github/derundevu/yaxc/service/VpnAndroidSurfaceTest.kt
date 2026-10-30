@@ -38,6 +38,7 @@ import org.robolectric.annotation.Implements
 import org.robolectric.annotation.LooperMode
 import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.shadows.ShadowService
+import org.robolectric.shadows.ShadowToast
 import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowVpnService
 
@@ -106,25 +107,30 @@ class VpnAndroidSurfaceTest : RoomTestSupport() {
         assertSame(previous, ConnectionFailureState.failure.value)
     }
 
+
     @Test
-    fun receiverRoutesOnlyLifecycleEventsAndPreservesProfileIdentityForTile() {
+    fun completedBackgroundConnectionShowsProfileButStatusDoesNotAnnounceAConnection() {
+        val profileName = "Synthetic quick-settings profile"
         val receiver = VpnActionReceiver()
-        receiver.onReceive(app, Intent(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME))
-        receiver.onReceive(app, Intent("synthetic.UNRELATED"))
-        receiver.onReceive(app, null)
-        receiver.onReceive(null, Intent(TProxyService.STOP_VPN_SERVICE_ACTION_NAME))
-        assertNull(shadowOf(app).nextStartedService)
-        for (action in listOf(
-            TProxyService.START_VPN_SERVICE_ACTION_NAME,
-            TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME,
-            TProxyService.STOP_VPN_SERVICE_ACTION_NAME,
-        )) {
-            receiver.onReceive(app, Intent(action).putExtra("profile", "Synthetic profile identity"))
-            val intent = nextCommand()
-            assertEquals(VpnTileService::class.java.name, intent.component!!.className)
-            assertEquals(action, intent.getStringExtra("action"))
-            assertEquals("Synthetic profile identity", intent.getStringExtra("label"))
-        }
+        receiver.onReceive(
+            app,
+            Intent(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+                .setPackage(app.packageName)
+                .putExtra("profile", profileName),
+        )
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertTrue(ShadowToast.getTextOfLatestToast().contains(profileName))
+
+        ShadowToast.reset()
+        receiver.onReceive(
+            app,
+            Intent(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME)
+                .setPackage(app.packageName)
+                .putExtra("isRunning", true)
+                .putExtra("profile", profileName),
+        )
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(0, ShadowToast.shownToastCount())
     }
 
     @Test
@@ -157,10 +163,17 @@ class VpnAndroidSurfaceTest : RoomTestSupport() {
             first.get().onStartCommand(tileEvent(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME, "Reloaded"), 0, 2)
             assertEquals(Tile.STATE_ACTIVE, tile.state)
             assertEquals("Reloaded", tile.label.toString())
+            VpnActionReceiver().onReceive(
+                app,
+                Intent(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME)
+                    .putExtra("isRunning", true)
+                    .putExtra("profile", "Renamed without reconnecting"),
+            )
+            first.get().onStartCommand(nextCommand(), 0, 3)
             first.get().onStartCommand(null, 0, 3)
             first.get().onStartCommand(tileEvent("synthetic.UNRELATED", "Wrong identity"), 0, 4)
             assertEquals(Tile.STATE_ACTIVE, tile.state)
-            assertEquals("Reloaded", tile.label.toString())
+            assertEquals("Renamed without reconnecting", tile.label.toString())
         } finally {
             first.destroy()
         }
@@ -168,9 +181,14 @@ class VpnAndroidSurfaceTest : RoomTestSupport() {
         try {
             second.get().onStartListening()
             assertEquals(Tile.STATE_ACTIVE, second.get().qsTile!!.state)
-            assertEquals("Reloaded", second.get().qsTile!!.label.toString())
-            second.get().onStartCommand(tileEvent(TProxyService.STOP_VPN_SERVICE_ACTION_NAME, "Reloaded"), 0, 5)
+            assertEquals("Renamed without reconnecting", second.get().qsTile!!.label.toString())
+            VpnActionReceiver().onReceive(
+                app,
+                Intent(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME).putExtra("isRunning", false),
+            )
+            second.get().onStartCommand(nextCommand(), 0, 5)
             assertEquals(Tile.STATE_INACTIVE, second.get().qsTile!!.state)
+            assertEquals(app.getString(R.string.appName), second.get().qsTile!!.label.toString())
         } finally {
             second.destroy()
         }

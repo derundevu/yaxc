@@ -8,11 +8,16 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
 import io.github.derundevu.yaxc.viewmodel.ProfileEditorViewModel
 import io.github.derundevu.yaxc.viewmodel.ProfileSaveResult
@@ -40,6 +45,8 @@ class ProfileActivity : AppCompatActivity() {
         }
     }
 
+    private val feedback = YaxcFeedbackState()
+    private var invalidProfileMessage by mutableStateOf<String?>(null)
     private val draft: ProfileEditorViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,7 +67,7 @@ class ProfileActivity : AppCompatActivity() {
         )
 
         setContent {
-            YaxcAppTheme {
+            YaxcAppTheme(feedback = feedback) {
                 ProfileScreen(
                     title = getString(if (id == 0L) R.string.newProfile else R.string.editProfile),
                     name = draft.name,
@@ -74,6 +81,20 @@ class ProfileActivity : AppCompatActivity() {
                     onNameChange = { draft.name = it },
                     onSourceChange = { draft.selectedSourceId = it },
                 )
+                invalidProfileMessage?.let { message ->
+                    YaxcMessageDialog(
+                        title = getString(R.string.invalidProfile),
+                        message = message,
+                        confirmLabel = getString(R.string.ignore),
+                        onConfirm = {
+                            invalidProfileMessage = null
+                            save(false)
+                        },
+                        onDismiss = { invalidProfileMessage = null },
+                        dismissLabel = getString(R.string.cancel),
+                        kind = FeedbackKind.Error,
+                    )
+                }
             }
         }
     }
@@ -90,11 +111,6 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun showError(message: String) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(getString(R.string.invalidProfile))
-            .setMessage(message)
-            .setNegativeButton(getString(R.string.cancel)) { _, _ -> }
-            .setPositiveButton(getString(R.string.ignore)) { _, _ -> save(false) }
-            .show()
+        invalidProfileMessage = message.ifBlank { getString(R.string.feedbackOperationFailed) }
     }
 }

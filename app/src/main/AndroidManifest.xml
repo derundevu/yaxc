@@ -153,9 +153,11 @@
             android:name=".receiver.VpnActionReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="io.github.derundevu.yaxc.VpnStart" />
-                <action android:name="io.github.derundevu.yaxc.VpnStop" />
-                <action android:name="io.github.derundevu.yaxc.NewConfig" />
+                <action android:name="${applicationId}.VpnStart" />
+                <action android:name="${applicationId}.VpnStop" />
+                <action android:name="${applicationId}.VpnStopFailed" />
+                <action android:name="${applicationId}.NewConfig" />
+                <action android:name="${applicationId}.VpnStatus" />
             </intent-filter>
         </receiver>
         <receiver
