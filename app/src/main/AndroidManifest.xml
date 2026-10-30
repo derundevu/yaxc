@@ -23,7 +23,7 @@
         android:name=".Yaxc"
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
-        android:banner="@mipmap/banner"
+        android:banner="@drawable/launcher_banner"
         android:networkSecurityConfig="@xml/network_security_config"
         android:label="@string/appName"
         android:supportsRtl="true"

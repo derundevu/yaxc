@@ -323,10 +323,12 @@
     <string name="settingsThemeSystem">System default</string>
     <string name="settingsThemeMidnightBlue">Midnight Blue</string>
     <string name="settingsThemeGraphite">Graphite</string>
+    <string name="settingsThemeMint">Mint Graphite</string>
     <string name="settingsThemeLightSlate">Light Slate</string>
     <string name="settingsThemeSystemShort">System</string>
     <string name="settingsThemeMidnightBlueShort">Midnight</string>
     <string name="settingsThemeGraphiteShort">Graphite</string>
+    <string name="settingsThemeMintShort">Mint</string>
     <string name="settingsThemeLightSlateShort">Light</string>
     <string name="settingsValueCopied">%1$s copied</string>
     <string name="settingsCopyUsername">Copy username</string>

@@ -344,7 +344,10 @@ fun SettingsScreen(
             onDismissRequest = { showThemeDialog = false },
             title = { Text(text = textResource(R.string.settingsThemeTitle)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     LanguageOptionRow(
                         title = textResource(R.string.settingsThemeSystem),
                         selected = formState.themeStyle == YaxcThemeStyle.System.value,
@@ -366,6 +369,14 @@ fun SettingsScreen(
                         selected = formState.themeStyle == YaxcThemeStyle.Graphite.value,
                         onClick = {
                             onFormStateChange(formState.copy(themeStyle = YaxcThemeStyle.Graphite.value))
+                            showThemeDialog = false
+                        },
+                    )
+                    LanguageOptionRow(
+                        title = textResource(R.string.settingsThemeMint),
+                        selected = formState.themeStyle == YaxcThemeStyle.Mint.value,
+                        onClick = {
+                            onFormStateChange(formState.copy(themeStyle = YaxcThemeStyle.Mint.value))
                             showThemeDialog = false
                         },
                     )
@@ -560,6 +571,7 @@ private fun BasicSettingsTab(
                     when (formState.themeStyle) {
                         YaxcThemeStyle.MidnightBlue.value -> R.string.settingsThemeMidnightBlueShort
                         YaxcThemeStyle.Graphite.value -> R.string.settingsThemeGraphiteShort
+                        YaxcThemeStyle.Mint.value -> R.string.settingsThemeMintShort
                         YaxcThemeStyle.LightSlate.value -> R.string.settingsThemeLightSlateShort
                         else -> R.string.settingsThemeSystemShort
                     }

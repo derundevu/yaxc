@@ -14,10 +14,14 @@ Based on [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray); maintained as an
 - Customize per-app routing and routing rules.
 - Edit JSON in a full-screen code workspace with syntax diagnostics, formatting, undo/redo and find/replace.
 - View subscription traffic and expiry when provided by your service.
-- Choose light or dark themes and manage geodata inside the app.
-- In-app messages, confirmations and loading dialogs follow the selected theme.
+- Choose light or dark themes, including Mint Graphite, and manage geodata inside the app.
+- Confirmations and loading dialogs follow the selected theme; short messages use system Toasts.
 - Check for app updates without leaving the app.
 - Use optional root/transparent-proxy mode for advanced setups.
+
+The Folded X app icon supports adaptive launcher masks and Android 13+ themed icons.
+For matching colors, select **Preferences → App Theme → Mint Graphite**, then save.
+Existing theme choices, including System default, are preserved.
 
 ## Screenshots
 

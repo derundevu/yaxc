@@ -135,6 +135,11 @@ class MainConnectionFailureDialogTest {
     }
 
     private companion object {
-        val themes = listOf(YaxcThemeStyle.MidnightBlue, YaxcThemeStyle.Graphite, YaxcThemeStyle.LightSlate)
+        val themes = listOf(
+            YaxcThemeStyle.MidnightBlue,
+            YaxcThemeStyle.Graphite,
+            YaxcThemeStyle.Mint,
+            YaxcThemeStyle.LightSlate,
+        )
     }
 }

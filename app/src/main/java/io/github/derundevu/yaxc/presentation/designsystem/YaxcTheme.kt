@@ -35,6 +35,7 @@ enum class YaxcThemeStyle {
     System,
     MidnightBlue,
     Graphite,
+    Mint,
     LightSlate,
 
     ;
@@ -227,6 +228,7 @@ fun YaxcTheme(
         YaxcThemeStyle.System -> error("System theme must be resolved before color selection")
         YaxcThemeStyle.MidnightBlue -> midnightBlueColorScheme()
         YaxcThemeStyle.Graphite -> graphiteColorScheme()
+        YaxcThemeStyle.Mint -> mintColorScheme()
         YaxcThemeStyle.LightSlate -> lightSlateColorScheme()
     }
 
@@ -234,6 +236,7 @@ fun YaxcTheme(
         YaxcThemeStyle.System -> error("System theme must be resolved before color selection")
         YaxcThemeStyle.MidnightBlue -> midnightBlueExtendedColors()
         YaxcThemeStyle.Graphite -> graphiteExtendedColors()
+        YaxcThemeStyle.Mint -> mintExtendedColors()
         YaxcThemeStyle.LightSlate -> lightSlateExtendedColors()
     }
 
@@ -346,6 +349,44 @@ private fun graphiteColorScheme() = darkColorScheme(
     onError = Color(0xFF320D0D),
 )
 
+private fun mintColorScheme() = darkColorScheme(
+    primary = Color(0xFF7CF4C4),
+    onPrimary = Color(0xFF08231B),
+    primaryContainer = Color(0xFF1B3A31),
+    onPrimaryContainer = Color(0xFFBFF8E1),
+    inversePrimary = Color(0xFF086D50),
+    secondary = Color(0xFFB9CEC6),
+    onSecondary = Color(0xFF182C25),
+    secondaryContainer = Color(0xFF293D35),
+    onSecondaryContainer = Color(0xFFD9EBE1),
+    tertiary = Color(0xFF9BDCD2),
+    onTertiary = Color(0xFF0D3631),
+    tertiaryContainer = Color(0xFF254D46),
+    onTertiaryContainer = Color(0xFFC8F6ED),
+    background = Color(0xFF111A28),
+    onBackground = Color(0xFFF4F8FA),
+    surface = Color(0xFF151F2C),
+    onSurface = Color(0xFFF4F8FA),
+    surfaceVariant = Color(0xFF24332F),
+    onSurfaceVariant = Color(0xFFB5C9BF),
+    surfaceTint = Color(0xFF7CF4C4),
+    surfaceDim = Color(0xFF111A28),
+    surfaceBright = Color(0xFF303F47),
+    surfaceContainerLowest = Color(0xFF0B131E),
+    surfaceContainerLow = Color(0xFF121D28),
+    surfaceContainer = Color(0xFF1A2731),
+    surfaceContainerHigh = Color(0xFF223239),
+    surfaceContainerHighest = Color(0xFF2B3D42),
+    inverseSurface = Color(0xFFDEE9E4),
+    inverseOnSurface = Color(0xFF1A2B24),
+    outline = Color(0xFF80988E),
+    outlineVariant = Color(0xFF364B43),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+)
+
 private fun lightSlateColorScheme() = lightColorScheme(
     primary = Color(0xFF1F4E8C),
     onPrimary = Color(0xFFFFFFFF),
@@ -398,6 +439,20 @@ private fun graphiteExtendedColors() = YaxcExtendedColors(
         Color(0xFF16191E),
         Color(0xFF111317),
         Color(0xFF1A1F28),
+    ),
+)
+
+private fun mintExtendedColors() = YaxcExtendedColors(
+    accentSoft = Color(0xFF1C3D32),
+    success = Color(0xFF7CF4C4),
+    warning = Color(0xFFF0C477),
+    danger = Color(0xFFFFB4AB),
+    textMuted = Color(0xFFA6BAB2),
+    cardBorder = Color(0xFF33463F),
+    backgroundGradient = listOf(
+        Color(0xFF111A28),
+        Color(0xFF101B24),
+        Color(0xFF132824),
     ),
 )
 
