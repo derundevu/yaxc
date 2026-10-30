@@ -338,15 +338,24 @@ class VpnDeviceIntegrationTest {
         // 198.18.0.1 is a synthetic benchmark destination; only the test core redirects it to our peer.
         val pipes = InstrumentationRegistry.getInstrumentation().uiAutomation
             .executeShellCommandRw("toybox nc -w 5 -W 5 198.18.0.1 ${target.port}")
-        ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use {
-            it.write("GET /vpn-$stage HTTP/1.1\r\nHost: 198.18.0.1:${target.port}\r\nConnection: close\r\n\r\n".toByteArray())
+        // nc may close its socket on stdin EOF before the peer sends its response.
+        val response = ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use { request ->
+            request.write("GET /vpn-$stage HTTP/1.1\r\nHost: 198.18.0.1:${target.port}\r\nConnection: close\r\n\r\n".toByteArray())
+            DataInputStream(ParcelFileDescriptor.AutoCloseInputStream(pipes[0])).use { input ->
+                val headers = buildString {
+                    while (!endsWith("\r\n\r\n")) {
+                        check(length < 16_384) { "VPN HTTP response headers exceed the fixture bound" }
+                        append(input.readUnsignedByte().toChar())
+                    }
+                }
+                val contentLength = headers.lineSequence()
+                    .first { it.startsWith("Content-Length:", ignoreCase = true) }
+                    .substringAfter(':').trim().toInt()
+                assertEquals(target.payload.size, contentLength)
+                ByteArray(contentLength).also(input::readFully)
+            }
         }
-        val response = ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use { it.readBytes() }
-        val separator = "\r\n\r\n".toByteArray()
-        val bodyAt = response.indices.firstOrNull { offset ->
-            offset + separator.size <= response.size && separator.indices.all { response[offset + it] == separator[it] }
-        } ?: error("VPN did not return an HTTP response to the separate UID")
-        assertArrayEquals(target.payload, response.copyOfRange(bodyAt + separator.size, response.size))
+        assertArrayEquals(target.payload, response)
         val request = target.requests.poll(5, TimeUnit.SECONDS)
         assertNotNull("No exact request reached the controlled VPN peer", request)
         assertEquals("GET", request!!.method)

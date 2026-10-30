@@ -1,0 +1,14 @@
+## What's new in 1.5.2
+
+### Embedded core
+
+- Updated embedded Xray-core from 26.10.21 to 26.10.29.
+- Includes the upstream fix for oversized A/AAAA replies crashing the DNS outbound, normal WebSocket close handling, and geodata download restrictions.
+- Includes upstream XDRIVE S3 support and Google Drive transport improvements. The newer Google Drive slot mode requires a compatible server.
+- Retained yaxc's failed-construction resource cleanup, synchronized splice state, isolated validation and ping cancellation/deadline fixes.
+
+### Build reliability
+
+- Keep gomobile and gobind on the locked Go module graph; Android builds no longer run an initialization command that reinstalls gobind from latest.
+
+The package ID, profile database schema, stored raw configurations, hev-socks5-tunnel and XrayHelper sources are unchanged. The separately managed root-mode Xray executable is not upgraded by replacing the embedded core. Existing large-UDP limitations remain.

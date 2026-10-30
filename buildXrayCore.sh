@@ -45,7 +45,8 @@ prepare_go() {
 build_android() {
   echo "Building XrayCore for $TARGET"
   rm -f "$DEST/XrayCore*"
-  gomobile init
+  # Both tools are already installed from the locked module graph above.
+  # gomobile init would reinstall gobind@latest; bind needs no OpenAL setup.
   # Match upstream Android builds: anet requires access to net.zoneCache.
   gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "android/$TARGET" -ldflags="-buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" -trimpath
 }
