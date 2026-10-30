@@ -1,0 +1,31 @@
+## What's new in 1.5.1
+
+### Appearance and feedback
+
+- Added the Folded X launcher icon, including adaptive masks, Android 13+ themed icons and matching TV artwork.
+- Added the Mint Graphite dark theme, with matching controls, dialogs and editor colors. Existing theme choices are preserved.
+- Connection confirmations use system Toasts with the applied profile name, including starts from Quick Settings. Status queries and unchanged refreshes stay silent.
+- Added theme-aware confirmation, error and cancellable loading dialogs.
+
+### Connections and subscriptions
+
+- Keep the active connection running when a subscription refresh leaves its effective configuration unchanged, including metadata-only updates.
+- Validate configuration changes before applying them; rejected validation keeps the current connection. Pending refreshes cannot undo Stop.
+- Added actionable missing or damaged geodata errors with Resources, Retry and Dismiss actions.
+- Manual subscription operations now show cancellable progress and accurate success, partial-failure or error results. Work and source drafts survive screen rotation.
+- Made subscription refresh/import batches atomic and protected newer edits from stale concurrent updates.
+
+### Reliability
+
+- Preserve raw and Base64 JSON imports without losing unknown fields, and handle clipboard whitespace and byte-order marks.
+- Preserve profile identity and ordering when saving, and reject saves to profiles deleted while their editor was open.
+- Preserve routing-rule priority and unsupported rule content when switching between visual and JSON editing.
+- Accept successful zero-millisecond ping results and improve worker cleanup after cancellation or process death.
+- Failed or cancelled resource downloads no longer replace installed files with incomplete data.
+- Improved app-update version and ABI matching, and prevent installation of incomplete APK downloads.
+
+### Maintenance
+
+- Expanded regression coverage for subscriptions, profile persistence, VPN lifecycle, ping, routing, app updates and the editor.
+- Embedded Xray 26.10.21, hev-socks5-tunnel 2.19.3, the package ID and profile database schema are unchanged.
+- The separately managed root-mode Xray and existing large-UDP limitations are unchanged.
