@@ -7,24 +7,27 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.abi_target }}
+    name: Build ${{ matrix.output_label }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
       matrix:
         include:
           - native_arch: arm
-            abi_id: 1
             abi_target: armeabi-v7a
+            output_label: armeabi-v7a
           - native_arch: arm64
-            abi_id: 2
             abi_target: arm64-v8a
+            output_label: arm64-v8a
           - native_arch: '386'
-            abi_id: 3
             abi_target: x86
+            output_label: x86
           - native_arch: amd64
-            abi_id: 4
             abi_target: x86_64
+            output_label: x86_64
+          - native_arch: all
+            abi_target: armeabi-v7a,arm64-v8a,x86,x86_64
+            output_label: universal
 
     steps:
       - name: Checkout
@@ -87,17 +90,14 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew \
-            -PabiId=${{ matrix.abi_id }} \
             -PabiTarget=${{ matrix.abi_target }} \
             :app:assembleRelease
 
       - name: Stage APK
         run: |
-          BASE=$(cat app/versionCode.txt)
-          VC=$((BASE + ${{ matrix.abi_id }}))
           mkdir -p dist
-          mv "app/build/outputs/apk/release/app-${{ matrix.abi_target }}-release.apk" \
-             "dist/yaxc-${GITHUB_REF_NAME}-${{ matrix.abi_target }}-${VC}.apk"
+          mv "app/build/outputs/apk/release/app-${{ matrix.output_label }}-release.apk" \
+             "dist/yaxc-${GITHUB_REF_NAME}-${{ matrix.output_label }}.apk"
 
       - name: Cleanup keystore
         if: always()
@@ -106,7 +106,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yaxc-${{ matrix.abi_target }}
+          name: yaxc-${{ matrix.output_label }}
           path: dist/*.apk
           if-no-files-found: error
 
@@ -130,30 +130,27 @@ jobs:
       - name: Resolve release notes
         id: notes
         run: |
-          BASE=$(cat app/versionCode.txt)
-          VC=$((BASE + 4))
+          VC=$(cat app/versionCode.txt)
           CHANGELOG="metadata/en-US/changelogs/${VC}.txt"
-          if [ -f "$CHANGELOG" ]; then
-            {
-              echo "body<<EOF"
+          {
+            echo "body<<EOF"
+            if [ -f "$CHANGELOG" ]; then
               cat "$CHANGELOG"
-              echo
-              echo
-              echo "Build matrix: armeabi-v7a, arm64-v8a, x86, x86_64"
-              echo "Base versionCode: $BASE"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "body<<EOF"
+            else
               echo "Release $GITHUB_REF_NAME"
-              echo
-              echo "- Signed APKs are attached below."
-              echo "- Build matrix: armeabi-v7a, arm64-v8a, x86, x86_64"
-              echo "- Base versionCode: $BASE"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          fi
+            fi
+            echo
+            echo
+            echo "Not sure which APK to choose? Download yaxc-${GITHUB_REF_NAME}-universal.apk."
+            echo
+            echo "Signed APKs:"
+            for ABI in armeabi-v7a arm64-v8a x86 x86_64 universal; do
+              echo "- yaxc-${GITHUB_REF_NAME}-${ABI}.apk"
+            done
+            echo
+            echo "All APKs share versionCode: $VC"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

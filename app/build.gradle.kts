@@ -5,14 +5,9 @@ plugins {
     alias(libs.plugins.google.ksp)
 }
 
-val abiId: String by project
 val abiTarget: String by project
 
-fun calcVersionCode(): Int {
-    val versionCodeFile = file("versionCode.txt")
-    val versionCode = versionCodeFile.readText().trim().toInt()
-    return versionCode + abiId.toInt()
-}
+val targetAbis = abiTarget.split(",").toTypedArray()
 
 android {
     namespace = "io.github.derundevu.yaxc"
@@ -22,8 +17,8 @@ android {
         applicationId = "io.github.derundevu.yaxc"
         minSdk = 26
         targetSdk = 36
-        versionCode = calcVersionCode()
-        versionName = "1.5.2"
+        versionCode = file("versionCode.txt").readText().trim().toInt()
+        versionName = "1.5.3"
         testInstrumentationRunner = "io.github.derundevu.yaxc.testing.RegressionTestRunner"
     }
 
@@ -66,10 +61,10 @@ android {
     splits {
         abi {
             isEnable = true
-            isUniversalApk = false
+            isUniversalApk = targetAbis.size > 1
             reset()
             //noinspection ChromeOsAbiSupport
-            include(*abiTarget.split(",").toTypedArray())
+            include(*targetAbis)
         }
     }
 

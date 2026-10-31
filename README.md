@@ -31,8 +31,9 @@ Existing theme choices, including System default, are preserved.
 
 ## Install and connect
 
-1. Download an APK matching your device from [Releases](https://github.com/derundevu/yaxc/releases).
-   Most current phones use `arm64-v8a`.
+1. Download an APK from [Releases](https://github.com/derundevu/yaxc/releases).
+   Choose `yaxc-v1.5.2-universal.apk` if unsure which architecture your device uses.
+   For a smaller download, choose the matching ABI; most current phones use `arm64-v8a`.
 2. Add a subscription, select a profile and optionally check its latency.
    Use **Scan QR code** or **From Clipboard** to import an HTTPS subscription URL or a profile share link.
 3. Download `geoip.dat` and `geosite.dat` in Settings → Resources before connecting:

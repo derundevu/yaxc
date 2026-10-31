@@ -21,7 +21,7 @@ is_in_array() {
 }
 
 check_target() {
-  if ! is_in_array "$TARGET" "${ARCHS[@]}"; then
+  if [[ "$TARGET" != "all" ]] && ! is_in_array "$TARGET" "${ARCHS[@]}"; then
     echo "Not supported"
     exit 1
   fi
@@ -44,11 +44,15 @@ prepare_go() {
 
 build_android() {
   echo "Building XrayCore for $TARGET"
+  local targets="android/$TARGET"
+  if [[ "$TARGET" == "all" ]]; then
+    targets="android/arm,android/arm64,android/386,android/amd64"
+  fi
   rm -f "$DEST/XrayCore*"
   # Both tools are already installed from the locked module graph above.
   # gomobile init would reinstall gobind@latest; bind needs no OpenAL setup.
   # Match upstream Android builds: anet requires access to net.zoneCache.
-  gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "android/$TARGET" -ldflags="-buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" -trimpath
+  gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "$targets" -ldflags="-buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" -trimpath
 }
 
 refresh_dependencies() {

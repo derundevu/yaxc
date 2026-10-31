@@ -62,16 +62,18 @@ rm gradle/wrapper/gradle-wrapper.jar
 gradle clean
 
 # Build dependencies
-./buildGo.sh $NATIVE_ARCH
+./buildGo.sh "$NATIVE_ARCH"
 
 # Build app
 echo "$KS_FILE" > /tmp/yaxc_base64.txt
 base64 -d /tmp/yaxc_base64.txt > /tmp/yaxc.jks
-gradle -PabiId=$ABI_ID -PabiTarget=$ABI_TARGET assembleRelease
+gradle -PabiTarget="$ABI_TARGET" assembleRelease
 rm /tmp/yaxc_base64.txt /tmp/yaxc.jks
 
 # Build name
-VERSION_CODE=$(cat app/versionCode.txt)
-((VERSION_CODE += ABI_ID))
-BUILD_NAME="yaxc-$RELEASE_TAG-$VERSION_CODE.apk"
-mv "app/build/outputs/apk/release/app-$ABI_TARGET-release.apk" "$DIST_DIR/$BUILD_NAME"
+OUTPUT_LABEL="$ABI_TARGET"
+if [[ "$ABI_TARGET" == *,* ]]; then
+  OUTPUT_LABEL="universal"
+fi
+BUILD_NAME="yaxc-$RELEASE_TAG-$OUTPUT_LABEL.apk"
+mv "app/build/outputs/apk/release/app-$OUTPUT_LABEL-release.apk" "$DIST_DIR/$BUILD_NAME"

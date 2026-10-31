@@ -3,7 +3,7 @@ set -e
 
 TARGET="$1"
 ARCHS=(arm arm64 386 amd64)
-DEST="../app/src/main/assets"
+DEST="../app/src/main/assets/xrayhelpers"
 
 is_in_array() {
   local value="$1"
@@ -19,7 +19,7 @@ is_in_array() {
 }
 
 check_target() {
-  if ! is_in_array "$TARGET" "${ARCHS[@]}"; then
+  if [[ "$TARGET" != "all" ]] && ! is_in_array "$TARGET" "${ARCHS[@]}"; then
     echo "Not supported"
     exit 1
   fi
@@ -32,11 +32,26 @@ prepare_go() {
 
 build_android() {
   echo "Building XrayHelper for $TARGET"
-  local OUTPUT="$DEST/xrayhelper"
-  rm -f "$OUTPUT"
-  CGO_ENABLED=0 GOOS=linux GOARCH=$TARGET \
-    go build -v -o "$OUTPUT" \
-    -ldflags "-s -w -buildid=" -buildvcs=false -trimpath ./main
+  local targets=("$TARGET")
+  if [[ "$TARGET" == "all" ]]; then
+    targets=("${ARCHS[@]}")
+  fi
+
+  # Remove the legacy flat asset and any previously generated variants.
+  rm -rf "../app/src/main/assets/xrayhelper" "$DEST"
+  mkdir -p "$DEST"
+  local arch abi
+  for arch in "${targets[@]}"; do
+    case "$arch" in
+      arm) abi="armeabi-v7a" ;;
+      arm64) abi="arm64-v8a" ;;
+      386) abi="x86" ;;
+      amd64) abi="x86_64" ;;
+    esac
+    CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+      go build -v -o "$DEST/$abi" \
+      -ldflags "-s -w -buildid=" -buildvcs=false -trimpath ./main
+  done
 }
 
 check_target
