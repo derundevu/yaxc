@@ -20,6 +20,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -50,7 +52,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowVpnService
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = RegressionApplication::class, sdk = [34], shadows = [VpnBuilderShadow::class])
@@ -315,6 +320,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         startAndAwait()
         val first = boundary.devices.single()
         command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        command(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
         command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
         pumpUntil { boundary.devices.size == 2 && TProxyService.isActive() }
         first.assertClosed()
@@ -323,6 +329,90 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         assertEquals(1, boundary.coreStops)
         assertEquals(1, boundary.tunnelStops)
         assertTrue(boundary.coreRunning)
+        assertFalse("An older STOP must not stop the newer service start", shadowOf(service).isStoppedBySelf)
+        assertFalse("An older STOP must not remove the newer foreground notification", shadowOf(service).isForegroundStopped)
+        assertEquals(
+            listOf(
+                TProxyService.START_VPN_SERVICE_ACTION_NAME,
+                TProxyService.STOP_VPN_SERVICE_ACTION_NAME,
+                TProxyService.START_VPN_SERVICE_ACTION_NAME,
+            ),
+            broadcasts().map { it.action }.filter {
+                it == TProxyService.START_VPN_SERVICE_ACTION_NAME || it == TProxyService.STOP_VPN_SERVICE_ACTION_NAME
+            },
+        )
+    }
+
+    @Test
+    @Config(shadows = [VpnBuilderShadow::class, PendingStartServiceShadow::class])
+    fun startRecordedByAndroidBeforeItsCallbackSurvivesOlderStopCompletion() {
+        startAndAwait()
+        val first = boundary.devices.single()
+        val platform = shadowOf(service) as PendingStartServiceShadow
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        // AMS has accepted the next START, but its callback is still queued on the main thread.
+        platform.requestedStartId = startId + 1
+        pumpUntil { broadcasts().any { it.action == TProxyService.STOP_VPN_SERVICE_ACTION_NAME } }
+        first.assertClosed()
+        assertFalse(TProxyService.isActive())
+        assertFalse(platform.isStoppedBySelf)
+        assertFalse(platform.isForegroundStopped)
+
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.devices.size == 2 && TProxyService.isActive() }
+        boundary.devices.last().assertTraffic("AMS-queued start retained foreground ownership")
+        assertFalse(platform.isStoppedBySelf)
+        assertFalse(platform.isForegroundStopped)
+    }
+
+    @Test
+    @Config(shadows = [VpnBuilderShadow::class, PendingStartServiceShadow::class])
+    fun queuedStatusCompletesPendingStopWithoutLeavingAnIdleForegroundService() {
+        startAndAwait()
+        val platform = shadowOf(service) as PendingStartServiceShadow
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        platform.requestedStartId = startId + 1
+        pumpUntil { broadcasts().any { it.action == TProxyService.STOP_VPN_SERVICE_ACTION_NAME } }
+        assertFalse(platform.isStoppedBySelf)
+        val before = broadcasts().size
+
+        command(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { platform.isStoppedBySelf }
+        assertTrue(platform.isForegroundStopped)
+        val status = broadcasts().drop(before).single { it.action == TProxyService.STATUS_VPN_SERVICE_ACTION_NAME }
+        assertFalse(status.getBooleanExtra("isRunning", true))
+        assertFalse(boundary.coreRunning)
+        assertEquals(1, boundary.coreStarts)
+        boundary.devices.single().assertClosed()
+    }
+
+    @Test
+    fun foregroundStartDoesNotWaitForAnOlderNativeStop() {
+        service.commandDispatcher = Dispatchers.IO
+        startAndAwait()
+        val stoppingCore = CountDownLatch(1)
+        val releaseCore = CountDownLatch(1)
+        boundary.onCoreStop = {
+            stoppingCore.countDown()
+            check(releaseCore.await(15, TimeUnit.SECONDS)) { "Controlled native stop was not released" }
+        }
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        assertTrue(stoppingCore.await(5, TimeUnit.SECONDS))
+        val callbacks = Executors.newSingleThreadExecutor()
+        val started = callbacks.submit { command(TProxyService.START_VPN_SERVICE_ACTION_NAME) }
+        try {
+            started.get(5, TimeUnit.SECONDS)
+            assertEquals("Foreground acknowledgement must precede native teardown completion", 1L, releaseCore.count)
+        } finally {
+            releaseCore.countDown()
+            started.get(5, TimeUnit.SECONDS)
+            boundary.onCoreStop = null
+            callbacks.shutdownNow()
+        }
+        pumpUntil { boundary.devices.size == 2 && TProxyService.isActive() }
+        boundary.devices.last().assertTraffic("foreground start survived pending native stop")
+        assertFalse(shadowOf(service).isStoppedBySelf)
+        assertFalse(shadowOf(service).isForegroundStopped)
     }
 
     @Test
@@ -460,6 +550,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         settings.transparentProxy = true
         settings.tun2socks = false
         service.onRevoke()
+        pumpUntil { !TProxyService.isActive() }
         device.assertClosed()
         assertFalse(boundary.coreRunning)
         assertEquals(listOf(false), boundary.stoppedCoreModes)
@@ -476,6 +567,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         settings.transparentProxy = false
         settings.tun2socks = true
         service.onRevoke()
+        pumpUntil { !TProxyService.isActive() }
         assertFalse(boundary.transparentEnabled)
         assertFalse(boundary.coreRunning)
         assertEquals(listOf(true), boundary.stoppedCoreModes)
@@ -570,7 +662,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     fun missingSelectedProfileReportsFailureWithoutNativeOrDescriptorAcquisition() {
         settings.selectedProfile = 0
         command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
-        pumpUntil { ConnectionFailureState.failure.value != null }
+        pumpUntil { ConnectionFailureState.failure.value != null && shadowOf(service).isStoppedBySelf }
         assertFalse(TProxyService.isActive())
         assertEquals(0, boundary.validations)
         assertEquals(0, boundary.coreStarts)
@@ -707,7 +799,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         pumpUntil { boundary.validations == 2 }
         runBlocking { database.profileDao().delete(profile) }
         gate.complete("")
-        pumpUntil { !TProxyService.isActive() }
+        pumpUntil { broadcasts().any { it.action == TProxyService.STOP_VPN_SERVICE_ACTION_NAME } }
         device.assertClosed()
         assertFalse(boundary.coreRunning)
         assertEquals(1, boundary.coreStarts)
@@ -843,7 +935,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
             .getBooleanExtra("isRunning", false)
     }
 
-    private fun broadcasts(): List<Intent> = shadowOf(app).broadcastIntents
+    private fun broadcasts(): List<Intent> = shadowOf(app).broadcastIntents.toList()
 
     private fun pumpUntil(condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
@@ -892,6 +984,17 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         }
     }
 
+    @Implements(VpnService::class)
+    class PendingStartServiceShadow : ShadowVpnService() {
+        var requestedStartId = 0
+
+        @Implementation
+        override fun stopSelfResult(startId: Int): Boolean {
+            if (startId != requestedStartId) return false
+            return super.stopSelfResult(startId)
+        }
+    }
+
     private class OwnedRuntime : TProxyService.RuntimeBoundary, AutoCloseable {
         val devices = mutableListOf<Device>()
         val startedCoreModes = mutableListOf<Boolean>()
@@ -900,6 +1003,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         var diagnostic = ""
         var validations = 0
         var onTunnelStart: (() -> Unit)? = null
+        var onCoreStop: (() -> Unit)? = null
         var coreRunning = false
         var workerRunning = false
         var transparentEnabled = false
@@ -932,6 +1036,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         override fun stopCore(transparent: Boolean) {
             check(coreRunning) { "Core stopped without ownership" }
             assertEquals(startedCoreModes.last(), transparent)
+            onCoreStop?.invoke()
             coreRunning = false
             coreStops++
             stoppedCoreModes += transparent

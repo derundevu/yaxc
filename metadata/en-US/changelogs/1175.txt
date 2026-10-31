@@ -4,3 +4,4 @@
 - Simplified APK filenames; all variants share one versionCode for universal/ABI installs.
 - App routing: added a system-app filter and apps without their own INTERNET permission.
 - Matched the mode selector to Core Routing.
+- Fixed an app crash when immediately stopping and starting the VPN.

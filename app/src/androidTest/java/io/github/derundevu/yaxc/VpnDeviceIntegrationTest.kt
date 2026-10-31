@@ -4,9 +4,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
@@ -24,6 +30,7 @@ import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.XrayValidationHelper
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.testing.ChainedStreamTarget
+import io.github.derundevu.yaxc.testing.DeadlineInputStream
 import io.github.derundevu.yaxc.testing.LoopbackTarget
 import io.github.derundevu.yaxc.testing.ReloadSubscriptionTarget
 import kotlinx.coroutines.runBlocking
@@ -39,6 +46,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileDescriptor
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.UUID
@@ -61,6 +69,7 @@ class VpnDeviceIntegrationTest {
     private val events = LinkedBlockingQueue<Intent>()
     private var registered = false
     private var socksPort = 0
+    private var routedNetwork: Network? = null
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent) { events.offer(Intent(intent)) }
     }
@@ -340,8 +349,8 @@ class VpnDeviceIntegrationTest {
             .executeShellCommandRw("toybox nc -w 5 -W 5 198.18.0.1 ${target.port}")
         // nc may close its socket on stdin EOF before the peer sends its response.
         val response = ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use { request ->
-            request.write("GET /vpn-$stage HTTP/1.1\r\nHost: 198.18.0.1:${target.port}\r\nConnection: close\r\n\r\n".toByteArray())
-            DataInputStream(ParcelFileDescriptor.AutoCloseInputStream(pipes[0])).use { input ->
+            DataInputStream(DeadlineInputStream(pipes[0]).apply { beginResponse(10_000) }).use { input ->
+                request.write("GET /vpn-$stage HTTP/1.1\r\nHost: 198.18.0.1:${target.port}\r\nConnection: close\r\n\r\n".toByteArray())
                 val headers = buildString {
                     while (!endsWith("\r\n\r\n")) {
                         check(length < 16_384) { "VPN HTTP response headers exceed the fixture bound" }
@@ -393,29 +402,29 @@ class VpnDeviceIntegrationTest {
         // a peer that accepts exactly once make a reconnect incapable of satisfying the test.
         private val pipes = InstrumentationRegistry.getInstrumentation().uiAutomation
             .executeShellCommandRw("toybox nc -w 15 -W 15 198.18.0.1 $port")
-        private val input = DataInputStream(ParcelFileDescriptor.AutoCloseInputStream(pipes[0]))
+        private val response = DeadlineInputStream(pipes[0])
+        private val input = DataInputStream(response)
         private val output = DataOutputStream(ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]))
-        private val executor = Executors.newSingleThreadExecutor()
         private var expected = byteArrayOf()
 
         fun assertNextChainedResponse(payload: ByteArray) {
             expected += payload
-            val reply = executor.submit<ByteArray> {
-                output.writeInt(payload.size)
-                output.write(payload)
-                output.flush()
-                val size = input.readInt()
-                check(size in 1..16_384) { "Invalid chained response length: $size" }
-                ByteArray(size).also(input::readFully)
-            }.get(15, TimeUnit.SECONDS)
+            response.beginResponse(15_000)
+            output.writeInt(payload.size)
+            output.write(payload)
+            output.flush()
+            val size = input.readInt()
+            check(size in 1..16_384) { "Invalid chained response length: $size" }
+            val reply = ByteArray(size).also(input::readFully)
             assertArrayEquals("Established TCP connection lost or payload chain changed", expected, reply)
         }
 
         override fun close() {
-            output.close()
-            input.close()
-            executor.shutdownNow()
-            check(executor.awaitTermination(5, TimeUnit.SECONDS)) { "Shell stream reader did not stop" }
+            try {
+                output.close()
+            } finally {
+                input.close()
+            }
         }
     }
 
@@ -426,7 +435,46 @@ class VpnDeviceIntegrationTest {
             check(remaining > 0) { "Service did not publish $action; failure=${ConnectionFailureState.failure.value}" }
             val event = events.poll(remaining, TimeUnit.MILLISECONDS)
                 ?: error("Service did not publish $action; failure=${ConnectionFailureState.failure.value}")
-            if (event.action == action) return event
+            if (event.action == action) {
+                if (action == TProxyService.START_VPN_SERVICE_ACTION_NAME) awaitVpnRouting()
+                return event
+            }
+        }
+    }
+
+    private fun awaitVpnRouting() {
+        // establish()/START acknowledge native ownership, not ConnectivityService's later route
+        // publication. The application is excluded from its VPN, so observe other-UID networks.
+        // Reject the previous network: a restart must not pass this barrier on stale readiness.
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val networks = LinkedBlockingQueue<Network>()
+        val previousNetwork = routedNetwork
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+                val capabilities = manager.getNetworkCapabilities(network)
+                if (network != previousNetwork &&
+                    capabilities?.ownerUid == Process.myUid() &&
+                    properties.interfaceName?.startsWith("tun") == true &&
+                    properties.routes.any { it.isDefaultRoute && it.destination.address is Inet4Address }) {
+                    networks.offer(network)
+                }
+            }
+        }
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.adoptShellPermissionIdentity("android.permission.NETWORK_SETTINGS")
+        try {
+            manager.registerNetworkCallback(NetworkRequest.Builder()
+                .clearCapabilities()
+                .addTransportType(NetworkCapabilities.TRANSPORT_VPN)
+                .setIncludeOtherUidNetworks(true)
+                .build(), callback)
+        } finally {
+            automation.dropShellPermissionIdentity()
+        }
+        try {
+            routedNetwork = checkNotNull(networks.poll(5, TimeUnit.SECONDS)) { "New VPN routes were not published" }
+        } finally {
+            manager.unregisterNetworkCallback(callback)
         }
     }
 

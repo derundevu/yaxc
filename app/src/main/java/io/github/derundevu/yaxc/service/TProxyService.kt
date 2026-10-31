@@ -41,10 +41,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import kotlin.coroutines.CoroutineContext
@@ -123,6 +125,11 @@ class TProxyService : VpnService() {
     private var stopJob: Job? = null
     @Volatile
     private var configJob: Job? = null
+    // Android service lifetime is owned by the main thread, independently of native teardown.
+    private var latestStartId = 0
+    private var startGeneration = 0L
+    private var stopPending = false
+    private var serviceDestroyed = false
 
     private var isRunning: Boolean = false
     private var tunDevice: ParcelFileDescriptor? = null
@@ -130,6 +137,7 @@ class TProxyService : VpnService() {
     private val tunOwnerPolicyCache = linkedMapOf<Int, Boolean>()
     private var activeMode: RuntimeMode? = null
     private var activeConfig: RuntimeSnapshot? = null
+    @Volatile
     private var activeProfileName: String? = null
     @Volatile
     private var runtimeOptions: RuntimeOptions? = null
@@ -191,22 +199,30 @@ class TProxyService : VpnService() {
     private external fun TProxyGetStats(): LongArray
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        latestStartId = startId
+        val action = intent?.action
+        if (action == START_VPN_SERVICE_ACTION_NAME || action == RESTART_VPN_SERVICE_ACTION_NAME) {
+            startGeneration++
+            stopPending = false
+            startForeground(
+                VPN_SERVICE_NOTIFICATION_ID,
+                createNotification(activeProfileName ?: getString(R.string.connectionConnecting)),
+            )
+        }
+        val generation = startGeneration
+        when (action) {
             START_VPN_SERVICE_ACTION_NAME, RESTART_VPN_SERVICE_ACTION_NAME, NEW_CONFIG_SERVICE_ACTION_NAME -> {
                 val previous = commandJob
+                val previousStop = stopJob
                 configJob?.cancel()
                 ConnectionFailureState.clear()
-                if (intent.action == START_VPN_SERVICE_ACTION_NAME && !getIsRunning()) {
-                    startForeground(
-                        VPN_SERVICE_NOTIFICATION_ID,
-                        createNotification(getString(R.string.connectionConnecting)),
-                    )
-                }
                 configJob = scope.launch {
                     try {
+                        // Cancelling an intermediate config waiter must not let START overtake STOP.
+                        if (previousStop !== previous) previousStop?.join()
                         previous?.join()
                         currentCoroutineContext().ensureActive()
-                        configure(checkNotNull(intent.action))
+                        configure(checkNotNull(action), generation)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
@@ -219,37 +235,39 @@ class TProxyService : VpnService() {
                         currentCoroutineContext().ensureActive()
                         ConnectionFailureState.report(failure)
                         if (!getIsRunning()) {
-                            stopVpnInternal(notifyStop = false, stopService = true)
+                            stopVpn(generation, notifyStop = false)
                         }
                         broadcastStatus()
+                    } finally {
+                        withContext(NonCancellable + Dispatchers.Main.immediate) {
+                            finishPendingStop()
+                        }
                     }
                 }
                 commandJob = configJob
             }
-            STOP_VPN_SERVICE_ACTION_NAME -> {
-                val previousStop = stopJob
-                configJob?.cancel()
-                configJob = null
-                // The isolated constructor cannot be interrupted; it must not delay active teardown.
-                stopJob = scope.launch {
-                    previousStop?.join()
-                    stopVpnInternal(notifyStop = true, stopService = true)
-                }
-                commandJob = stopJob
+            STOP_VPN_SERVICE_ACTION_NAME -> enqueueStop()
+            STATUS_VPN_SERVICE_ACTION_NAME -> scope.launch {
+                broadcastStatus()
+                withContext(Dispatchers.Main.immediate) { finishPendingStop() }
             }
-            STATUS_VPN_SERVICE_ACTION_NAME -> scope.launch { broadcastStatus() }
-            NETWORK_UPDATE_SERVICE_ACTION_NAME -> scope.launch { transparentProxyHelper.networkUpdate() }
+            NETWORK_UPDATE_SERVICE_ACTION_NAME -> scope.launch {
+                transparentProxyHelper.networkUpdate()
+                withContext(Dispatchers.Main.immediate) { finishPendingStop() }
+            }
         }
         return START_STICKY
     }
 
     override fun onRevoke() {
-        stopVPN()
+        enqueueStop()
     }
 
     override fun onDestroy() {
+        serviceDestroyed = true
+        stopPending = false
         scope.cancel()
-        stopVpnInternal(notifyStop = false, stopService = false)
+        stopVpnInternal()
         cellularCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
         cellularCallback = null
         serviceRunning = getIsRunning()
@@ -267,7 +285,7 @@ class TProxyService : VpnService() {
         }
     }
 
-    private suspend fun configure(action: String) {
+    private suspend fun configure(action: String, generation: Long) {
         if (action == START_VPN_SERVICE_ACTION_NAME && getIsRunning()) return
         if (action == NEW_CONFIG_SERVICE_ACTION_NAME && !getIsRunning()) {
             broadcastStatus()
@@ -293,20 +311,23 @@ class TProxyService : VpnService() {
                         ),
                     )
                 }
+                if (candidate == null) {
+                    currentCoroutineContext().ensureActive()
+                    val hadRuntime = synchronized(runtimeLock) { activeMode != null }
+                    currentCoroutineContext().ensureActive()
+                    ConnectionFailureState.report(ConnectionFailure(getString(R.string.connectionMissingProfile)))
+                    check(stopVpn(generation, notifyStop = hadRuntime)) {
+                        "Failed to stop the previous VPN"
+                    }
+                    broadcastStatus()
+                    return@withTransaction true
+                }
                 val context = currentCoroutineContext()
                 synchronized(runtimeLock) {
                     context.ensureActive()
                     if (action == NEW_CONFIG_SERVICE_ACTION_NAME && !getIsRunning()) {
                         broadcastStatus()
                         return@synchronized true
-                    }
-                    if (candidate == null) {
-                        if (activeMode != null) {
-                            check(stopVpnInternal(notifyStop = true, stopService = true)) {
-                                "Failed to stop the previous VPN"
-                            }
-                        }
-                        checkNotNull(candidate) { getString(R.string.connectionMissingProfile) }
                     }
                     if (action == NEW_CONFIG_SERVICE_ACTION_NAME && candidate.snapshot == activeConfig) {
                         activeProfileName = candidate.name
@@ -355,13 +376,13 @@ class TProxyService : VpnService() {
                 notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(candidate.name))
                 broadcastStart(NEW_CONFIG_SERVICE_ACTION_NAME, candidate.name)
             } catch (error: Exception) {
-                stopVpnInternal(notifyStop = false, stopService = false)
+                stopVpnInternal()
                 throw error
             }
             return
         }
         if (activeMode != null) {
-            check(stopVpnInternal(notifyStop = false, stopService = false)) {
+            check(stopVpnInternal()) {
                 "Failed to stop the previous VPN"
             }
         }
@@ -374,7 +395,7 @@ class TProxyService : VpnService() {
             context.ensureActive()
             startVPN(candidate, context, action)
         } catch (error: Exception) {
-            stopVpnInternal(notifyStop = false, stopService = false)
+            stopVpnInternal()
             throw error
         }
     }
@@ -468,7 +489,8 @@ class TProxyService : VpnService() {
 
         /** Service Notification */
         val name = candidate.name
-        startForeground(VPN_SERVICE_NOTIFICATION_ID, createNotification(name))
+        activeProfileName = name
+        notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(name))
 
         /** Listen for cellular changes */
         if (cellularCallback == null) {
@@ -490,7 +512,6 @@ class TProxyService : VpnService() {
         isRunning = true
         serviceRunning = true
         activeConfig = candidate.snapshot
-        activeProfileName = name
         ConnectionFailureState.clear()
         broadcastStart(
             if (action == NEW_CONFIG_SERVICE_ACTION_NAME) action else START_VPN_SERVICE_ACTION_NAME,
@@ -498,15 +519,48 @@ class TProxyService : VpnService() {
         )
     }
 
-    private fun stopVPN() {
+    private fun enqueueStop() {
+        val previousStop = stopJob
+        val generation = startGeneration
         configJob?.cancel()
-        stopVpnInternal(notifyStop = true, stopService = true)
+        configJob = null
+        // The isolated constructor cannot be interrupted; it must not delay active teardown.
+        stopJob = scope.launch {
+            previousStop?.join()
+            stopVpn(generation, notifyStop = true)
+        }
+        commandJob = stopJob
     }
 
-    private fun stopVpnInternal(
-        notifyStop: Boolean,
-        stopService: Boolean,
-    ): Boolean = synchronized(runtimeLock) {
+    private suspend fun stopVpn(generation: Long, notifyStop: Boolean): Boolean {
+        if (!stopVpnInternal()) {
+            if (notifyStop) {
+                sendBroadcast(Intent(STOP_FAILED_SERVICE_ACTION_NAME).setPackage(BuildConfig.APPLICATION_ID))
+            }
+            return false
+        }
+        withContext(NonCancellable + Dispatchers.Main.immediate) {
+            if (serviceDestroyed) return@withContext
+            if (generation == startGeneration) {
+                stopPending = true
+                finishPendingStop()
+            }
+            // A replacement runtime waits for this job, so STOP is acknowledged before its START.
+            if (notifyStop) broadcastStop()
+        }
+        return true
+    }
+
+    private fun finishPendingStop() {
+        if (serviceDestroyed || !stopPending) return
+        // AMS may already know a newer start that onStartCommand has not received yet.
+        if (stopSelfResult(latestStartId)) {
+            stopPending = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
+    }
+
+    private fun stopVpnInternal(): Boolean = synchronized(runtimeLock) {
         synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
         val mode = activeMode
         if (mode == RuntimeMode.TRANSPARENT) {
@@ -514,9 +568,6 @@ class TProxyService : VpnService() {
         } else if (tunDevice != null) {
             if (!runtime.stopTunnel()) {
                 Log.e("TProxyService", "Failed to join tun2socks worker")
-                if (notifyStop) {
-                    sendBroadcast(Intent(STOP_FAILED_SERVICE_ACTION_NAME).setPackage(BuildConfig.APPLICATION_ID))
-                }
                 return false
             }
             runCatching { tunDevice?.close() }
@@ -529,13 +580,6 @@ class TProxyService : VpnService() {
         runtimeOptions = null
         serviceRunning = false
         if (mode != null) runtime.stopCore(mode == RuntimeMode.TRANSPARENT)
-        if (notifyStop) {
-            broadcastStop()
-        }
-        if (stopService) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        }
         return true
     }
 
