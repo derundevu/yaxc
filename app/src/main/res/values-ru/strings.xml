@@ -142,7 +142,6 @@
     <string name="routingRuleStatusOn">ВКЛ</string>
     <string name="routingRuleStatusOff">ВЫКЛ</string>
     <string name="routingRuleSummary">%1$s • %2$s • %3$s • %4$s</string>
-    <string name="appsRoutingModeTitle">Режим маршрутизации</string>
     <string name="appsRoutingModeHelp">Справка по режимам</string>
     <string name="appsRoutingModeHelpTitle">Как работают режимы маршрутизации</string>
     <string name="appsRoutingModeHelpBody">Выкл: раздельная маршрутизация по приложениям отключена. Весь трафик пользовательских приложений идет через VPN.\n\nИсключить выбранные приложения: отмеченные приложения обходят VPN, а все остальные продолжают работать через VPN.\n\nВключить только выбранные приложения: только отмеченные приложения используют VPN, а все остальные его обходят.\n\nИспользуйте Выкл, когда нужен простой туннель для всего устройства. Используйте режим исключения, когда большинство приложений должно идти через туннель, а только несколько — вне его. Используйте режим включения, когда VPN нужен лишь для небольшой группы приложений.</string>
@@ -150,6 +149,7 @@
     <string name="appsRoutingModeExcludeShort">Исключить</string>
     <string name="appsRoutingModeIncludeShort">Только включить</string>
     <string name="appsRoutingSelectedCount">Выбрано приложений: %1$d</string>
+    <string name="appsRoutingShowSystemApps">Показывать системные приложения</string>
     <string name="noAppsFound">По этому запросу приложения не найдены.</string>
     <string name="search">Поиск</string>
     <string name="configs">Конфиги</string>
@@ -221,7 +221,6 @@
     <string name="saveConfigs">Сохранить конфиги</string>
     <string name="invalidConfig">Неверный конфиг</string>
     <string name="loadingConfig">Загрузка конфига…</string>
-    <string name="appsRoutingDisabledMode">Режим: маршрутизация приложений выключена</string>
     <string name="appsRoutingExcludeMode">Режим: исключить выбранные приложения</string>
     <string name="appsRoutingIncludeMode">Режим: только выбранные приложения</string>
     <string name="saveSettings">Сохранить настройки</string>

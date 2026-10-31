@@ -87,7 +87,8 @@
             android:parentActivityName=".activity.MainActivity" />
         <activity
             android:name=".activity.AppsRoutingActivity"
-            android:parentActivityName=".activity.MainActivity" />
+            android:parentActivityName=".activity.MainActivity"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".activity.CoreRoutingActivity"
             android:parentActivityName=".activity.MainActivity" />

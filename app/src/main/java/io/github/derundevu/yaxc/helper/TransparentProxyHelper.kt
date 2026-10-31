@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.helper
 
 import android.content.Context
+import android.os.Build
 import com.topjohnwu.superuser.Shell
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
@@ -98,7 +99,11 @@ class TransparentProxyHelper(
         val xrayHelperVersionCode = settings.xrayHelperVersionCode
         if (xrayHelper.exists() && xrayHelperVersionCode == appVersionCode) return
         if (xrayHelper.exists()) xrayHelper.delete()
-        context.assets.open(xrayHelper.name).use { input ->
+        val assetPath = xrayHelperAssetPath(
+            Build.SUPPORTED_ABIS,
+            context.assets.list("xrayhelpers").orEmpty(),
+        )
+        context.assets.open(assetPath).use { input ->
             FileOutputStream(xrayHelper).use { output ->
                 input.copyTo(output)
             }
@@ -166,4 +171,10 @@ class TransparentProxyHelper(
             AppsRoutingMode.Include -> "whitelist"
         }
     }
+}
+
+internal fun xrayHelperAssetPath(supportedAbis: Array<out String>, packagedAbis: Array<out String>): String {
+    val abi = supportedAbis.firstOrNull { it in packagedAbis }
+        ?: error("No compatible XrayHelper for this device")
+    return "xrayhelpers/$abi"
 }

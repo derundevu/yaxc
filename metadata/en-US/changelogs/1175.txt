@@ -1,5 +1,6 @@
 ## What's new in 1.5.3
 
-- Added a universal APK for all four supported architectures. Choose it if unsure which architecture your device uses.
-- Simplified APK filenames to include only the app version and architecture or universal label.
-- All APK variants now share one versionCode, allowing installation of universal and architecture-specific APKs over each other within the same release.
+- Added a four-ABI universal APK; choose it if unsure.
+- Simplified APK filenames; all variants share one versionCode for universal/ABI installs.
+- App routing: added a system-app filter and apps without their own INTERNET permission.
+- Matched the mode selector to Core Routing.

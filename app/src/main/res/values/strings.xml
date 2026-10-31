@@ -142,7 +142,6 @@
     <string name="routingRuleStatusOn">ON</string>
     <string name="routingRuleStatusOff">OFF</string>
     <string name="routingRuleSummary">%1$s • %2$s • %3$s • %4$s</string>
-    <string name="appsRoutingModeTitle">Routing mode</string>
     <string name="appsRoutingModeHelp">Routing mode help</string>
     <string name="appsRoutingModeHelpTitle">How routing modes work</string>
     <string name="appsRoutingModeHelpBody">Off: app split routing is disabled. All user app traffic goes through the VPN.\n\nExclude selected apps: the apps you choose bypass the VPN, and all other apps continue using the VPN.\n\nInclude only selected apps: only the apps you choose use the VPN, and all other apps bypass it.\n\nUse Off when you want one simple full-device tunnel. Use Exclude when most apps should stay inside the tunnel and only a few should bypass it. Use Include when the VPN is needed only for a small set of apps.</string>
@@ -150,6 +149,7 @@
     <string name="appsRoutingModeExcludeShort">Exclude</string>
     <string name="appsRoutingModeIncludeShort">Include</string>
     <string name="appsRoutingSelectedCount">%1$d apps selected</string>
+    <string name="appsRoutingShowSystemApps">Show system apps</string>
     <string name="noAppsFound">No apps found for this search.</string>
     <string name="search">Search</string>
     <string name="configs">Configs</string>
@@ -221,7 +221,6 @@
     <string name="saveConfigs">Save Configs</string>
     <string name="invalidConfig">Invalid config</string>
     <string name="loadingConfig">Loading config…</string>
-    <string name="appsRoutingDisabledMode">Mode: app routing off</string>
     <string name="appsRoutingExcludeMode">Mode: Exclude selected apps</string>
     <string name="appsRoutingIncludeMode">Mode: Include only selected apps</string>
     <string name="saveSettings">Save Settings</string>

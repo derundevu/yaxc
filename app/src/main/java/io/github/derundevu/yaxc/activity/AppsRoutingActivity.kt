@@ -1,7 +1,6 @@
 package io.github.derundevu.yaxc.activity
 
-import android.Manifest
-import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.compose.setContent
@@ -37,8 +36,10 @@ class AppsRoutingActivity : AppCompatActivity() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }
-        selectedPackages = selectedPackagesFromSettings()
-        appsRoutingMode = settings.appsRoutingMode
+        selectedPackages = savedInstanceState?.getStringArrayList("selectedPackages")?.toSet()
+            ?: selectedPackagesFromSettings()
+        appsRoutingMode = savedInstanceState?.getString("routingMode")?.let(AppsRoutingMode::fromValue)
+            ?: settings.appsRoutingMode
 
         setContent {
             YaxcAppTheme {
@@ -62,33 +63,37 @@ class AppsRoutingActivity : AppCompatActivity() {
         getApps()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putStringArrayList("selectedPackages", ArrayList(selectedPackages))
+        outState.putString("routingMode", appsRoutingMode.value)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun getApps() {
         lifecycleScope.launch {
-            val selectedPackages = selectedPackagesFromSettings()
+            val selectedPackages = this@AppsRoutingActivity.selectedPackages
             val apps = withContext(Dispatchers.IO) {
                 val selected = ArrayList<AppList>()
                 val unselected = ArrayList<AppList>()
 
-                packageManager.getInstalledPackages(PackageManager.GET_PERMISSIONS).forEach {
-                    val permissions = it.requestedPermissions
-                    if (permissions == null || !permissions.contains(Manifest.permission.INTERNET)) {
-                        return@forEach
-                    }
-                    if (it.packageName == packageName) return@forEach
+                packageManager.getInstalledApplications(0).forEach { info ->
+                    if (info.packageName == packageName) return@forEach
 
-                    val appIcon = it.applicationInfo!!.loadIcon(packageManager)
-                    val appName = it.applicationInfo!!.loadLabel(packageManager).toString()
-                    val packageName = it.packageName
-                    val app = AppList(appIcon, appName, packageName)
+                    val app = AppList(
+                        appIcon = info.loadIcon(packageManager),
+                        appName = info.loadLabel(packageManager).toString(),
+                        packageName = info.packageName,
+                        isSystem = info.flags and
+                            (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0,
+                    )
 
-                    if (selectedPackages.contains(packageName)) selected.add(app) else unselected.add(app)
+                    if (selectedPackages.contains(info.packageName)) selected.add(app) else unselected.add(app)
                 }
 
                 selected + unselected
             }
 
             this@AppsRoutingActivity.apps = apps
-            this@AppsRoutingActivity.selectedPackages = selectedPackages
             isLoading = false
         }
     }

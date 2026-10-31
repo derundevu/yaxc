@@ -6,4 +6,5 @@ data class AppList(
     var appIcon: Drawable,
     var appName: String,
     var packageName: String,
+    val isSystem: Boolean,
 )
