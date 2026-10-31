@@ -18,3 +18,12 @@ local.properties
 RELEASE.sh
 RELEASING.md
 /.android/
+
+# md files
+AGENTS.md
+PROJECT_STATE.md
+TODO.md
+docs/XRAY_26_10_MIGRATION.md
+
+# local test scripts
+local_build.sh
