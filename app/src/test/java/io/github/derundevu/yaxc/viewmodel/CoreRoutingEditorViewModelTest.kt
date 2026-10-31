@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.json.JSONArray
 import org.json.JSONObject
@@ -324,7 +325,11 @@ class CoreRoutingEditorViewModelTest : RoomTestSupport() {
             tags(JSONObject(database.configDao().get()!!.routing).getJSONArray("rules")))
     }
 
-    private suspend fun editor(): CoreRoutingEditorViewModel = CoreRoutingEditorViewModel(app).also {
+    private suspend fun editor(): CoreRoutingEditorViewModel = CoreRoutingEditorViewModel(
+        app,
+        // Separate from Main so UNDISPATCHED operations pause before processing their captured snapshot.
+        StandardTestDispatcher(mainDispatcher.dispatcher.scheduler),
+    ).also {
         models += it
         it.viewModelScope.coroutineContext[Job]!!.children.toList().joinAll()
         assertFalse(it.isLoading)

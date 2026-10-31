@@ -19,12 +19,18 @@ import io.github.derundevu.yaxc.helper.ParsedCoreRouting
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorTools
 import io.github.derundevu.yaxc.service.TProxyService
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(application) {
+class CoreRoutingEditorViewModel internal constructor(
+    application: Application,
+    private val computationDispatcher: CoroutineDispatcher,
+) : AndroidViewModel(application) {
+    constructor(application: Application) : this(application, Dispatchers.Default)
+
     private val app = getApplication<Yaxc>()
     private val settings = Settings(application)
     val document = JsonEditorState("{}")
@@ -74,14 +80,14 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
             if (mode == CoreRoutingEditorMode.Json) {
                 if (visualDirty) {
                     val snapshot = visualSnapshot()
-                    val json = withContext(Dispatchers.Default) { buildJson(snapshot) }
+                    val json = withContext(computationDispatcher) { buildJson(snapshot) }
                     document.replaceText(json)
                     visualDirty = false
                 }
             } else {
                 val raw = document.text
                 val stored = rules
-                val parsed = withContext(Dispatchers.Default) {
+                val parsed = withContext(computationDispatcher) {
                     if (JsonEditorTools.validate(raw, document.root) != null) null
                     else runCatching { CoreRoutingHelper.parseRoutingJson(raw, stored, defaultRuleName) }.getOrNull()
                 } ?: return false
@@ -133,7 +139,7 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
         val raw = document.text
         val snapshot = visualSnapshot()
         try {
-            val prepared = withContext(Dispatchers.Default) {
+            val prepared = withContext(computationDispatcher) {
                 runCatching {
                     if (mode == CoreRoutingEditorMode.Json) {
                         JsonEditorTools.validate(raw, document.root)?.let { return@runCatching null }
@@ -175,7 +181,7 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
         isBusy = true
         val fallback = domainStrategy
         try {
-            val imported = withContext(Dispatchers.Default) {
+            val imported = withContext(computationDispatcher) {
                 runCatching {
                     val parsed = CoreRoutingHelper.parseImportedRules(raw, fallback, defaultRuleName)
                     parsed to buildJson(parsed)
@@ -198,7 +204,7 @@ class CoreRoutingEditorViewModel(application: Application) : AndroidViewModel(ap
         val raw = document.text
         val snapshot = visualSnapshot()
         try {
-            return withContext(Dispatchers.Default) {
+            return withContext(computationDispatcher) {
                 runCatching {
                     val parsed = if (mode == CoreRoutingEditorMode.Json) {
                         if (JsonEditorTools.validate(raw, document.root) != null) return@runCatching null
