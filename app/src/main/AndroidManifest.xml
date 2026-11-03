@@ -93,6 +93,12 @@
             android:name=".activity.CoreRoutingActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity
+            android:name=".activity.LiveRoutingActivity"
+            android:parentActivityName=".activity.RoutingActivity"
+            android:exported="false"
+            android:label="@string/liveRouting"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".activity.ConfigsActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity

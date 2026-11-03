@@ -157,6 +157,8 @@ class MainActivity : AppCompatActivity() {
                     tabs = uiState.tabs,
                     selectedTabId = uiState.selectedTabId,
                     selectedSourceId = uiState.selectedSourceId,
+                    liveRoutingAvailable = uiState.liveRoutingAvailable,
+                    liveRoutingDefaultGroupName = uiState.liveRoutingDefaultGroupName,
                     isRunning = uiState.isRunning,
                     connectionFailure = uiState.connectionFailure,
                     selectedSourceName = uiState.selectedSourceName,
@@ -352,6 +354,9 @@ class MainActivity : AppCompatActivity() {
             }
             MainEffect.OpenCoreRouting -> {
                 startActivity(Intent(applicationContext, CoreRoutingActivity::class.java))
+            }
+            MainEffect.OpenLiveRouting -> {
+                startActivity(Intent(applicationContext, LiveRoutingActivity::class.java))
             }
             MainEffect.OpenConfigs -> {
                 startActivity(Intent(applicationContext, ConfigsActivity::class.java))

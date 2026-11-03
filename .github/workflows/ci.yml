@@ -89,11 +89,17 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run native compatibility, ownership and cancellation regressions
+      - name: Run native compatibility, live routing and cancellation regressions
         working-directory: XrayCore
         run: |
-          go test -mod=readonly -race -count=1 -timeout=90s .
-          go test -mod=readonly -count=1 -timeout=30s github.com/xtls/libxray/nodep
+          go test -mod=readonly -race -count=1 -timeout=240s . ./lib \
+            github.com/xtls/xray-core/app/observatory \
+            github.com/xtls/xray-core/app/router \
+            github.com/xtls/xray-core/app/proxyman/outbound \
+            github.com/xtls/xray-core/transport/internet \
+            github.com/xtls/xray-core/transport/internet/tls \
+            github.com/xtls/xray-core/transport/internet/splithttp
+          go test -mod=readonly -count=1 -timeout=90s github.com/xtls/libxray/nodep github.com/xtls/libxray/share
 
       - name: Run core splice transition regressions
         working-directory: XrayCore/Xray-core

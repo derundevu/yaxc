@@ -112,7 +112,7 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getLong("selectedLink", 0L)
         set(value) = sharedPreferences.edit { putLong("selectedLink", value) }
 
-    /** Active Profile ID */
+    /** Selected connection: a positive Room profile ID, 0 for none, or -1 for Live Routing. */
     var selectedProfile: Long
         get() = sharedPreferences.getLong("selectedProfile", 0L)
         set(value) = sharedPreferences.edit { putLong("selectedProfile", value) }
@@ -152,6 +152,10 @@ class Settings(private val context: Context) {
     var coreRoutingDefaultsVersion: Int
         get() = sharedPreferences.getInt("coreRoutingDefaultsVersion", 0)
         set(value) = sharedPreferences.edit { putInt("coreRoutingDefaultsVersion", value) }
+    /** Atomic proxy-group and ordered application/domain routing plan. */
+    var liveRoutingPlan: String
+        get() = sharedPreferences.getString("liveRoutingPlan", "{}")!!
+        set(value) = sharedPreferences.edit { putString("liveRoutingPlan", value) }
 
     /** Tun Routes */
     var tunRoutes: Set<String>

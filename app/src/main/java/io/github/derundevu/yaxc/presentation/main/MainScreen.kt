@@ -22,6 +22,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.overscroll
 import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.withoutVisualEffect
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -125,6 +126,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -145,6 +147,7 @@ import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.helper.ConnectionFailure
 import io.github.derundevu.yaxc.helper.GeodataProblem
+import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
@@ -185,6 +188,8 @@ fun MainScreen(
     tabs: List<Link>,
     selectedTabId: Long,
     selectedSourceId: Long,
+    liveRoutingAvailable: Boolean,
+    liveRoutingDefaultGroupName: String,
     isRunning: Boolean,
     connectionFailure: ConnectionFailure?,
     selectedSourceName: String,
@@ -216,6 +221,7 @@ fun MainScreen(
     val spacing = YaxcTheme.spacing
     val density = LocalDensity.current
     val navigationBarBottom = WindowInsets.navigationBars.getBottom(density)
+    val liveRoutingSelected = selectedProfileId == LiveRoutingHelper.CONNECTION_PROFILE_ID
     val gestureNavigation = navigationBarBottom <= with(density) { 32.dp.roundToPx() }
     val reservedBottomInset = if (gestureNavigation) 0.dp else with(density) { navigationBarBottom.toDp() }
     val connectBottomPadding = 162.dp + reservedBottomInset
@@ -280,6 +286,8 @@ fun MainScreen(
                                     tabs = tabs,
                                     selectedTabId = selectedTabId,
                                     selectedSourceId = selectedSourceId,
+                                    liveRoutingAvailable = liveRoutingAvailable,
+                                    liveRoutingDefaultGroupName = liveRoutingDefaultGroupName,
                                     isRunning = isRunning,
                                     selectedSourceName = selectedSourceName,
                                     selectedSourceMetadata = selectedSourceMetadata,
@@ -312,6 +320,7 @@ fun MainScreen(
                                     bottomPadding = tabBottomPadding,
                                     onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
                                     onOpenCoreRouting = { onAction(MainAction.OpenCoreRoutingClicked) },
+                                    onOpenLiveRouting = { onAction(MainAction.OpenLiveRoutingClicked) },
                                 )
                             }
 
@@ -354,7 +363,9 @@ fun MainScreen(
                     selectedProfileName = selectedProfileName,
                     pingState = pingState,
                     onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
-                    onPingCurrent = { onAction(MainAction.PingClicked) },
+                    onPingCurrent = {
+                        onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                    },
                     onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
                     onRefreshSource = {
                         if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
@@ -620,6 +631,8 @@ private fun ConnectContent(
     selectedTabId: Long,
     selectedSourceId: Long,
     isRunning: Boolean,
+    liveRoutingAvailable: Boolean,
+    liveRoutingDefaultGroupName: String,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
     selectedSourceLastRefreshedAt: Long?,
@@ -644,6 +657,8 @@ private fun ConnectContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
 ) {
     val spacing = YaxcTheme.spacing
+    val liveRoutingSelected = selectedProfileId == LiveRoutingHelper.CONNECTION_PROFILE_ID
+    val sourceHeaderOffset = if (liveRoutingAvailable) 2 else 1
     val density = LocalDensity.current
     val panelPadding = YaxcTheme.paddings.regular
     val layoutDirection = LocalLayoutDirection.current
@@ -687,6 +702,7 @@ private fun ConnectContent(
     val currentCollapsedSourceHeight = rememberUpdatedState(collapsedSourceHeightPx)
     val currentSelectedTabId = rememberUpdatedState(selectedTabId)
     val currentBodyCount = rememberUpdatedState(profiles.size.coerceAtLeast(1))
+    val currentSourceHeaderOffset = rememberUpdatedState(sourceHeaderOffset)
 
     fun finishSourceDrag(cancelled: Boolean) {
         val sourceId = draggingSourceId ?: return
@@ -694,7 +710,7 @@ private fun ConnectContent(
             localSourceOrder ?: currentOrderedTabIds.value
         val sourceIndex = finalOrder.indexOf(sourceId)
         val expandedIndex = finalOrder.indexOf(currentSelectedTabId.value)
-        val headerIndex = 1 + sourceIndex + if (expandedIndex in 0 until sourceIndex) {
+        val headerIndex = currentSourceHeaderOffset.value + sourceIndex + if (expandedIndex in 0 until sourceIndex) {
             currentBodyCount.value + 1
         } else {
             0
@@ -745,7 +761,7 @@ private fun ConnectContent(
         if (expandedSourceIndex >= 0 && draggingSourceId == null) {
             ExpandedSourceBackground(
                 listState = listState,
-                headerIndex = 1 + expandedSourceIndex,
+                headerIndex = sourceHeaderOffset + expandedSourceIndex,
                 bodyCount = profiles.size.coerceAtLeast(1),
                 headerHeightPx = if (headerContentHeightPx == 0) 0 else {
                     headerContentHeightPx + with(density) { panelTopPadding.roundToPx() }
@@ -775,10 +791,24 @@ private fun ConnectContent(
                     selectedProfileName = selectedProfileName,
                     pingState = pingState,
                     collapseProgress = collapseProgress,
-                    onPingCurrent = { onAction(MainAction.PingClicked) },
+                    onPingCurrent = {
+                        onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                    },
                     onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
                 )
                 Spacer(Modifier.height(spacing.md))
+            }
+
+            if (liveRoutingAvailable) {
+                item(key = "live-routing", contentType = "live_routing") {
+                    LiveRoutingConnectionCard(
+                        isSelected = liveRoutingSelected,
+                        defaultGroupName = liveRoutingDefaultGroupName,
+                        onSelect = { onAction(MainAction.SelectProfile(LiveRoutingHelper.CONNECTION_PROFILE_ID)) },
+                        onConfigure = { onAction(MainAction.OpenLiveRoutingClicked) },
+                    )
+                    Spacer(Modifier.height(spacing.md))
+                }
             }
 
             orderedTabs.forEach { source ->
@@ -812,7 +842,7 @@ private fun ConnectContent(
                                 draggedCenterY = center
                                 draggingSourceId = source.id
                                 listState.requestScrollToItem(
-                                    index = 1 + initialIndex,
+                                    index = currentSourceHeaderOffset.value + initialIndex,
                                     scrollOffset = -header.offset,
                                 )
                             },
@@ -924,7 +954,7 @@ private fun ConnectContent(
                     }
                 }
             }
-            if (tabs.isEmpty()) {
+            if (tabs.isEmpty() && !liveRoutingAvailable) {
                 item(key = "empty_sources") {
                     EmptySourcesCard()
                     Spacer(Modifier.height(spacing.md))
@@ -942,11 +972,67 @@ private fun ConnectContent(
 }
 
 @Composable
+private fun LiveRoutingConnectionCard(
+    isSelected: Boolean,
+    defaultGroupName: String,
+    onSelect: () -> Unit,
+    onConfigure: () -> Unit,
+) {
+    val accent = if (isSelected) YaxcTheme.extendedColors.success else MaterialTheme.colorScheme.primary
+    YaxcGlassPanel(
+        modifier = Modifier
+            .testTag("main:live-routing")
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onSelect),
+        contentPadding = YaxcTheme.paddings.regular,
+        accentColor = accent,
+        accentAlpha = if (isSelected) 0.22f else 0.08f,
+        borderColor = if (isSelected) accent.copy(alpha = 0.46f)
+            else yaxcSoftStroke(darkAlpha = 0.12f, lightAlpha = 0.92f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.AutoMirrored.Outlined.AltRoute, contentDescription = null, tint = accent)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = stringResource(R.string.liveRouting),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.liveRoutingConnectionLead),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YaxcTheme.extendedColors.textMuted,
+                )
+                Text(
+                    text = if (defaultGroupName.isNotBlank()) {
+                        stringResource(R.string.liveRoutingDefaultGroupLabel, defaultGroupName)
+                    } else stringResource(R.string.liveRoutingMissingGroup),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (defaultGroupName.isNotBlank()) YaxcTheme.extendedColors.textMuted
+                        else MaterialTheme.colorScheme.error,
+                )
+            }
+            IconButton(onClick = onConfigure, modifier = Modifier.testTag("main:live-routing:settings")) {
+                Icon(
+                    Icons.Outlined.Settings,
+                    contentDescription = stringResource(R.string.liveRouting),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun RoutingContent(
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onOpenAppsRouting: () -> Unit,
     onOpenCoreRouting: () -> Unit,
+    onOpenLiveRouting: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     LazyColumn(
@@ -959,6 +1045,15 @@ private fun RoutingContent(
         ),
         verticalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
+        item {
+            SettingsActionCard(
+                icon = Icons.AutoMirrored.Outlined.AltRoute,
+                title = textResource(R.string.liveRouting),
+                description = textResource(R.string.liveRoutingEntryLead),
+                onClick = onOpenLiveRouting,
+                showChevron = false,
+            )
+        }
         item {
             SettingsActionCard(
                 icon = Icons.AutoMirrored.Outlined.AltRoute,

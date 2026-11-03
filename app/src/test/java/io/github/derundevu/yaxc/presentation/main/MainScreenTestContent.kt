@@ -10,6 +10,8 @@ internal fun MainScreenTestContent(state: MainUiState, onAction: (MainAction) ->
         tabs = state.tabs,
         selectedTabId = state.selectedTabId,
         selectedSourceId = state.selectedSourceId,
+        liveRoutingAvailable = state.liveRoutingAvailable,
+        liveRoutingDefaultGroupName = state.liveRoutingDefaultGroupName,
         isRunning = state.isRunning,
         connectionFailure = state.connectionFailure,
         selectedSourceName = state.selectedSourceName,

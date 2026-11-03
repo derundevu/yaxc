@@ -21,8 +21,11 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbac
 import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
 import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
+import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.service.TProxyService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -115,6 +118,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldTransparentProxy = settings.transparentProxy
         val oldLanguageTag = settings.languageTag
         val oldThemeStyle = settings.themeStyle
+        val oldPingAddress = settings.pingAddress.trim()
 
         val newSocksAddress = formState.socksAddress.trim()
         val newSocksPort = formState.socksPort.trim()
@@ -235,6 +239,12 @@ class SettingsActivity : AppCompatActivity() {
 
             if (restartService) {
                 TProxyService.restart(this@SettingsActivity)
+            } else if (oldPingAddress != settings.pingAddress.trim() && TProxyService.isActive()) {
+                val healthEnabled = withContext(Dispatchers.IO) {
+                    runCatching { LiveRoutingHelper.decode(settings.liveRoutingPlan).groups.any { it.checkAvailability } }
+                        .getOrDefault(false)
+                }
+                if (healthEnabled && TProxyService.isActive()) TProxyService.applyRouting(this@SettingsActivity)
             }
 
             if (themeChanged) {

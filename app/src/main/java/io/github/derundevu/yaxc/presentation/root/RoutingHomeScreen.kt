@@ -29,6 +29,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 fun RoutingHomeScreen(
     onOpenAppsRouting: () -> Unit,
     onOpenCoreRouting: () -> Unit,
+    onOpenLiveRouting: () -> Unit,
     onSelectDestination: (RootDestination) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
@@ -69,6 +70,14 @@ fun RoutingHomeScreen(
                         text = textResource(R.string.routingScreenLead),
                         style = MaterialTheme.typography.bodyLarge,
                         color = YaxcTheme.extendedColors.textMuted,
+                    )
+                }
+                item {
+                    RootSectionCard(
+                        icon = Icons.Outlined.Hub,
+                        title = textResource(R.string.liveRouting),
+                        description = textResource(R.string.liveRoutingEntryLead),
+                        onClick = onOpenLiveRouting,
                     )
                 }
                 item {

@@ -37,6 +37,7 @@ sealed interface MainAction {
     data object OpenConnectionInfoClicked : MainAction
     data object OpenAppsRoutingClicked : MainAction
     data object OpenCoreRoutingClicked : MainAction
+    data object OpenLiveRoutingClicked : MainAction
     data object OpenConfigsClicked : MainAction
     data object OpenSettingsClicked : MainAction
 }

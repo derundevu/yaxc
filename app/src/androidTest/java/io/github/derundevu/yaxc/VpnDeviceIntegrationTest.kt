@@ -26,6 +26,11 @@ import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.database.YaxcDatabase
 import io.github.derundevu.yaxc.helper.ConnectionFailureState
+import io.github.derundevu.yaxc.helper.AppDomainRule
+import io.github.derundevu.yaxc.helper.LiveRoutingHelper
+import io.github.derundevu.yaxc.helper.LiveRoutingPlan
+import io.github.derundevu.yaxc.helper.ProxyGroup
+import io.github.derundevu.yaxc.helper.ProxyGroupStrategy
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.XrayValidationHelper
 import io.github.derundevu.yaxc.service.TProxyService
@@ -46,6 +51,8 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileDescriptor
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -89,6 +96,7 @@ class VpnDeviceIntegrationTest {
         val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
         previousPreferences = preferences.all
         settings = Settings(context)
+        settings.liveRoutingPlan = "{}"
         settings.transparentProxy = false
         settings.tun2socks = true
         settings.enableIpV6 = false
@@ -336,6 +344,259 @@ class VpnDeviceIntegrationTest {
         requireTunTransfer("new-owner-after-edited-setting")
     }
 
+    @Test
+    fun liveAppDomainGroupsSwitchAndBalanceNewFlowsWithoutBreakingEstablishedTunStream() = runBlocking {
+        settings.socksUsername = "fixture-user"
+        settings.socksPassword = "fixture-password"
+        settings.liveRoutingPlan = "{}"
+        LoopbackTarget().use { first ->
+            LoopbackTarget().use { second ->
+                ChainedStreamTarget(frames = 4).use { stream ->
+                    profile = profile.copy(config = profileConfig(stream.port))
+                    db.profileDao().update(profile)
+                    val otherSource = Link(name = "Synthetic second subscription")
+                    otherSource.id = db.linkDao().insertAtEnd(otherSource)
+                    try {
+                        val a = Profile(linkId = source.id, name = "Synthetic A", config = profileConfig(first.port))
+                        a.id = db.profileDao().create(a)
+                        val b = Profile(linkId = otherSource.id, name = "Synthetic B", config = profileConfig(second.port))
+                        b.id = db.profileDao().create(b)
+                        var group = ProxyGroup(id = "live-main", name = "Live mixed sources",
+                            profileIds = listOf(a.id, b.id), selectedProfileId = a.id)
+                        val other = ProxyGroup(id = "live-other", name = "Other domain", profileIds = listOf(b.id))
+                        val rules = listOf(
+                            AppDomainRule(id = "live-rule", packages = listOf("com.android.shell"),
+                                domains = listOf("full:live-routing.invalid"), target = group.id),
+                            AppDomainRule(id = "other-rule", packages = listOf("com.android.shell"),
+                                domains = listOf("full:other-routing.invalid"), target = other.id),
+                        )
+                        fun save() {
+                            settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group, other), rules))
+                        }
+                        save()
+                        start()
+                        val network = routedNetwork
+                        ShellTcpFlow(stream.port).use { flow ->
+                            fun exchange(stage: String) {
+                                val bytes = "$stage 東京\n".toByteArray()
+                                flow.assertNextChainedResponse(bytes)
+                                assertArrayEquals(bytes, stream.received.poll(5, TimeUnit.SECONDS))
+                                assertEquals("Live update replaced TUN network", network, routedNetwork)
+                            }
+                            exchange("before-live-group-change")
+                            assertArrayEquals(first.payload, transferTunHttp("manual-a", first.port, "live-routing.invalid"))
+                            assertEquals("/vpn-manual-a", first.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                            assertNull(second.requests.poll())
+                            assertArrayEquals(second.payload, transferTunHttp("other-domain", first.port, "other-routing.invalid"))
+                            assertEquals("/vpn-other-domain", second.requests.poll(5, TimeUnit.SECONDS)!!.path)
+
+                            group = group.copy(selectedProfileId = b.id)
+                            save()
+                            TProxyService.applyRouting(context)
+                            await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+                            assertArrayEquals(second.payload, transferTunHttp("manual-b", first.port, "live-routing.invalid"))
+                            assertEquals("/vpn-manual-b", second.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                            assertNull(first.requests.poll())
+                            exchange("after-manual-group-change")
+
+                            group = group.copy(strategy = ProxyGroupStrategy.RoundRobin)
+                            save()
+                            TProxyService.applyRouting(context)
+                            await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+                            repeat(4) { index ->
+                                assertArrayEquals(first.payload, transferTunHttp("balanced-$index", first.port, "live-routing.invalid"))
+                            }
+                            val firstPaths = mutableListOf<String>()
+                            val secondPaths = mutableListOf<String>()
+                            while (true) firstPaths += (first.requests.poll()?.path ?: break)
+                            while (true) secondPaths += (second.requests.poll()?.path ?: break)
+                            assertEquals(2, firstPaths.size)
+                            assertEquals(2, secondPaths.size)
+                            assertEquals((0..3).map { "/vpn-balanced-$it" }.toSet(), (firstPaths + secondPaths).toSet())
+                            exchange("after-live-round-robin")
+
+                            val applied = settings.xrayConfig().readBytes()
+                            db.profileDao().delete(b)
+                            TProxyService.applyRouting(context)
+                            await(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME)
+                            assertNotNull(ConnectionFailureState.failure.value)
+                            assertArrayEquals(applied, settings.xrayConfig().readBytes())
+                            exchange("after-rejected-missing-member")
+                        }
+                        stream.awaitFinished()
+                        assertEquals(profile.id, settings.selectedProfile)
+                        assertTrue(TProxyService.isActive())
+                    } finally {
+                        db.linkDao().delete(otherSource)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun standaloneDefaultGroupRoutesUnmatchedFlowsAndHotChangesKeepEstablishedTunStream() = runBlocking {
+        settings.socksUsername = "fixture-user"
+        settings.socksPassword = "fixture-password"
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+        // Isolate the shell's fixture traffic from other apps.
+        settings.appsRoutingMode = Settings.AppsRoutingMode.Include
+        settings.appsRouting = "com.android.shell"
+        db.configDao().update(Config(
+            routingMode = Config.Mode.Replace,
+            // Android's per-network DNS/DoT validation probes can enter even an include-only VPN.
+            // They must not consume the single-accept binary stream listener.
+            routing = """{"rules":[{"port":"53,853","outboundTag":"block"},{"domain":["full:core-default.invalid"],"outboundTag":"proxy"}]}""",
+        ))
+        LoopbackTarget().use { first ->
+            LoopbackTarget().use { second ->
+                ChainedStreamTarget(frames = 4).use { stream ->
+                    val streamProfile = Profile(linkId = source.id, name = "Retained stream", config = profileConfig(stream.port))
+                    streamProfile.id = db.profileDao().create(streamProfile)
+                    val a = Profile(linkId = source.id, name = "Default A", config = profileConfig(first.port))
+                    a.id = db.profileDao().create(a)
+                    val b = Profile(linkId = source.id, name = "Default B", config = profileConfig(second.port))
+                    b.id = db.profileDao().create(b)
+                    val streamGroup = ProxyGroup(id = "stream-group", name = "Stream", profileIds = listOf(streamProfile.id))
+                    val aGroup = ProxyGroup(id = "a-group", name = "A", profileIds = listOf(a.id))
+                    val bGroup = ProxyGroup(id = "b-group", name = "B", profileIds = listOf(b.id))
+                    val balanced = ProxyGroup(id = "balanced-group", name = "Balanced",
+                        profileIds = listOf(a.id, b.id), strategy = ProxyGroupStrategy.RoundRobin)
+                    val groups = listOf(streamGroup, aGroup, bGroup, balanced)
+                    val rules = listOf(
+                        AppDomainRule(id = "explicit-rule", packages = listOf("com.android.shell"),
+                            domains = listOf("full:explicit-default.invalid"), target = bGroup.id),
+                        AppDomainRule(id = "default-rule", domains = listOf("full:default-target.invalid"), target = "proxy"),
+                    )
+                    fun save(default: String) {
+                        settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(groups, rules, default))
+                    }
+                    fun apply(default: String) {
+                        save(default)
+                        TProxyService.applyRouting(context)
+                        await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+                    }
+                    fun request(peer: LoopbackTarget, stage: String, host: String = "unmatched.invalid") {
+                        assertArrayEquals(peer.payload, transferTunHttp(stage, first.port, host))
+                        assertEquals("/vpn-$stage", peer.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                    }
+                    save(streamGroup.id)
+                    start()
+                    val network = routedNetwork
+                    ShellTcpFlow(stream.port).use { flow ->
+                        fun exchange(stage: String) {
+                            val bytes = stage.toByteArray()
+                            flow.assertNextChainedResponse(bytes)
+                            assertArrayEquals(bytes, stream.received.poll(5, TimeUnit.SECONDS))
+                            assertEquals("Default group change replaced TUN", network, routedNetwork)
+                            assertEquals(LiveRoutingHelper.CONNECTION_PROFILE_ID, settings.selectedProfile)
+                        }
+                        exchange("standalone-start")
+                        apply(aGroup.id)
+                        request(first, "unmatched-a")
+                        request(second, "explicit-b", "explicit-default.invalid")
+                        request(first, "default-target-a", "default-target.invalid")
+                        request(first, "core-default-a", "core-default.invalid")
+                        exchange("default-a")
+                        apply(bGroup.id)
+                        request(second, "unmatched-b")
+                        exchange("default-b")
+                        apply(balanced.id)
+                        repeat(4) { index ->
+                            assertArrayEquals(first.payload, transferTunHttp("default-balanced-$index", first.port, "unmatched.invalid"))
+                        }
+                        val firstPaths = List(2) { first.requests.poll(5, TimeUnit.SECONDS)!!.path }
+                        val secondPaths = List(2) { second.requests.poll(5, TimeUnit.SECONDS)!!.path }
+                        assertEquals((0..3).map { "/vpn-default-balanced-$it" }.toSet(), (firstPaths + secondPaths).toSet())
+                        assertNull(first.requests.poll())
+                        assertNull(second.requests.poll())
+                        exchange("default-round-robin")
+                    }
+                    stream.awaitFinished()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun appUidRoutesStandardUdpToUpdatedGroupWithoutRestart() = runBlocking {
+        settings.socksUsername = "fixture-user"
+        settings.socksPassword = "fixture-password"
+        settings.socksUdp = true
+        UdpEchoPeer(0x41).use { first ->
+            UdpEchoPeer(0x42).use { second ->
+                fun outbound(port: Int) = """{"outbounds":[{"tag":"proxy","protocol":"freedom","settings":{"redirect":"127.0.0.1:$port","finalRules":[{"action":"allow","ip":["127.0.0.1/32"],"port":"$port"}]}}]}"""
+                val a = Profile(linkId = source.id, name = "UDP A", config = outbound(first.port))
+                a.id = db.profileDao().create(a)
+                val b = Profile(linkId = source.id, name = "UDP B", config = outbound(second.port))
+                b.id = db.profileDao().create(b)
+                val rule = AppDomainRule(id = "udp-rule", packages = listOf("com.android.shell"), target = "udp-group")
+                var group = ProxyGroup(id = "udp-group", name = "UDP group",
+                    profileIds = listOf(a.id, b.id), selectedProfileId = a.id)
+                settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), listOf(rule)))
+                start()
+                requireUdpReply(first, "before-live-switch")
+                group = group.copy(selectedProfileId = b.id)
+                settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), listOf(rule)))
+                TProxyService.applyRouting(context)
+                await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+                requireUdpReply(second, "after-live-switch")
+                assertEquals(profile.id, settings.selectedProfile)
+                TProxyService.stop(context)
+                await(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+                requireSocksListenerReleased()
+            }
+        }
+    }
+
+    private fun requireUdpReply(peer: UdpEchoPeer, stage: String) {
+        val payload = ByteArray(512) { index -> (index xor stage.hashCode()).toByte() }
+        val pipes = InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommandRw("toybox nc -u -w 5 -W 5 198.18.0.1 29381")
+        ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use { output ->
+            DataInputStream(DeadlineInputStream(pipes[0]).apply { beginResponse(10_000) }).use { input ->
+                output.write(payload)
+                output.flush()
+                val actual = try {
+                    ByteArray(payload.size + 1).also(input::readFully)
+                } catch (error: Exception) {
+                    throw AssertionError("UDP stage=$stage peerPackets=${peer.packetsReceived}", error)
+                }
+                assertArrayEquals(byteArrayOf(peer.marker) + payload, actual)
+            }
+        }
+    }
+
+    private class UdpEchoPeer(value: Int) : Closeable {
+        val marker = value.toByte()
+        @Volatile var packetsReceived = 0
+            private set
+        private val socket = DatagramSocket(0, InetAddress.getByName("127.0.0.1"))
+        val port: Int get() = socket.localPort
+        private val executor = Executors.newSingleThreadExecutor()
+        private val worker = executor.submit {
+            val buffer = ByteArray(513)
+            while (!socket.isClosed) {
+                val packet = DatagramPacket(buffer, buffer.size)
+                try {
+                    socket.receive(packet)
+                    packetsReceived++
+                    check(packet.length == 512) { "Unexpected UDP fixture size" }
+                    val reply = byteArrayOf(marker) + packet.data.copyOfRange(packet.offset, packet.offset + packet.length)
+                    socket.send(DatagramPacket(reply, reply.size, packet.socketAddress))
+                } catch (error: java.net.SocketException) {
+                    if (!socket.isClosed) throw error
+                }
+            }
+        }
+        override fun close() {
+            socket.close()
+            worker.get(5, TimeUnit.SECONDS)
+            executor.shutdown()
+            check(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
+    }
+
     private fun start() {
         TProxyService.start(context, true)
         await(TProxyService.START_VPN_SERVICE_ACTION_NAME)
@@ -343,14 +604,20 @@ class VpnDeviceIntegrationTest {
     }
 
     private fun requireTunTransfer(stage: String) {
-        // UiAutomation's shell child is a different UID from the excluded VPN application.
-        // 198.18.0.1 is a synthetic benchmark destination; only the test core redirects it to our peer.
+        assertArrayEquals(target.payload, transferTunHttp(stage, target.port, "198.18.0.1"))
+        val request = target.requests.poll(5, TimeUnit.SECONDS)
+        assertNotNull("No exact request reached the controlled VPN peer", request)
+        assertEquals("GET", request!!.method)
+        assertEquals("/vpn-$stage", request.path)
+    }
+
+    private fun transferTunHttp(stage: String, destinationPort: Int, host: String): ByteArray {
+        // A shell child owns the original socket; HTTP sniffing supplies the domain independently.
         val pipes = InstrumentationRegistry.getInstrumentation().uiAutomation
-            .executeShellCommandRw("toybox nc -w 5 -W 5 198.18.0.1 ${target.port}")
-        // nc may close its socket on stdin EOF before the peer sends its response.
-        val response = ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use { request ->
+            .executeShellCommandRw("toybox nc -w 5 -W 5 198.18.0.1 $destinationPort")
+        return ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use { request ->
             DataInputStream(DeadlineInputStream(pipes[0]).apply { beginResponse(10_000) }).use { input ->
-                request.write("GET /vpn-$stage HTTP/1.1\r\nHost: 198.18.0.1:${target.port}\r\nConnection: close\r\n\r\n".toByteArray())
+                request.write("GET /vpn-$stage HTTP/1.1\r\nHost: $host:$destinationPort\r\nConnection: close\r\n\r\n".toByteArray())
                 val headers = buildString {
                     while (!endsWith("\r\n\r\n")) {
                         check(length < 16_384) { "VPN HTTP response headers exceed the fixture bound" }
@@ -360,15 +627,10 @@ class VpnDeviceIntegrationTest {
                 val contentLength = headers.lineSequence()
                     .first { it.startsWith("Content-Length:", ignoreCase = true) }
                     .substringAfter(':').trim().toInt()
-                assertEquals(target.payload.size, contentLength)
+                check(contentLength in 1..16_384)
                 ByteArray(contentLength).also(input::readFully)
             }
         }
-        assertArrayEquals(target.payload, response)
-        val request = target.requests.poll(5, TimeUnit.SECONDS)
-        assertNotNull("No exact request reached the controlled VPN peer", request)
-        assertEquals("GET", request!!.method)
-        assertEquals("/vpn-$stage", request.path)
     }
 
     private fun profileConfig(destinationPort: Int = target.port): String = """{

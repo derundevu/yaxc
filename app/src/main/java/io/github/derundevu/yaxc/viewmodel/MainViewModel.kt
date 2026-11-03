@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.viewmodel
 
 import android.app.Application
+import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.derundevu.yaxc.R
@@ -11,16 +12,21 @@ import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.ConnectionFailure
 import io.github.derundevu.yaxc.helper.ConnectionFailureState
+import io.github.derundevu.yaxc.helper.LiveRoutingHelper
+import io.github.derundevu.yaxc.helper.LiveRoutingPlan
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
 import io.github.derundevu.yaxc.presentation.main.MainProfileItem
 import io.github.derundevu.yaxc.presentation.main.MainUiState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -46,6 +52,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private data class RuntimeState(
         val isRunning: Boolean,
         val ping: MainPingSnapshot,
+        val liveRouting: LiveRoutingPlan?,
     )
 
     private val settings = Settings(application)
@@ -67,7 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val validProfileIds = profiles.map { it.id }.toSet()
         pingTracker.retain(validProfileIds)
         pingState.value = pingTracker.snapshot
-        if (selectedProfileId.value != 0L && profiles.none { it.id == selectedProfileId.value }) {
+        if (selectedProfileId.value > 0L && profiles.none { it.id == selectedProfileId.value }) {
             clearSelectedProfile()
         }
     }.stateIn(
@@ -84,8 +91,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedProfileId = selectedProfileId,
         )
     }
-    private val runtime = combine(isRunning, pingState) { isRunning, ping ->
-        RuntimeState(isRunning = isRunning, ping = ping)
+    private val liveRouting = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == "liveRoutingPlan" || key == "transparentProxy") trySend(Unit)
+        }
+        settings.registerChangeListener(listener)
+        trySend(Unit)
+        awaitClose { settings.unregisterChangeListener(listener) }
+    }.conflate().map {
+        if (settings.transparentProxy) null
+        else runCatching { LiveRoutingHelper.decode(settings.liveRoutingPlan) }.getOrNull()
+    }.flowOn(Dispatchers.Default)
+    private val runtime = combine(isRunning, pingState, liveRouting) { isRunning, ping, plan ->
+        RuntimeState(isRunning = isRunning, ping = ping, liveRouting = plan)
     }
 
     val uiState = combine(
@@ -95,6 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runtime,
         ConnectionFailureState.failure,
     ) { tabs: List<Link>, profiles: List<ProfilePresentation>, selection: SelectionState, runtime: RuntimeState, failure: ConnectionFailure? ->
+        val liveRoutingSelected = selection.selectedProfileId == LiveRoutingHelper.CONNECTION_PROFILE_ID
         val selectedPresentation = profiles.firstOrNull { it.profile.id == selection.selectedProfileId }
         val selectedProfile = selectedPresentation?.profile
         val selectedSourceId = selectedProfile?.link?.takeIf { linkId ->
@@ -103,10 +122,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val resolvedTabId = selection.selectedTabId.takeIf { selected ->
             selected == 0L || tabs.any { it.id == selected }
         } ?: 0L
-        val cardSourceId = if (selectedSourceId != 0L) selectedSourceId else resolvedTabId
+        val cardSourceId = if (liveRoutingSelected) 0L
+            else if (selectedSourceId != 0L) selectedSourceId else resolvedTabId
         val selectedSource = tabs.firstOrNull { it.id == cardSourceId }
-        val selectedSourceName = selectedSource?.name
-            ?: application.getString(R.string.mainNoSourceSelected)
+        val selectedSourceName = if (liveRoutingSelected) application.getString(R.string.liveRouting)
+            else selectedSource?.name ?: application.getString(R.string.mainNoSourceSelected)
         val selectedSourceMetadata = SubscriptionMetadata.fromJsonString(
             selectedSource?.subscriptionMetadata
         )
@@ -122,11 +142,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     pingState = runtime.ping.profiles[presentation.profile.id] ?: MainPingState.Idle,
                 )
             }
-        val selectedProfileName = selectedProfile?.name.orEmpty()
+        val selectedProfileName = if (liveRoutingSelected) application.getString(R.string.liveRoutingConnectionSelected)
+            else selectedProfile?.name.orEmpty()
         val selectedProfilePingState = runtime.ping.profiles[selection.selectedProfileId]
             ?: MainPingState.Idle
-        val selectedServerLabel = selectedPresentation?.serverLabel
-            ?: application.getString(R.string.noValue)
+        val selectedServerLabel = if (liveRoutingSelected) runtime.liveRouting?.defaultGroup?.name.orEmpty()
+            else selectedPresentation?.serverLabel ?: application.getString(R.string.noValue)
         val socksAddress = settings.socksAddress.trim()
         val socksPort = settings.socksPort.trim()
         val socksUsername = settings.socksUsername.trim()
@@ -136,6 +157,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MainUiState(
             tabs = tabs,
             selectedTabId = resolvedTabId,
+            liveRoutingAvailable = runtime.liveRouting?.groups?.isNotEmpty() == true || liveRoutingSelected,
+            liveRoutingDefaultGroupName = runtime.liveRouting?.defaultGroup?.name.orEmpty(),
             selectedSourceId = cardSourceId,
             selectedSourceName = selectedSourceName,
             selectedSourceMetadata = selectedSourceMetadata,
@@ -269,6 +292,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is MainAction.PingFinished -> finishPing(action.operationId)
             is MainAction.SelectProfile -> {
                 if (selectedProfileId.value == action.profileId) return
+                if (action.profileId == LiveRoutingHelper.CONNECTION_PROFILE_ID && !uiState.value.liveRoutingAvailable) return
                 selectProfile(action.profileId)
                 if (uiState.value.isRunning && action.reloadRuntime) {
                     _effects.tryEmit(MainEffect.ReloadCurrentConfig)
@@ -338,7 +362,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MainAction.ToggleVpnClicked -> _effects.tryEmit(MainEffect.HandleToggleVpn)
             MainAction.PingClicked -> {
                 val profileId = selectedProfileId.value
-                if (profileId == 0L) return
+                if (profileId <= 0L) return
                 val operationId = startPing(listOf(profileId))
                 _effects.tryEmit(MainEffect.RunPing(operationId, profileId))
             }
@@ -359,6 +383,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MainAction.OpenConnectionInfoClicked -> _effects.tryEmit(MainEffect.OpenConnectionInfo)
             MainAction.OpenAppsRoutingClicked -> _effects.tryEmit(MainEffect.OpenAppsRouting)
             MainAction.OpenCoreRoutingClicked -> _effects.tryEmit(MainEffect.OpenCoreRouting)
+            MainAction.OpenLiveRoutingClicked -> _effects.tryEmit(MainEffect.OpenLiveRouting)
             MainAction.OpenConfigsClicked -> _effects.tryEmit(MainEffect.OpenConfigs)
             MainAction.OpenSettingsClicked -> _effects.tryEmit(MainEffect.OpenSettings)
         }

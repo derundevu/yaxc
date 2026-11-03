@@ -8,7 +8,7 @@ replace github.com/xtls/libxray => ./libXray
 
 require (
 	github.com/xtls/libxray v0.0.0-00010101000000-000000000000
-	github.com/xtls/xray-core v1.260327.1-0.20261029083850-0afec66085a8
+	github.com/xtls/xray-core v1.260327.1-0.20261031132019-a4a3dff5b20c
 	google.golang.org/protobuf v1.36.12
 )
 

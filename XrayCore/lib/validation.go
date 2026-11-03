@@ -31,6 +31,17 @@ func ValidateInWorker(dir string, config string) error {
 	if err != nil {
 		return err
 	}
+	content, err := os.ReadFile(config)
+	if err != nil {
+		return err
+	}
+	document, err := decodeRoutingDocument(content)
+	if err != nil {
+		return err
+	}
+	if err := prepareLiveCoreConfig(configJSON, document); err != nil {
+		return err
+	}
 	server, err := core.New(configJSON)
 	if err != nil {
 		return err

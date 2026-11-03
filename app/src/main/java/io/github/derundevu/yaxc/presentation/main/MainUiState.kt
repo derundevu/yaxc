@@ -22,6 +22,8 @@ data class MainUiState(
     val tabs: List<Link> = emptyList(),
     val selectedTabId: Long = 0L,
     val selectedSourceId: Long = 0L,
+    val liveRoutingAvailable: Boolean = false,
+    val liveRoutingDefaultGroupName: String = "",
     val selectedSourceName: String = "",
     val selectedSourceMetadata: SubscriptionMetadata? = null,
     val selectedSourceLastRefreshedAt: Long? = null,

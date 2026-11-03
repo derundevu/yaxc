@@ -32,6 +32,9 @@ class RoutingActivity : AppCompatActivity() {
                     onOpenCoreRouting = {
                         startActivity(Intent(applicationContext, CoreRoutingActivity::class.java))
                     },
+                    onOpenLiveRouting = {
+                        startActivity(Intent(applicationContext, LiveRoutingActivity::class.java))
+                    },
                     onSelectDestination = ::navigateRoot,
                 )
             }

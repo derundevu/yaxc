@@ -53,12 +53,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: ''
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
-      - name: Install Android NDK
+      - name: Install pinned Android NDK
+        shell: bash
         run: |
           NDK_VERSION=$(awk -F '"' '/ndkVersion/ {print $2}' app/build.gradle.kts)
-          yes | sdkmanager --install "ndk;$NDK_VERSION" --channel=3
+          sdkmanager --install "ndk;$NDK_VERSION"
 
       - name: Setup Go
         uses: actions/setup-go@v5

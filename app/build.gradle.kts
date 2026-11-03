@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
@@ -8,6 +10,51 @@ plugins {
 val abiTarget: String by project
 
 val targetAbis = abiTarget.split(",").toTypedArray()
+
+val verifyNativeArtifacts by tasks.registering {
+    group = "verification"
+    description = "Checks that the Go core and helper cover every requested Android ABI."
+    val requiredAbis = targetAbis.toList()
+    val coreAar = layout.projectDirectory.file("libs/XrayCore.aar").asFile
+    val helperDirectory = layout.projectDirectory.dir("src/main/assets/xrayhelpers").asFile
+    inputs.files(coreAar, requiredAbis.map { helperDirectory.resolve(it) })
+    inputs.property("abiTarget", abiTarget)
+
+    doLast {
+        val missing = mutableListOf<String>()
+        if (!coreAar.isFile) {
+            missing += "libs/XrayCore.aar"
+        } else {
+            ZipFile(coreAar).use { archive ->
+                requiredAbis.forEach { abi ->
+                    val library = archive.getEntry("jni/$abi/libgojni.so")
+                    if (library == null || library.size == 0L) {
+                        missing += "XrayCore.aar: jni/$abi/libgojni.so"
+                    }
+                }
+            }
+        }
+        requiredAbis.forEach { abi ->
+            val helper = helperDirectory.resolve(abi)
+            if (!helper.isFile || helper.length() == 0L) {
+                missing += "src/main/assets/xrayhelpers/$abi"
+            }
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "Native artifacts do not cover abiTarget=${requiredAbis.joinToString(",")}:\n" +
+                    missing.joinToString("\n") { " - $it" } +
+                    "\nRebuild matching native artifacts before packaging. For every ABI, run " +
+                    "./buildXrayCore.sh all && ./buildXrayHelper.sh all; " +
+                    "for a single ABI, use its native target from docs/DEVELOPMENT.md.",
+            )
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(verifyNativeArtifacts)
+}
 
 android {
     namespace = "io.github.derundevu.yaxc"

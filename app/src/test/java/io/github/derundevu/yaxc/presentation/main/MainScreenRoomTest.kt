@@ -17,6 +17,9 @@ import androidx.room.withTransaction
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.helper.ConnectionFailureState
+import io.github.derundevu.yaxc.helper.LiveRoutingHelper
+import io.github.derundevu.yaxc.helper.LiveRoutingPlan
+import io.github.derundevu.yaxc.helper.ProxyGroup
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.RoomTestSupport
@@ -46,6 +49,50 @@ class MainScreenRoomTest : RoomTestSupport() {
     fun releaseViewModel() {
         store.clear()
         ConnectionFailureState.clear()
+    }
+
+    @Test
+    fun liveRoutingSelectionAppearsAfterSaveSurvivesRecreationAndDoesNotReplaceProfileSelection() {
+        runBlocking {
+            app.linkRepository.insert(Link(id = 101, name = "Ordinary source"))
+            app.profileRepository.create(profile(102, 101, 0, "Ordinary profile"))
+        }
+        settings.selectedLink = 101
+        settings.selectedProfile = 102
+        showMain()
+        await { it.selectedProfileId == 102L && it.profilesCount == 1 }
+        compose.onNodeWithTag("main:live-routing").assertDoesNotExist()
+
+        val group = ProxyGroup(name = "Automatic group", profileIds = listOf(102))
+        settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(groups = listOf(group)))
+        await { it.liveRoutingAvailable }
+        assertEquals(102L, settings.selectedProfile)
+        compose.onNodeWithTag("main:live-routing").assertIsDisplayed().performClick()
+        await { it.selectedProfileId == LiveRoutingHelper.CONNECTION_PROFILE_ID }
+        compose.onNodeWithTag("main:live-routing").assertIsSelected()
+        assertEquals(LiveRoutingHelper.CONNECTION_PROFILE_ID, settings.selectedProfile)
+        assertEquals(0L, model.uiState.value.selectedSourceId)
+        assertEquals("Automatic group", model.uiState.value.liveRoutingDefaultGroupName)
+
+        // Room emissions must not clear the virtual connection as a missing profile.
+        runBlocking {
+            app.profileRepository.update(app.profileRepository.find(102).copy(name = "Renamed profile"))
+        }
+        await { it.filteredProfiles.singleOrNull()?.profile?.name == "Renamed profile" }
+        assertEquals(LiveRoutingHelper.CONNECTION_PROFILE_ID, settings.selectedProfile)
+        compose.runOnIdle {
+            store.clear()
+            model = ViewModelProvider(store, ViewModelProvider.AndroidViewModelFactory(app))[MainViewModel::class.java]
+            modelGeneration.intValue++
+        }
+        await { it.liveRoutingAvailable && it.liveRoutingDefaultGroupName == "Automatic group" }
+        compose.onNodeWithTag("main:live-routing").assertIsSelected()
+
+        compose.onNodeWithTag("main:profiles").performScrollToKey("profile:102")
+        compose.onNodeWithTag("profile:102").performClick()
+        await { it.selectedProfileId == 102L && it.selectedSourceId == 101L }
+        compose.onNodeWithTag("profile:102").assertIsSelected()
+        assertEquals(102L, settings.selectedProfile)
     }
 
     @Test
@@ -120,6 +167,11 @@ class MainScreenRoomTest : RoomTestSupport() {
         }
         showMain()
         await { it.tabs.size == 3 }
+        // Saving a live plan inserts a virtual group without recreating existing gesture handlers.
+        settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(
+            groups = listOf(ProxyGroup(name = "Live group", profileIds = listOf(310))),
+        ))
+        await { it.liveRoutingAvailable }
         val first = compose.onNodeWithTag("source:31:drag", useUnmergedTree = true)
         val third = compose.onNodeWithTag("source:203:drag", useUnmergedTree = true)
         val distance = third.fetchSemanticsNode().boundsInRoot.center.y -

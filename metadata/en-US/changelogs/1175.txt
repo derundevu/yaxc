@@ -1,7 +1,14 @@
 ## What's new in 1.5.3
 
-- Added a four-ABI universal APK; choose it if unsure.
-- Simplified APK filenames; all variants share one versionCode for universal/ABI installs.
-- App routing: added a system-app filter and apps without their own INTERNET permission.
-- Matched the mode selector to Core Routing.
-- Fixed an app crash when immediately stopping and starting the VPN.
+- Updated the embedded Xray-core to 26.10.31, including the security mitigation that disables listener MPTCP by default while preserving explicit opt-in. OS/kernel security updates are still required.
+- Preserved custom Live Routing, cancellation and splice fixes; retained XHTTP share links support the new h2Params without losing legacy session options.
+- Fixed concurrent TLS certificate/OCSP refresh so new handshakes receive coherent snapshots while earlier handshakes retain their certificate.
+- Live Routing: cross-subscription Select/Random/round-robin groups and ordered app/domain rules. New flows update without reconnecting; existing streams keep their paths.
+- Connect through a dedicated Live Routing group without selecting a profile; choose a default group for unmatched traffic.
+- Optional node availability: ordered Select backups, healthy-only Random/round robin, automatic recovery and explicit blocking when all members are unavailable.
+- Live Routing help now opens from ? beside Save, with setup examples and warnings to disable automatic subscription refresh and avoid randomized provider ordering.
+- Fixed Live Routing text and icon colors in dark themes.
+- Four-ABI universal APK, simpler filenames and a shared versionCode.
+- App routing: system-app filter, apps without INTERNET permission and a Core Routing-style mode selector.
+- Fixed the crash on immediate VPN stop/start.
+- Prevent incomplete native ABI builds from producing APKs that crash at startup.

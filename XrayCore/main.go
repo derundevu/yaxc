@@ -22,6 +22,18 @@ func Start(dir string, config string) string {
 	return lib.WrapError(err)
 }
 
+// ApplyRouting atomically replaces routing rules/balancers and versions changed
+// outbounds without restarting the core or closing established connections.
+// configText is the full generated JSON, not a path. Empty means success.
+func ApplyRouting(configText string) string {
+	return lib.WrapError(lib.ApplyRouting(configText))
+}
+
+// LiveRoutingStatus reports only runtime group identities and health state.
+func LiveRoutingStatus() string {
+	return lib.LiveRoutingStatus()
+}
+
 func Stop() string {
 	err := lib.Stop()
 	return lib.WrapError(err)

@@ -35,6 +35,7 @@ The standard Android VPN mode does **not** require root.
 
 - **Per-app split tunneling:** route all apps through the VPN, exclude selected apps or include only selected apps.
 - **Core routing:** build ordered rules in the visual editor or edit routing JSON directly. Send matching traffic through the proxy, directly or to a blocking outbound.
+- **Live Routing:** combine profiles across subscriptions into proxy groups, then connect using the special Live Routing group without selecting a profile. Route apps or domains and change group choices without reconnecting. See [Live Routing](#live-routing).
 - Match domains, IP ranges, ports, protocols and TCP/UDP transport; import and export routing JSON through the clipboard.
 - Download or import GeoIP, GeoSite and Antifilter lists in the app. Choose a bundled provider preset or your own geodata URLs.
 
@@ -171,17 +172,105 @@ If Android reports a signing conflict, do not uninstall just to bypass it: unins
 For split tunneling, open **Routing → Apps Routing**, choose **Off**, **Exclude** or **Include**, select apps and save.
 For domain/IP rules, open **Routing → Core Routing**. Rules are evaluated from top to bottom; higher rules take precedence.
 
+### Live Routing
+
+**Subscription safety:** disable **Settings → Preferences → Auto-refresh subscriptions** and refresh manually.
+Profile IDs are matched by position, not permanent server identity: a provider reordering entries can silently put
+a different server into an existing group. **Do not use Live Routing with subscriptions returned in random order.**
+Manual refresh does not fix randomized ordering. Review membership, endpoints and priorities after each refresh.
+An active session can apply a manual refresh immediately; stop Live Routing first if you need to inspect changes
+before using them, then review and reconnect.
+
+Open **Routing → Live Routing**:
+
+1. Choose **Add proxy group**, give it a name and choose member profiles from any subscription or local profiles.
+2. Choose a strategy: **Select** uses the configured member; **Random** chooses a member per new connection;
+   **Round robin** cycles through members per new connection.
+3. Optionally enable **Consider node availability**. Select then uses the first healthy member in the explicit
+   **Primary and backup order**; Random/Round robin keep distributing connections among all healthy members.
+   This option is off for old and new groups until you enable it.
+4. Choose the **default group** for unmatched traffic. The first group is used automatically until you choose another.
+5. Add an ordered rule, choose apps and/or enter domains, then choose a group, **Default route**, **Direct** or **Block**.
+   Move rules up/down to set their priority; disabled rules do not match.
+6. Tap **Save**. This persists the plan locally and requests a live update if a session is active; it does not connect
+   a stopped session. A local save is not confirmation that the running core accepted it: check **Connect** for errors.
+7. On **Connect**, select the special **Live Routing** group and tap the usual connection button. No individual
+   profile needs to be selected. Ordinary subscription groups and profile selection remain available.
+
+Use **?** beside **Save** for the full setup guide, examples, subscription warnings and routing limitations.
+
+The first matching enabled rule wins, before **Core Routing**. When a rule contains both apps and domains, **both**
+criteria must match (AND); any value within either list is enough (OR). After Core Routing, unmatched traffic uses
+the default group's strategy in a Live Routing connection. **Default route** and Core Routing proxy targets also use
+that group; explicit direct/block routes keep their meaning. With a regular profile selected, these rules remain an
+overlay and the selected profile supplies the default route. Domain entries are one per line: a bare hostname such as `example.com` or
+`domain:example.com` matches that domain and its subdomains; `full:example.com` is exact. `regexp:`, `geosite:` and
+`ext:<file>:<tag>` matchers are also supported. Hostnames are normalized to ASCII for internationalized domains.
+Xray must know the destination hostname from the proxy request or sniffing; an IP-only connection may not match.
+
+Groups compose each member's outbound graph, including supported outbound chains, rather than switching whole
+configurations. A Live Routing connection uses the app's global DNS, inbound and Core Routing settings, not one
+member's full configuration. A regular profile connection still shares those settings with the selected profile.
+Unsupported or incomplete graphs are rejected; missing members or an invalid default-group choice are never silently
+replaced. All group members stay loaded, so changing the default group, selected member or strategy alone does not
+allocate new native handlers.
+
+Availability checks perform an HTTP GET to the existing **Ping Address** setting through each member's complete
+outbound graph, not a direct server-port test. The URL must be HTTP(S); only 2xx succeeds and redirects are not
+followed. The manual ping type/timeout do not change these background checks.
+
+- Checks start immediately, then every **10 seconds per member** when a worker is available; timeout **5 seconds**,
+  at most **4 concurrent probes** across all groups. Large groups can queue.
+- An untested member is **checking**, not healthy. Its first success admits it; **2 consecutive failures** remove
+  it, and **3 consecutive successes** restore it. Observations older than **35 seconds** expire to checking and
+  need three successes again. Endpoint/graph or probe-URL changes cannot inherit old observations.
+- Without queueing, failure detection is approximately **10–25 seconds**; recovery is approximately **20–35 seconds**
+  after service returns. The UI refreshes status about once a second. These are not user-request timeouts.
+- Select returns new connections to the highest-priority eligible node. Random/Round robin have multiple eligible
+  participants, not one active node. The editor distinguishes configured primary, actual runtime choice and unsaved
+  or outdated configuration.
+- With checks enabled, **no eligible member means rejection of new group traffic**, including during startup or a
+  controller error. It never escapes through the ordinary profile, another group, default outbound or direct route.
+  This also applies when that group is the independent default or is reached through Default route/Core Routing.
+
+The check proves only this HTTP request through that graph at that time, not every site, DNS request or TCP/UDP
+protocol. A broken probe endpoint can mark otherwise usable members unavailable; choose an endpoint suitable for
+your network. Checks consume network traffic and battery while the core is running.
+
+Accepted changes affect **new flows** without restarting Xray or the TUN, changing the selected connection or
+interrupting established streams. Validation/live-update errors keep the previous runtime. Endpoint or graph changes
+can consume a session's native handler-version budget (512, including the initial handlers); if it is exhausted,
+the update is rejected with an explicit reconnect request, never an automatic reconnect.
+
+**Limitations:** app matching requires **VPN mode on Android 10+ and authenticated SOCKS**. Apps sharing an Android
+UID cannot be distinguished; an unknown connection owner does not match app criteria. **Apps Routing** still decides
+which apps enter the VPN, so excluded apps bypass Live Routing too. Domain-only rules also work in SOCKS-only mode.
+Live Routing is explicitly unavailable in root transparent mode; saving there is disabled.
+Keep the default **Socks UDP** setting enabled: disabling it selects a legacy UDP-over-TCP protocol that the bundled
+Xray core does not support.
+
+Per-app rules are routing preferences, not an authorization boundary for clients that know your SOCKS password.
+Keep those credentials private: a direct SOCKS client with the password can choose a managed app identity.
+
 ## Subscription updates
 
 Automatic refresh is optional. Enable **Settings → Preferences → Auto-refresh subscriptions** and set the refresh interval;
 provider-supplied intervals are used when available. Android may defer background work.
 
+For Live Routing, keep automatic refresh **off** and inspect explicit updates. Positional profile IDs mean reordering,
+insertion or deletion can change which server a retained group member represents. Randomized provider ordering is
+not supported safely, even with manual refresh or availability checks.
+
 Each source is updated as a complete batch: a failed or malformed refresh keeps that source's previous profiles.
 Cancellation before commit also keeps them; an update already committing finishes before reporting its result.
-An unchanged active configuration keeps the existing connection running. A changed configuration is validated before
-replacing the active core; an invalid replacement keeps the previous connection and reports an error.
-If an update removes the selected profile, the VPN stops rather than silently using a deleted profile.
-When refreshing multiple sources, successful sources can still update; the result reports any partial failures.
+An unchanged active configuration keeps the connection running. Validated routing/outbound-only changes can also
+apply live, retaining established streams, when shared core and platform settings are unchanged. Other validated
+core changes reload Xray; changed VPN/platform settings require a restart. Invalid candidates or rejected live
+updates keep the previous runtime and report an error; a reconnect-required rejection never forces a reconnect.
+If conditional subscription reconciliation (`NEW_CONFIG`) finds that the selected default profile was removed, it
+stops the runtime rather than silently selecting another profile. A missing Live Routing group member instead rejects
+the update without substituting a member. When refreshing multiple sources, successful sources can still update;
+the result reports any partial failures.
 
 ## FAQ
 

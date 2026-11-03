@@ -25,6 +25,7 @@ sealed interface MainEffect {
     data object OpenConnectionInfo : MainEffect
     data object OpenAppsRouting : MainEffect
     data object OpenCoreRouting : MainEffect
+    data object OpenLiveRouting : MainEffect
     data object OpenConfigs : MainEffect
     data object OpenSettings : MainEffect
     data object ReloadCurrentConfig : MainEffect
