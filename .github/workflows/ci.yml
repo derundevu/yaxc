@@ -89,6 +89,15 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare Xray router test geodata
+        working-directory: XrayCore/Xray-core
+        run: |
+          mkdir -p resources
+          # Pin test data so rule updates cannot change regression results.
+          curl --fail --location --silent --show-error \
+            --output resources/geosite.dat \
+            https://raw.githubusercontent.com/XTLS/Xray-rules-dat/b2fd201b17cdbb2a6aff5e49a52910247d026778/geosite/geosite-expand.dat
+
       - name: Run native compatibility, live routing and cancellation regressions
         working-directory: XrayCore
         run: |
