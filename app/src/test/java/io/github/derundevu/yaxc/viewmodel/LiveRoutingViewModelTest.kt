@@ -202,6 +202,47 @@ class LiveRoutingViewModelTest : RoomTestSupport() {
     }
 
     @Test
+    fun reorderingGroupsChangesOnlyAutomaticDefaultAndPreservesExplicitDefaultAndRuleTargets() = runEditorTest {
+        val first = ProxyGroup(id = "first", name = "First", profileIds = listOf(7))
+        val second = ProxyGroup(id = "second", name = "Second", profileIds = listOf(7))
+        val third = ProxyGroup(id = "third", name = "Third", profileIds = listOf(7))
+        val rules = listOf(
+            AppDomainRule(id = "first-rule", name = "First rule", domains = listOf("first.test"), target = first.id),
+            AppDomainRule(id = "second-rule", name = "Second rule", enabled = false, target = second.id),
+        )
+        val initial = LiveRoutingPlan(groups = listOf(first, second, third), rules = rules)
+        val persisted = LiveRoutingHelper.encode(initial)
+        settings.liveRoutingPlan = persisted
+        val editor = editor()
+
+        editor.moveGroup(-1, 0)
+        editor.moveGroup(0, 3)
+        assertEquals(initial, editor.plan)
+        assertFalse(editor.hasChanges)
+
+        editor.moveGroup(2, 0)
+        assertEquals(listOf(third, first, second), editor.plan.groups)
+        assertNull(editor.plan.defaultGroupId)
+        assertEquals(third, editor.plan.defaultGroup)
+        assertEquals(rules, editor.plan.rules)
+        assertEquals(initial, editor.savedPlan)
+        assertEquals(persisted, settings.liveRoutingPlan)
+        assertTrue(editor.hasChanges)
+
+        editor.selectDefaultGroup(second.id)
+        editor.moveGroup(2, 0)
+        assertEquals(listOf(second, third, first), editor.plan.groups)
+        assertEquals(second.id, editor.plan.defaultGroupId)
+        assertEquals(second, editor.plan.defaultGroup)
+        editor.moveGroup(0, 2)
+        assertEquals(listOf(third, first, second), editor.plan.groups)
+        assertEquals(second.id, editor.plan.defaultGroupId)
+        assertEquals(second, editor.plan.defaultGroup)
+        assertEquals(rules, editor.plan.rules)
+        assertEquals(persisted, settings.liveRoutingPlan)
+    }
+
+    @Test
     fun disabledReferencesPreventGroupDeletionUntilRuleRemoved() = runEditorTest {
         val group = ProxyGroup(name = "Synthetic group", profileIds = listOf(7), selectedProfileId = 7)
         val rule = AppDomainRule(enabled = false, target = group.id)

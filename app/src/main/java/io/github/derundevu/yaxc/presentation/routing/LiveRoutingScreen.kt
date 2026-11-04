@@ -1,7 +1,17 @@
 package io.github.derundevu.yaxc.presentation.routing
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -18,8 +28,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -29,6 +41,8 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DragHandle
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -47,7 +61,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -56,18 +72,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.AppDomainRule
 import io.github.derundevu.yaxc.helper.LiveRoutingGroupStatus
@@ -81,6 +105,7 @@ import io.github.derundevu.yaxc.viewmodel.LiveRoutingProfileOption
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,6 +121,17 @@ fun LiveRoutingScreen(
     val profilesById = remember(draft.profiles) { draft.profiles.associateBy { it.id } }
     val savedGroups = remember(draft.savedPlan) { draft.savedPlan?.groups?.associateBy { it.id }.orEmpty() }
     val runtimeGroups = remember(draft.runtimeStatus.groups) { draft.runtimeStatus.groups.associateBy { it.id } }
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    val itemSpacingPx = with(density) { spacing.md.toPx() }
+    val reorder = remember(listState, itemSpacingPx) { LiveRoutingReorderState(listState, itemSpacingPx) }
+    val groupKeys = remember(draft.plan.groups) { draft.plan.groups.map { "group:${it.id}" } }
+    val ruleKeys = remember(draft.plan.rules) { draft.plan.rules.map { "rule:${it.id}" } }
+    var expandedGroupId by rememberSaveable { mutableStateOf<String?>(null) }
+    var expandedRuleId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(editable) {
+        if (!editable) reorder.cancel()
+    }
     var profilePicker by rememberSaveable { mutableStateOf<String?>(null) }
     var priorityPicker by rememberSaveable { mutableStateOf<String?>(null) }
     var showHelp by rememberSaveable { mutableStateOf(false) }
@@ -135,6 +171,7 @@ fun LiveRoutingScreen(
         },
     ) { padding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier.testTag("live-routing:content").fillMaxSize().background(YaxcTheme.backgroundBrush)
                 .padding(padding).navigationBarsPadding().imePadding(),
             contentPadding = PaddingValues(start = spacing.md, end = spacing.md, top = spacing.md, bottom = spacing.xl),
@@ -170,7 +207,11 @@ fun LiveRoutingScreen(
                 }
             }
             item(key = "groups-title") {
-                SectionHeading(R.string.liveRoutingGroups, R.string.liveRoutingAddGroup, editable, draft::addGroup)
+                SectionHeading(R.string.liveRoutingGroups, R.string.liveRoutingAddGroup, editable) {
+                    val previousSize = draft.plan.groups.size
+                    draft.addGroup()
+                    if (draft.plan.groups.size > previousSize) expandedGroupId = draft.plan.groups.last().id
+                }
             }
             if (draft.plan.groups.isEmpty()) item(key = "groups-empty") {
                 Text(stringResource(R.string.liveRoutingNoGroups), color = YaxcTheme.extendedColors.textMuted)
@@ -195,7 +236,7 @@ fun LiveRoutingScreen(
                     }
                 }
             }
-            items(draft.plan.groups, key = { "group:${it.id}" }) { group ->
+            itemsIndexed(draft.plan.groups, key = { _, group -> "group:${group.id}" }) { index, group ->
                 GroupCard(
                     group = group,
                     profiles = profilesById,
@@ -205,6 +246,13 @@ fun LiveRoutingScreen(
                     enabled = editable,
                     inUse = draft.plan.rules.any { it.target == group.id },
                     isExplicitDefault = draft.plan.defaultGroupId == group.id,
+                    expanded = expandedGroupId == group.id,
+                    index = index,
+                    total = draft.plan.groups.size,
+                    modifier = reorderItemModifier(reorder, "group:${group.id}"),
+                    dragModifier = reorder.headerModifier("group:${group.id}", groupKeys, editable, draft::moveGroup),
+                    onToggleExpanded = { expandedGroupId = if (expandedGroupId == group.id) null else group.id },
+                    onMove = { draft.moveGroup(index, it) },
                     onChange = draft::updateGroup,
                     onProfiles = { profilePicker = group.id },
                     onPriority = { priorityPicker = group.id },
@@ -212,7 +260,11 @@ fun LiveRoutingScreen(
                 )
             }
             item(key = "rules-title") {
-                SectionHeading(R.string.liveRoutingRules, R.string.routingAddRule, editable, draft::addRule)
+                SectionHeading(R.string.liveRoutingRules, R.string.routingAddRule, editable) {
+                    val previousSize = draft.plan.rules.size
+                    draft.addRule()
+                    if (draft.plan.rules.size > previousSize) expandedRuleId = draft.plan.rules.last().id
+                }
             }
             if (draft.plan.rules.isEmpty()) item(key = "rules-empty") {
                 Text(stringResource(R.string.liveRoutingNoRules), color = YaxcTheme.extendedColors.textMuted)
@@ -226,6 +278,10 @@ fun LiveRoutingScreen(
                     targetName = targetLabel(rule.target, draft.plan.groups),
                     enabled = editable,
                     appsAvailable = draft.appMatchingAvailable,
+                    expanded = expandedRuleId == rule.id,
+                    modifier = reorderItemModifier(reorder, "rule:${rule.id}"),
+                    dragModifier = reorder.headerModifier("rule:${rule.id}", ruleKeys, editable, draft::moveRule),
+                    onToggleExpanded = { expandedRuleId = if (expandedRuleId == rule.id) null else rule.id },
                     onChange = draft::updateRule,
                     onDomains = { draft.updateDomains(rule.id, it) },
                     onApps = { appPicker = rule.id },
@@ -273,6 +329,7 @@ fun LiveRoutingScreen(
             packages = rule.packages,
             apps = draft.apps,
             isLoading = draft.appsLoading,
+            enabled = editable,
             onDismiss = { appPicker = null },
             onConfirm = {
                 draft.selectPackages(rule.id, it)
@@ -341,6 +398,164 @@ private fun SectionHeading(title: Int, add: Int, enabled: Boolean, onAdd: () -> 
     }
 }
 
+/** Only visible items in the pressed section can become drop targets; the draft changes on drop. */
+private class LiveRoutingReorderState(
+    private val listState: LazyListState,
+    private val spacingPx: Float,
+) {
+    var draggingKey by mutableStateOf<String?>(null)
+        private set
+    private var offsetY by mutableFloatStateOf(0f)
+    private var targetIndex by mutableStateOf<Int?>(null)
+    private var indices = emptyMap<String, Int>()
+    private var draggedHeight = 0f
+
+    fun cancel() {
+        draggingKey = null
+        offsetY = 0f
+        targetIndex = null
+        indices = emptyMap()
+    }
+
+    fun headerModifier(key: String, sectionKeys: List<String>, enabled: Boolean, onMove: (Int, Int) -> Unit): Modifier {
+        if (!enabled) return Modifier
+        return Modifier.pointerInput(key, sectionKeys) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = {
+                    val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
+                    if (item != null) {
+                        indices = sectionKeys.withIndex().associate { it.value to it.index }
+                        draggedHeight = item.size.toFloat()
+                        offsetY = 0f
+                        targetIndex = indices[key]
+                        draggingKey = key
+                    }
+                },
+                onDragCancel = { cancel() },
+                onDragEnd = {
+                    val from = indices[key]
+                    val to = targetIndex
+                    cancel()
+                    if (from != null && to != null && from != to) onMove(from, to)
+                },
+                onDrag = { change, amount ->
+                    if (draggingKey == key) {
+                        change.consume()
+                        val visible = listState.layoutInfo.visibleItemsInfo
+                        val item = visible.firstOrNull { it.key == key }
+                        if (item != null) {
+                            offsetY += amount.y
+                            // Compare header positions so expanded cards can pass shorter neighbours.
+                            visible.firstOrNull { it.key == sectionKeys.first() }?.let {
+                                offsetY = offsetY.coerceAtLeast((it.offset - item.offset).toFloat())
+                            }
+                            visible.firstOrNull { it.key == sectionKeys.last() }?.let {
+                                offsetY = offsetY.coerceAtMost((it.offset - item.offset).toFloat())
+                            }
+                            val headerOffset = item.offset + offsetY
+                            var distance = Float.POSITIVE_INFINITY
+                            for (candidate in visible) {
+                                val candidateKey = candidate.key as? String ?: continue
+                                val index = indices[candidateKey] ?: continue
+                                val candidateDistance = abs(candidate.offset - headerOffset)
+                                if (candidateDistance < distance) {
+                                    distance = candidateDistance
+                                    targetIndex = index
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    fun displacement(key: String): Float {
+        val active = draggingKey ?: return 0f
+        if (active == key) return offsetY
+        val from = indices[active] ?: return 0f
+        val to = targetIndex ?: return 0f
+        val index = indices[key] ?: return 0f
+        return when {
+            from < to && index in (from + 1)..to -> -(draggedHeight + spacingPx)
+            from > to && index in to until from -> draggedHeight + spacingPx
+            else -> 0f
+        }
+    }
+}
+
+@Composable
+private fun reorderItemModifier(reorder: LiveRoutingReorderState, key: String): Modifier {
+    val dragging = reorder.draggingKey == key
+    val target = reorder.displacement(key)
+    val offset by animateFloatAsState(
+        targetValue = target,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
+        label = "live_routing_item_displacement",
+    )
+    return Modifier.graphicsLayer { translationY = if (dragging) target else offset }.zIndex(if (dragging) 3f else 0f)
+}
+
+@Composable
+private fun RoutingCardHeader(
+    name: String,
+    summary: String,
+    expanded: Boolean,
+    enabled: Boolean,
+    index: Int,
+    total: Int,
+    tag: String,
+    dragModifier: Modifier,
+    onToggleExpanded: () -> Unit,
+    onMove: (Int) -> Unit,
+    trailing: @Composable () -> Unit = {},
+) {
+    val expansionLabel = stringResource(if (expanded) R.string.liveRoutingCollapse else R.string.liveRoutingExpand)
+    val moveUp = stringResource(R.string.liveRoutingMoveUp, name)
+    val moveDown = stringResource(R.string.liveRoutingMoveDown, name)
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "live_routing_expand_rotation")
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).then(dragModifier)
+                .clickable(onClickLabel = expansionLabel, onClick = onToggleExpanded)
+                .semantics {
+                    stateDescription = expansionLabel
+                    customActions = if (enabled) buildList {
+                        if (index > 0) add(CustomAccessibilityAction(moveUp) { onMove(index - 1); true })
+                        if (index < total - 1) add(CustomAccessibilityAction(moveDown) { onMove(index + 1); true })
+                    } else emptyList()
+                }.testTag(tag).padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Outlined.DragHandle, stringResource(R.string.liveRoutingDragToReorder), tint = YaxcTheme.extendedColors.textMuted)
+            Column(Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(Icons.Outlined.ExpandMore, null, Modifier.graphicsLayer { rotationZ = rotation })
+        }
+        trailing()
+    }
+}
+
+@Composable
+private fun EditorExpansion(expanded: Boolean, content: @Composable ColumnScope.() -> Unit) {
+    AnimatedVisibility(
+        visible = expanded,
+        enter = expandVertically(tween(260), expandFrom = Alignment.Top) + fadeIn(tween(180, delayMillis = 40)),
+        exit = shrinkVertically(tween(220), shrinkTowards = Alignment.Top) + fadeOut(tween(120)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp), content = content)
+    }
+}
+
 @Composable
 private fun GroupCard(
     group: ProxyGroup,
@@ -351,6 +566,13 @@ private fun GroupCard(
     enabled: Boolean,
     inUse: Boolean,
     isExplicitDefault: Boolean,
+    expanded: Boolean,
+    index: Int,
+    total: Int,
+    modifier: Modifier,
+    dragModifier: Modifier,
+    onToggleExpanded: () -> Unit,
+    onMove: (Int) -> Unit,
     onChange: (ProxyGroup) -> Unit,
     onProfiles: () -> Unit,
     onPriority: () -> Unit,
@@ -358,82 +580,108 @@ private fun GroupCard(
 ) {
     val spacing = YaxcTheme.spacing
     val matched = rememberMatchingRuntime(group, profiles, saved, runtime)
-    YaxcCard {
-        OutlinedTextField(
-            value = group.name,
-            onValueChange = { onChange(group.copy(name = it)) },
-            label = { Text(stringResource(R.string.liveRoutingGroupName)) },
-            singleLine = true,
+    var name by rememberSaveable(group.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(group.name)) }
+    LaunchedEffect(group.name) {
+        if (name.text != group.name) name = TextFieldValue(group.name)
+    }
+    YaxcCard(modifier = modifier.testTag("live-routing:group:${group.id}")) {
+        RoutingCardHeader(
+            name = group.name.ifBlank { stringResource(R.string.liveRoutingGroupName) },
+            summary = stringResource(R.string.liveRoutingGroupSummary, group.profileIds.size, stringResource(group.strategy.titleResource())),
+            expanded = expanded,
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
+            index = index,
+            total = total,
+            tag = "live-routing:group-header:${group.id}",
+            dragModifier = dragModifier,
+            onToggleExpanded = onToggleExpanded,
+            onMove = onMove,
         )
-        Text(stringResource(R.string.liveRoutingStrategy), Modifier.padding(top = spacing.sm), style = MaterialTheme.typography.labelLarge)
-        // Three fixed strategy choices, not a profile list.
-        ProxyGroupStrategy.entries.forEach { strategy ->
-            val label = stringResource(strategy.titleResource())
+        RuntimeSummary(group, profiles, saved, running, runtime, matched, compact = !expanded)
+        EditorExpansion(expanded) {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it; onChange(group.copy(name = it.text)) },
+                label = { Text(stringResource(R.string.liveRoutingGroupName)) },
+                singleLine = true,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth().testTag("live-routing:group-name:${group.id}"),
+            )
+            Text(stringResource(R.string.liveRoutingStrategy), Modifier.padding(top = spacing.sm), style = MaterialTheme.typography.labelLarge)
+            // Three fixed strategy choices, not a profile list.
+            ProxyGroupStrategy.entries.forEach { strategy ->
+                val label = stringResource(strategy.titleResource())
+                Row(
+                    Modifier.fillMaxWidth().selectable(
+                        selected = group.strategy == strategy,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onClick = { onChange(group.copy(strategy = strategy)) },
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = group.strategy == strategy, onClick = null, enabled = enabled)
+                    Text(label)
+                }
+            }
             Row(
-                Modifier.fillMaxWidth().selectable(
-                    selected = group.strategy == strategy,
+                Modifier.fillMaxWidth().toggleable(
+                    value = group.checkAvailability,
                     enabled = enabled,
-                    role = Role.RadioButton,
-                    onClick = { onChange(group.copy(strategy = strategy)) },
-                ),
+                    role = Role.Checkbox,
+                    onValueChange = { onChange(group.copy(checkAvailability = it)) },
+                ).padding(vertical = spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RadioButton(selected = group.strategy == strategy, onClick = null, enabled = enabled)
-                Text(label)
+                Checkbox(checked = group.checkAvailability, onCheckedChange = null, enabled = enabled)
+                Text(stringResource(R.string.liveRoutingCheckAvailability), Modifier.padding(start = spacing.sm))
             }
-        }
-        Row(
-            Modifier.fillMaxWidth().toggleable(
-                value = group.checkAvailability,
-                enabled = enabled,
-                role = Role.Checkbox,
-                onValueChange = { onChange(group.copy(checkAvailability = it)) },
-            ).padding(vertical = spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(checked = group.checkAvailability, onCheckedChange = null, enabled = enabled)
-            Text(stringResource(R.string.liveRoutingCheckAvailability), Modifier.padding(start = spacing.sm))
-        }
-        FilledTonalButton(onClick = onProfiles, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.liveRoutingChooseProfiles, group.profileIds.size))
-        }
-        if (group.strategy == ProxyGroupStrategy.Select) {
-            val selected = (group.selectedProfileId ?: group.profileIds.firstOrNull())?.let { profiles[it]?.name }
-                ?: stringResource(R.string.liveRoutingNoSelectedProfile)
-            Text(
-                stringResource(if (group.checkAvailability) R.string.liveRoutingPreferredProfile else R.string.liveRoutingSelectedProfile, selected),
-                Modifier.padding(top = spacing.sm),
-            )
-            if (group.checkAvailability) {
+            FilledTonalButton(onClick = onProfiles, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.liveRoutingChooseProfiles, group.profileIds.size))
+            }
+            if (group.strategy == ProxyGroupStrategy.Select) {
+                val selected = (group.selectedProfileId ?: group.profileIds.firstOrNull())?.let { profiles[it]?.name }
+                    ?: stringResource(R.string.liveRoutingNoSelectedProfile)
                 Text(
-                    stringResource(R.string.liveRoutingBackupCount, (group.profileIds.size - 1).coerceAtLeast(0)),
+                    stringResource(if (group.checkAvailability) R.string.liveRoutingPreferredProfile else R.string.liveRoutingSelectedProfile, selected),
+                    Modifier.padding(top = spacing.sm),
+                )
+                if (group.checkAvailability) {
+                    Text(
+                        stringResource(R.string.liveRoutingBackupCount, (group.profileIds.size - 1).coerceAtLeast(0)),
+                        color = YaxcTheme.extendedColors.textMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = onPriority, enabled = enabled && group.profileIds.isNotEmpty()) {
+                        Text(stringResource(R.string.liveRoutingEditPriority))
+                    }
+                }
+            } else if (group.checkAvailability) {
+                Text(
+                    stringResource(R.string.liveRoutingHealthFilterHint),
+                    Modifier.padding(top = spacing.sm),
                     color = YaxcTheme.extendedColors.textMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                TextButton(onClick = onPriority, enabled = enabled && group.profileIds.isNotEmpty()) {
-                    Text(stringResource(R.string.liveRoutingEditPriority))
-                }
             }
-        } else if (group.checkAvailability) {
-            Text(
-                stringResource(R.string.liveRoutingHealthFilterHint),
+            if (isExplicitDefault || inUse) Text(
+                stringResource(if (isExplicitDefault) R.string.liveRoutingDefaultGroupInUse else R.string.liveRoutingGroupInUse),
                 Modifier.padding(top = spacing.sm),
                 color = YaxcTheme.extendedColors.textMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
-        }
-        RuntimeSummary(group, profiles, saved, running, runtime, matched)
-        if (isExplicitDefault || inUse) Text(
-            stringResource(if (isExplicitDefault) R.string.liveRoutingDefaultGroupInUse else R.string.liveRoutingGroupInUse),
-            Modifier.padding(top = spacing.sm),
-            color = YaxcTheme.extendedColors.textMuted,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        TextButton(onClick = onDelete, enabled = enabled && !inUse && !isExplicitDefault) {
-            Icon(Icons.Outlined.DeleteOutline, null)
-            Text(stringResource(R.string.liveRoutingDeleteGroup))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDelete, enabled = enabled && !inUse && !isExplicitDefault, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Outlined.DeleteOutline, null)
+                    Text(stringResource(R.string.liveRoutingDeleteGroup))
+                }
+                IconButton(onClick = { onMove(index - 1) }, enabled = enabled && index > 0) {
+                    Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.liveRoutingMoveUp, group.name))
+                }
+                IconButton(onClick = { onMove(index + 1) }, enabled = enabled && index < total - 1) {
+                    Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.liveRoutingMoveDown, group.name))
+                }
+            }
         }
     }
 }
@@ -479,6 +727,7 @@ private fun RuntimeSummary(
     running: Boolean,
     runtime: LiveRoutingGroupStatus?,
     matched: LiveRoutingGroupStatus?,
+    compact: Boolean = false,
 ) {
     val message = when {
         !saved -> stringResource(R.string.liveRoutingHealthNotApplied)
@@ -509,6 +758,8 @@ private fun RuntimeSummary(
             YaxcTheme.extendedColors.textMuted
         },
         style = MaterialTheme.typography.bodySmall,
+        maxLines = if (compact) 1 else Int.MAX_VALUE,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -544,6 +795,10 @@ private fun RuleCard(
     targetName: String,
     enabled: Boolean,
     appsAvailable: Boolean,
+    expanded: Boolean,
+    modifier: Modifier,
+    dragModifier: Modifier,
+    onToggleExpanded: () -> Unit,
     onChange: (AppDomainRule) -> Unit,
     onDomains: (String) -> Unit,
     onApps: () -> Unit,
@@ -554,53 +809,82 @@ private fun RuleCard(
 ) {
     val spacing = YaxcTheme.spacing
     val toggleLabel = stringResource(R.string.liveRoutingEnableRule, rule.name)
-    YaxcCard {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.liveRoutingRulePosition, index + 1, total), modifier = Modifier.weight(1f))
-            Switch(
-                checked = rule.enabled,
-                onCheckedChange = { onChange(rule.copy(enabled = it)) },
+    val enabledLabel = stringResource(if (rule.enabled) R.string.liveRoutingRuleEnabled else R.string.liveRoutingRuleDisabled)
+    var name by rememberSaveable(rule.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(rule.name)) }
+    var domainValue by rememberSaveable(rule.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(domains)) }
+    LaunchedEffect(rule.name) {
+        if (name.text != rule.name) name = TextFieldValue(rule.name)
+    }
+    LaunchedEffect(domains) {
+        if (domainValue.text != domains) domainValue = TextFieldValue(domains)
+    }
+    YaxcCard(modifier = modifier.testTag("live-routing:rule:${rule.id}")) {
+        RoutingCardHeader(
+            name = rule.name.ifBlank { stringResource(R.string.routingRuleName) },
+            summary = stringResource(R.string.liveRoutingRuleSummary, rule.packages.size, rule.domains.size, targetName),
+            expanded = expanded,
+            enabled = enabled,
+            index = index,
+            total = total,
+            tag = "live-routing:rule-header:${rule.id}",
+            dragModifier = dragModifier,
+            onToggleExpanded = onToggleExpanded,
+            onMove = onMove,
+            trailing = {
+                Switch(
+                    checked = rule.enabled,
+                    onCheckedChange = { onChange(rule.copy(enabled = it)) },
+                    enabled = enabled,
+                    modifier = Modifier.semantics { contentDescription = toggleLabel; stateDescription = enabledLabel },
+                )
+            },
+        )
+        EditorExpansion(expanded) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.liveRoutingRulePosition, index + 1, total), modifier = Modifier.weight(1f))
+                IconButton(onClick = { onMove(index - 1) }, enabled = enabled && index > 0) {
+                    Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.liveRoutingMoveUp, rule.name))
+                }
+                IconButton(onClick = { onMove(index + 1) }, enabled = enabled && index < total - 1) {
+                    Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.liveRoutingMoveDown, rule.name))
+                }
+            }
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it; onChange(rule.copy(name = it.text)) },
+                label = { Text(stringResource(R.string.routingRuleName)) },
+                singleLine = true,
                 enabled = enabled,
-                modifier = Modifier.semantics { contentDescription = toggleLabel },
+                modifier = Modifier.fillMaxWidth().testTag("live-routing:rule-name:${rule.id}"),
             )
-            IconButton(onClick = { onMove(index - 1) }, enabled = enabled && index > 0) {
-                Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.liveRoutingMoveUp, rule.name))
+            FilledTonalButton(
+                onClick = onApps,
+                enabled = enabled && appsAvailable,
+                modifier = Modifier.fillMaxWidth().padding(top = spacing.sm).testTag("live-routing:choose-apps:${rule.id}"),
+            ) {
+                Text(stringResource(R.string.liveRoutingChooseApps, rule.packages.size))
             }
-            IconButton(onClick = { onMove(index + 1) }, enabled = enabled && index < total - 1) {
-                Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.liveRoutingMoveDown, rule.name))
+            if (rule.packages.isNotEmpty()) TextButton(onClick = onClearApps, enabled = enabled) {
+                Text(stringResource(R.string.liveRoutingClearApps))
             }
-        }
-        OutlinedTextField(
-            value = rule.name,
-            onValueChange = { onChange(rule.copy(name = it)) },
-            label = { Text(stringResource(R.string.routingRuleName)) },
-            singleLine = true,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        FilledTonalButton(onClick = onApps, enabled = enabled && appsAvailable, modifier = Modifier.fillMaxWidth().padding(top = spacing.sm)) {
-            Text(stringResource(R.string.liveRoutingChooseApps, rule.packages.size))
-        }
-        if (rule.packages.isNotEmpty()) TextButton(onClick = onClearApps, enabled = enabled) {
-            Text(stringResource(R.string.liveRoutingClearApps))
-        }
-        OutlinedTextField(
-            value = domains,
-            onValueChange = onDomains,
-            label = { Text(stringResource(R.string.routingRuleDomains)) },
-            supportingText = { Text(stringResource(R.string.liveRoutingDomainsHint)) },
-            minLines = 2,
-            maxLines = 5,
-            enabled = enabled,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, keyboardType = KeyboardType.Text, autoCorrectEnabled = false),
-            modifier = Modifier.fillMaxWidth().padding(top = spacing.sm),
-        )
-        FilledTonalButton(onClick = onTarget, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.liveRoutingTarget, targetName))
-        }
-        TextButton(onClick = onDelete, enabled = enabled) {
-            Icon(Icons.Outlined.DeleteOutline, null)
-            Text(stringResource(R.string.liveRoutingDeleteRule))
+            OutlinedTextField(
+                value = domainValue,
+                onValueChange = { domainValue = it; onDomains(it.text) },
+                label = { Text(stringResource(R.string.routingRuleDomains)) },
+                supportingText = { Text(stringResource(R.string.liveRoutingDomainsHint)) },
+                minLines = 2,
+                maxLines = 5,
+                enabled = enabled,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, keyboardType = KeyboardType.Text, autoCorrectEnabled = false),
+                modifier = Modifier.fillMaxWidth().padding(top = spacing.sm).testTag("live-routing:rule-domains:${rule.id}"),
+            )
+            FilledTonalButton(onClick = onTarget, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.liveRoutingTarget, targetName))
+            }
+            TextButton(onClick = onDelete, enabled = enabled) {
+                Icon(Icons.Outlined.DeleteOutline, null)
+                Text(stringResource(R.string.liveRoutingDeleteRule))
+            }
         }
     }
 }
@@ -787,50 +1071,109 @@ private fun PriorityPicker(
     }
 }
 
+private class AppPickerRequest(
+    val apps: List<LiveRoutingAppOption>,
+    val packages: List<String>,
+    val selected: List<String>,
+    val query: String,
+    val missingLabel: String,
+)
+
+private class AppPickerOptions(
+    val request: AppPickerRequest,
+    val apps: List<LiveRoutingAppOption>,
+    val selected: Set<String>,
+    val visiblePackages: Set<String>,
+    val selectedVisibleCount: Int,
+)
+
 @Composable
 private fun AppPicker(
     packages: List<String>,
     apps: List<LiveRoutingAppOption>,
     isLoading: Boolean,
+    enabled: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (List<String>) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(packages) }
     val missingLabel = stringResource(R.string.liveRoutingMissingAppLabel)
-    val options by produceState<List<LiveRoutingAppOption>>(emptyList(), apps, packages, query) {
+    val request = remember(apps, packages, selected, query, missingLabel) {
+        AppPickerRequest(apps, packages, selected, query, missingLabel)
+    }
+    val options by produceState<AppPickerOptions?>(null, request) {
         value = withContext(Dispatchers.Default) {
-            val known = apps.mapTo(mutableSetOf()) { it.packageName }
-            val missing = packages.filterNot { it in known }.map { LiveRoutingAppOption(it, missingLabel, false) }
-            val all = if (missing.isEmpty()) apps else missing + apps
-            val keyword = query.trim()
-            if (keyword.isEmpty()) all else all.filter {
+            val chosen = request.selected.toHashSet()
+            val known = request.apps.mapTo(mutableSetOf()) { it.packageName }
+            val missing = request.packages.filterNot { it in known }
+                .map { LiveRoutingAppOption(it, request.missingLabel, false) }
+            val all = if (missing.isEmpty()) request.apps else missing + request.apps
+            val keyword = request.query.trim()
+            val filtered = if (keyword.isEmpty()) all else all.filter {
                 it.name.contains(keyword, true) || it.packageName.contains(keyword, true)
             }
+            val sorted = filtered.sortedWith(
+                compareBy<LiveRoutingAppOption> { it.packageName !in chosen }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.packageName }
+                    .thenBy { it.packageName },
+            )
+            AppPickerOptions(
+                request = request,
+                apps = sorted,
+                selected = chosen,
+                visiblePackages = sorted.mapTo(mutableSetOf()) { it.packageName },
+                selectedVisibleCount = sorted.count { it.packageName in chosen },
+            )
         }
     }
+    val current = options
+    val pending = current?.request !== request
+    val selectionEnabled = enabled && !isLoading && !pending
     PickerDialog(
         title = stringResource(R.string.liveRoutingAppsTitle),
         onDismiss = onDismiss,
         onConfirm = { onConfirm(selected) },
-        confirmEnabled = !isLoading,
+        confirmEnabled = enabled && !isLoading,
     ) {
-        SearchField(query, { query = it })
-        Text(stringResource(R.string.liveRoutingAppIdentityHint), Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
-        if (isLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
-            if (options.isEmpty() && !isLoading) item { Text(stringResource(R.string.noAppsFound), Modifier.padding(16.dp)) }
-            items(options, key = { it.packageName }) { option ->
-                val checked = option.packageName in selected
+        SearchField(query, { query = it }, Modifier.testTag("live-routing:app-search"))
+        VisibleAppsSelection(
+            selectedCount = selected.size,
+            visibleCount = current?.apps?.size ?: 0,
+            selectedVisibleCount = current?.selectedVisibleCount ?: 0,
+            enabled = selectionEnabled,
+            onCheckedChange = { checked ->
+                if (selectionEnabled) {
+                    selected = if (checked) {
+                        selected + current.visiblePackages.filterNot { it in current.selected }
+                    } else {
+                        selected.filterNot { it in current.visiblePackages }
+                    }
+                }
+            },
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        if (isLoading || pending) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        LazyColumn(Modifier.weight(1f).testTag("live-routing:apps-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
+            item(key = "app-help") {
+                Text(stringResource(R.string.liveRoutingAppIdentityHint), Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
+            }
+            if (current?.apps.isNullOrEmpty() && !isLoading && !pending) item(key = "apps-empty") {
+                Text(stringResource(R.string.noAppsFound), Modifier.padding(16.dp))
+            }
+            items(current?.apps.orEmpty(), key = { it.packageName }) { option ->
+                val checked = option.packageName in current?.selected.orEmpty()
                 Row(
-                    Modifier.fillMaxWidth().toggleable(
+                    Modifier.fillMaxWidth().testTag("live-routing:app:${option.packageName}").toggleable(
                         value = checked,
+                        enabled = selectionEnabled,
                         role = Role.Checkbox,
                         onValueChange = { selected = if (it) selected + option.packageName else selected - option.packageName },
                     ).padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Checkbox(checked = checked, onCheckedChange = null)
+                    Checkbox(checked = checked, onCheckedChange = null, enabled = selectionEnabled)
                     Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(option.name, style = MaterialTheme.typography.bodyLarge)
                         Text(option.packageName, color = YaxcTheme.extendedColors.textMuted, style = MaterialTheme.typography.bodySmall)
@@ -992,13 +1335,13 @@ private fun PickerDialog(
 }
 
 @Composable
-private fun SearchField(value: String, onChange: (String) -> Unit) {
+private fun SearchField(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(stringResource(R.string.search)) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
     )
 }
 

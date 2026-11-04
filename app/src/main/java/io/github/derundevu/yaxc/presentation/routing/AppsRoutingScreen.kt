@@ -47,6 +47,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,8 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings.AppsRoutingMode
 import io.github.derundevu.yaxc.dto.AppList
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,6 +83,7 @@ fun AppsRoutingScreen(
     onBack: () -> Unit,
     onModeChange: (AppsRoutingMode) -> Unit,
     onTogglePackage: (String) -> Unit,
+    onSetPackagesSelected: (packages: Set<String>, selected: Boolean) -> Unit,
     onSave: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
@@ -89,13 +93,33 @@ fun AppsRoutingScreen(
     var controlsHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
 
-    val filteredApps = remember(apps, query, showSystemApps) {
-        val keyword = query.trim()
-        if (showSystemApps && keyword.isEmpty()) apps else apps.filter { app ->
-            (showSystemApps || !app.isSystem) &&
-                (keyword.isEmpty() || app.appName.contains(keyword, ignoreCase = true) ||
-                    app.packageName.contains(keyword, ignoreCase = true))
+    val filteredAppsState = remember(apps, query, showSystemApps) {
+        mutableStateOf<List<AppList>?>(null)
+    }
+    LaunchedEffect(filteredAppsState, selectedPackages) {
+        filteredAppsState.value = withContext(Dispatchers.Default) {
+            val keyword = query.trim()
+            val selected = ArrayList<AppList>()
+            val unselected = ArrayList<AppList>()
+            apps.forEach { app ->
+                if ((showSystemApps || !app.isSystem) &&
+                    (keyword.isEmpty() || app.appName.contains(keyword, ignoreCase = true) ||
+                        app.packageName.contains(keyword, ignoreCase = true))
+                ) {
+                    if (app.packageName in selectedPackages) selected.add(app) else unselected.add(app)
+                }
+            }
+            selected.addAll(unselected)
+            selected
         }
+    }
+    val filteredApps = filteredAppsState.value.orEmpty()
+    val isFiltering = filteredAppsState.value == null
+    val visiblePackages = remember(filteredApps) {
+        filteredApps.mapTo(mutableSetOf()) { it.packageName }
+    }
+    val selectedVisibleCount = remember(visiblePackages, selectedPackages) {
+        visiblePackages.count { it in selectedPackages }
     }
 
     Scaffold(
@@ -223,10 +247,22 @@ fun AppsRoutingScreen(
                             modifier = Modifier.padding(start = spacing.sm, top = spacing.sm, bottom = spacing.sm),
                         )
                     }
+
+                    VisibleAppsSelection(
+                        selectedCount = selectedPackages.size,
+                        visibleCount = visiblePackages.size,
+                        selectedVisibleCount = selectedVisibleCount,
+                        enabled = !isLoading && !isFiltering && visiblePackages.isNotEmpty(),
+                        onCheckedChange = { selected ->
+                            if (!isLoading && !isFiltering && visiblePackages.isNotEmpty()) {
+                                onSetPackagesSelected(visiblePackages, selected)
+                            }
+                        },
+                    )
                 }
 
                 when {
-                    isLoading -> {
+                    isLoading || isFiltering -> {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()

@@ -170,6 +170,9 @@ If Android reports a signing conflict, do not uninstall just to bypass it: unins
 5. **Connect.** Tap the power button and approve Android's VPN request. Use the same button to disconnect.
 
 For split tunneling, open **Routing → Apps Routing**, choose **Off**, **Exclude** or **Include**, select apps and save.
+Selected apps stay at the top. **Select all visible apps** checks every app matching the current search and system-app
+filter; tap it again to clear those matches. Selections hidden by the filters are left unchanged.
+
 For domain/IP rules, open **Routing → Core Routing**. Rules are evaluated from top to bottom; higher rules take precedence.
 
 ### Live Routing
@@ -190,14 +193,20 @@ Open **Routing → Live Routing**:
    **Primary and backup order**; Random/Round robin keep distributing connections among all healthy members.
    This option is off for old and new groups until you enable it.
 4. Choose the **default group** for unmatched traffic. The first group is used automatically until you choose another.
+   Reordering groups changes this automatic fallback; an explicitly chosen default group stays selected.
 5. Add an ordered rule, choose apps and/or enter domains, then choose a group, **Default route**, **Direct** or **Block**.
-   Move rules up/down to set their priority; disabled rules do not match.
+   Long-press a group or rule header and drag to reorder within its section; disabled rules do not match.
 6. Tap **Save**. This persists the plan locally and requests a live update if a session is active; it does not connect
    a stopped session. A local save is not confirmation that the running core accepted it: check **Connect** for errors.
 7. On **Connect**, select the special **Live Routing** group and tap the usual connection button. No individual
    profile needs to be selected. Ordinary subscription groups and profile selection remain available.
 
 Use **?** beside **Save** for the full setup guide, examples, subscription warnings and routing limitations.
+
+Tap a group or rule header to expand or collapse its editor; new entries open automatically. Collapsing keeps your
+unsaved fields and text selection. For offscreen positions, scroll and drag again or use the arrows in the expanded
+card. Selected apps appear first in the app picker; **Select all visible apps** affects only the current search results
+and leaves hidden selections untouched.
 
 The first matching enabled rule wins, before **Core Routing**. When a rule contains both apps and domains, **both**
 criteria must match (AND); any value within either list is enough (OR). After Core Routing, unmatched traffic uses

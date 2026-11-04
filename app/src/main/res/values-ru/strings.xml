@@ -116,6 +116,13 @@
     <string name="liveRoutingBack">Назад</string>
     <string name="liveRoutingGroups">Группы прокси</string>
     <string name="liveRoutingRules">Правила по порядку</string>
+    <string name="liveRoutingGroupSummary">%1$d профилей · %2$s</string>
+    <string name="liveRoutingRuleSummary">%1$d приложений · %2$d доменов → %3$s</string>
+    <string name="liveRoutingDragToReorder">Удерживайте и перетащите для изменения порядка</string>
+    <string name="liveRoutingExpand">Развернуть</string>
+    <string name="liveRoutingCollapse">Свернуть</string>
+    <string name="liveRoutingRuleEnabled">Включено</string>
+    <string name="liveRoutingRuleDisabled">Выключено</string>
     <string name="liveRoutingAddGroup">Добавить группу прокси</string>
     <string name="liveRoutingNoGroups">Добавьте хотя бы одну группу для подключения через живую маршрутизацию. Правила прямого подключения, блокировки и маршрута по умолчанию можно использовать и при обычном подключении с профилем.</string>
     <string name="liveRoutingNoRules">Живых правил пока нет. Маршрутизация ядра и маршрут по умолчанию продолжают действовать.</string>
@@ -274,6 +281,8 @@
     <string name="appsRoutingModeIncludeShort">Только включить</string>
     <string name="appsRoutingSelectedCount">Выбрано приложений: %1$d</string>
     <string name="appsRoutingShowSystemApps">Показывать системные приложения</string>
+    <string name="appsRoutingSelectAllVisible">Выбрать все видимые приложения</string>
+    <string name="appsRoutingSelectionSummary">Выбрано: %1$d · Видимых: %2$d</string>
     <string name="noAppsFound">По этому запросу приложения не найдены.</string>
     <string name="search">Поиск</string>
     <string name="configs">Конфиги</string>

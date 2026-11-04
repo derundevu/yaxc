@@ -245,6 +245,11 @@ class LiveRoutingViewModel internal constructor(
         change(plan.copy(groups = plan.groups.filterNot { it.id == id }))
     }
 
+    fun moveGroup(from: Int, to: Int) {
+        if (canReload || from !in plan.groups.indices || to !in plan.groups.indices) return
+        change(plan.copy(groups = plan.groups.toMutableList().apply { add(to, removeAt(from)) }))
+    }
+
     fun addRule() = change(plan.copy(rules = plan.rules + AppDomainRule(
         name = app.getString(R.string.routingRuleDefaultName, plan.rules.size + 1),
     )))
@@ -278,7 +283,7 @@ class LiveRoutingViewModel internal constructor(
     }
 
     fun moveRule(from: Int, to: Int) {
-        if (from !in plan.rules.indices || to !in plan.rules.indices) return
+        if (canReload || from !in plan.rules.indices || to !in plan.rules.indices) return
         change(plan.copy(rules = plan.rules.toMutableList().apply { add(to, removeAt(from)) }))
     }
 

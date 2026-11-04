@@ -55,6 +55,13 @@ class AppsRoutingActivity : AppCompatActivity() {
                             if (!packages.add(packageName)) packages.remove(packageName)
                         }.toSet()
                     },
+                    onSetPackagesSelected = { packages, selected ->
+                        selectedPackages = if (selected) {
+                            selectedPackages + packages
+                        } else {
+                            selectedPackages - packages
+                        }
+                    },
                     onSave = ::saveAppsRouting,
                 )
             }
@@ -71,26 +78,18 @@ class AppsRoutingActivity : AppCompatActivity() {
 
     private fun getApps() {
         lifecycleScope.launch {
-            val selectedPackages = this@AppsRoutingActivity.selectedPackages
             val apps = withContext(Dispatchers.IO) {
-                val selected = ArrayList<AppList>()
-                val unselected = ArrayList<AppList>()
+                packageManager.getInstalledApplications(0).mapNotNull { info ->
+                    if (info.packageName == packageName) return@mapNotNull null
 
-                packageManager.getInstalledApplications(0).forEach { info ->
-                    if (info.packageName == packageName) return@forEach
-
-                    val app = AppList(
+                    AppList(
                         appIcon = info.loadIcon(packageManager),
                         appName = info.loadLabel(packageManager).toString(),
                         packageName = info.packageName,
                         isSystem = info.flags and
                             (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0,
                     )
-
-                    if (selectedPackages.contains(info.packageName)) selected.add(app) else unselected.add(app)
                 }
-
-                selected + unselected
             }
 
             this@AppsRoutingActivity.apps = apps

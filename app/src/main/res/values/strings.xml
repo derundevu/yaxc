@@ -116,6 +116,13 @@
     <string name="liveRoutingBack">Back</string>
     <string name="liveRoutingGroups">Proxy groups</string>
     <string name="liveRoutingRules">Ordered rules</string>
+    <string name="liveRoutingGroupSummary">%1$d profiles · %2$s</string>
+    <string name="liveRoutingRuleSummary">%1$d apps · %2$d domains → %3$s</string>
+    <string name="liveRoutingDragToReorder">Long press and drag to reorder</string>
+    <string name="liveRoutingExpand">Expand</string>
+    <string name="liveRoutingCollapse">Collapse</string>
+    <string name="liveRoutingRuleEnabled">Enabled</string>
+    <string name="liveRoutingRuleDisabled">Disabled</string>
     <string name="liveRoutingAddGroup">Add proxy group</string>
     <string name="liveRoutingNoGroups">Add at least one group to connect with Live Routing. Direct, block and default-route rules can still be used with a regular profile connection.</string>
     <string name="liveRoutingNoRules">No live rules yet. Core Routing and the default route still apply.</string>
@@ -274,6 +281,8 @@
     <string name="appsRoutingModeIncludeShort">Include</string>
     <string name="appsRoutingSelectedCount">%1$d apps selected</string>
     <string name="appsRoutingShowSystemApps">Show system apps</string>
+    <string name="appsRoutingSelectAllVisible">Select all visible apps</string>
+    <string name="appsRoutingSelectionSummary">%1$d selected · %2$d visible</string>
     <string name="noAppsFound">No apps found for this search.</string>
     <string name="search">Search</string>
     <string name="configs">Configs</string>

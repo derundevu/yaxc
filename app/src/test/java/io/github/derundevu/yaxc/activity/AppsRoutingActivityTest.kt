@@ -4,6 +4,9 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -20,6 +23,7 @@ import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.waitForAsyncState
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -73,6 +77,7 @@ class AppsRoutingActivityTest : HelperSettingsTest() {
         compose.onNodeWithText("Synthetic System").assertIsDisplayed()
         compose.onNodeWithText("Synthetic Updated").assertIsDisplayed()
         compose.onNodeWithText(app.getString(R.string.appsRoutingShowSystemApps)).performClick()
+        awaitApps()
         compose.onNodeWithText("Synthetic System").assertDoesNotExist()
         compose.onNodeWithText("Synthetic Updated").assertDoesNotExist()
         compose.onNodeWithText("Synthetic Launcher").assertIsDisplayed()
@@ -95,11 +100,55 @@ class AppsRoutingActivityTest : HelperSettingsTest() {
         compose.onNodeWithText("Synthetic System").assertDoesNotExist()
         compose.onNodeWithText(app.getString(R.string.noAppsFound)).assertIsDisplayed()
         compose.onNodeWithText(app.getString(R.string.appsRoutingShowSystemApps)).performClick()
+        awaitApps()
         compose.onNodeWithText("Synthetic System").assertIsDisplayed()
         assertEquals("", settings.appsRouting)
         save()
         assertEquals("synthetic.launcher", settings.appsRouting)
         assertEquals(AppsRoutingMode.Include, settings.appsRoutingMode)
+    }
+
+    @Test
+    fun bulkSelectionUsesAllNameAndPackageMatchesAndPreservesHiddenSelections() {
+        val visiblePackages = (0 until 24).map { index ->
+            "synthetic.bulk${index.toString().padStart(2, '0')}".also { packageName ->
+                install(packageName, "Bulk Match ${index.toString().padStart(2, '0')}", 0)
+            }
+        }.toSet()
+        install("synthetic.bulk.system", "Bulk Match System", ApplicationInfo.FLAG_SYSTEM)
+        install("synthetic.bulk.updated", "Bulk Match Updated", ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
+        val hiddenPackages = setOf("synthetic.launcher", "synthetic.bulk.system", "synthetic.bulk.updated")
+        val initialSelection = (hiddenPackages + visiblePackages.first()).sorted().joinToString("\n")
+        settings.appsRouting = initialSelection
+        openActivity()
+        compose.onNodeWithText(app.getString(R.string.appsRoutingShowSystemApps)).performClick()
+        search("  bULk maTCH  ")
+        val composedMatches = compose.onAllNodesWithText("Bulk Match", substring = true)
+            .fetchSemanticsNodes().size
+        assertTrue("Bulk actions must include apps outside the lazy viewport", composedMatches in 1 until 24)
+        compose.onNodeWithText("Bulk Match System").assertDoesNotExist()
+        compose.onNodeWithText("Bulk Match Updated").assertDoesNotExist()
+        compose.onNodeWithText(app.getString(R.string.appsRoutingSelectionSummary, 4, 24))
+            .assertIsDisplayed()
+        compose.onNodeWithText(app.getString(R.string.appsRoutingSelectAllVisible))
+            .assertIsEnabled().performClick().assertIsOn()
+        assertEquals(initialSelection, settings.appsRouting)
+        save()
+        assertEquals((hiddenPackages + visiblePackages).sorted().joinToString("\n"), settings.appsRouting)
+
+        controller!!.pause().stop().destroy()
+        controller = null
+        openActivity()
+        compose.onNodeWithText(app.getString(R.string.appsRoutingShowSystemApps)).performClick()
+        search("no matching packages")
+        compose.onNodeWithText(app.getString(R.string.appsRoutingSelectAllVisible)).assertIsNotEnabled()
+        search("  SyNtHeTiC.BuLk  ")
+        compose.onNodeWithText(app.getString(R.string.appsRoutingSelectionSummary, 27, 24))
+            .assertIsDisplayed()
+        compose.onNodeWithText(app.getString(R.string.appsRoutingSelectAllVisible))
+            .assertIsOn().performClick().assertIsOff()
+        save()
+        assertEquals(hiddenPackages.sorted().joinToString("\n"), settings.appsRouting)
     }
 
     @Test
@@ -112,9 +161,10 @@ class AppsRoutingActivityTest : HelperSettingsTest() {
         try {
             compose.waitForAsyncState { DelayedApplicationsPackageManager.entered.count == 0L }
             compose.onNodeWithContentDescription(app.getString(R.string.loading)).assertIsDisplayed()
+            compose.onNodeWithText(app.getString(R.string.appsRoutingSelectAllVisible)).assertIsNotEnabled()
             compose.onNodeWithText(app.getString(R.string.appsRoutingModeIncludeShort)).performClick()
             compose.onNodeWithText(app.getString(R.string.appsRoutingShowSystemApps)).performClick()
-            search("synthetic")
+            search("synthetic", awaitResults = false)
             compose.onNodeWithContentDescription(app.getString(R.string.save)).assertIsEnabled().performClick()
             compose.waitForAsyncState { controller!!.get().isFinishing }
             assertEquals(AppsRoutingMode.Include, settings.appsRoutingMode)
@@ -138,8 +188,9 @@ class AppsRoutingActivityTest : HelperSettingsTest() {
         }
     }
 
-    private fun search(query: String) {
+    private fun search(query: String, awaitResults: Boolean = true) {
         compose.onNodeWithText(app.getString(R.string.search)).performTextReplacement(query)
+        if (awaitResults) awaitApps()
     }
 
     private fun save() {
