@@ -185,6 +185,6 @@ class LinkRepositoryDatabaseTest : RoomTestSupport() {
         name = name, address = "http://127.0.0.1:18080/subscription", type = Link.Type.Subscription,
         isActive = false, userAgent = "fixture-agent/1", xHwid = "synthetic-link-hwid",
         customHeaders = "X-Fixture: synthetic", subscriptionMetadata = "upload=7; total=512",
-        lastRefreshedAt = 123456789L,
+        lastRefreshedAt = 123456789L, refreshIntervalMinutes = 45,
     )
 }

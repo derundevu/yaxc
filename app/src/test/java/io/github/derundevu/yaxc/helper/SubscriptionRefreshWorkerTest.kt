@@ -3,6 +3,7 @@ package io.github.derundevu.yaxc.helper
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.dto.SubscriptionMetadata
 import io.github.derundevu.yaxc.testing.MainDispatcherRule
 import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.RoomTestSupport
@@ -53,6 +54,45 @@ class SubscriptionRefreshWorkerTest : RoomTestSupport() {
             assertTrue(database.linkDao().find(due.id)!!.lastRefreshedAt > 0L)
             assertEquals(future, database.linkDao().find(future.id))
             assertEquals(1, server.requestCount.get())
+        }
+    }
+
+    @Test
+    fun workerUsesEachLocalOverrideOrGlobalIntervalWithoutFollowingServerMetadata() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            settings.refreshLinksOnOpen = true
+            settings.refreshLinksIntervalMinutes = 60
+            val now = System.currentTimeMillis()
+            val sources = listOf(
+                Link(address = server.url, name = "local-due", refreshIntervalMinutes = 15,
+                    lastRefreshedAt = now - 30 * 60_000L,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 120).toJsonString()),
+                Link(address = server.url, name = "global-not-due",
+                    lastRefreshedAt = now - 30 * 60_000L,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 15).toJsonString()),
+                Link(address = server.url, name = "global-due",
+                    lastRefreshedAt = now - 90 * 60_000L,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 120).toJsonString()),
+                Link(address = server.url, name = "local-not-due", refreshIntervalMinutes = 120,
+                    lastRefreshedAt = now - 90 * 60_000L,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 15).toJsonString()),
+            )
+            sources.forEach { it.id = database.linkDao().insertAtEnd(it) }
+            repeat(2) {
+                server.enqueue("""{"remarks":"worker-$it","outbounds":[{"protocol":"freedom"}]}""")
+            }
+            assertEquals(ListenableWorker.Result.success(), worker().doWork())
+            for (index in listOf(0, 2)) {
+                assertTrue(database.linkDao().find(sources[index].id)!!.lastRefreshedAt >= now)
+                assertEquals(sources[index].refreshIntervalMinutes,
+                    database.linkDao().find(sources[index].id)!!.refreshIntervalMinutes)
+                assertEquals(1, database.profileDao().linkProfiles(sources[index].id).size)
+            }
+            for (index in listOf(1, 3)) {
+                assertEquals(sources[index], database.linkDao().find(sources[index].id))
+                assertTrue(database.profileDao().linkProfiles(sources[index].id).isEmpty())
+            }
+            assertEquals(2, server.requestCount.get())
         }
     }
 

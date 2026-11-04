@@ -310,6 +310,9 @@
     <string name="sourceAddressLead">Оставьте адрес пустым, если источник должен быть ручным.</string>
     <string name="sourceAddressManualLead">Оставьте пустым, чтобы создать ручную группу с локальными профилями.</string>
     <string name="sourceAddressRemoteLead">Укажите HTTPS-источник, если профили должны обновляться автоматически.</string>
+    <string name="sourceRefreshInterval">Интервал обновления (минуты)</string>
+    <string name="sourceRefreshIntervalLead">Необязательно. Оставьте пустым, чтобы использовать общий интервал из настроек (%1$d мин.). Минимум: %2$d мин.</string>
+    <string name="sourceRefreshIntervalMinimum">Укажите интервал не менее %1$d мин.</string>
     <string name="sourceUserAgentLead">Необязательно. Используется только при обновлении этого источника по сети.</string>
     <string name="sourceXHwidLead">Необязательный override. Оставьте пустым, чтобы использовать x-hwid по умолчанию из настроек.</string>
     <string name="sourceHeadersLead">Необязательно. По одному заголовку в строке в формате Header-Name: value. Подходит для дополнительных заголовков провайдера поверх автоматических User-Agent и x-hwid/device headers.</string>
@@ -420,7 +423,7 @@
     <string name="mainSubscriptionTrafficLimit">Лимит трафика</string>
     <string name="mainSubscriptionDaysLeft">Дней до окончания</string>
     <string name="mainSubscriptionExpiresAt">Истекает</string>
-    <string name="mainSubscriptionAutoUpdate">Период автообновления</string>
+    <string name="mainSubscriptionAutoUpdate">Интервал провайдера (метаданные)</string>
     <string name="mainSubscriptionSupportUrl">Ссылка на поддержку</string>
     <string name="mainSubscriptionWebPage">Страница сервиса</string>
     <string name="mainSubscriptionUnlimited">Без лимита</string>
@@ -431,9 +434,9 @@
     <string name="mainSubscriptionUsageShort">%1$s / %2$s</string>
     <string name="mainSubscriptionDaysShort">осталось %1$s дн.</string>
     <string name="mainSubscriptionDaysFull">%1$d дн.</string>
-    <string name="mainSubscriptionAutoUpdateShort">%1$d мин.</string>
-    <string name="mainSubscriptionAutoUpdateHoursShort">%1$d ч.</string>
-    <string name="mainSubscriptionAutoUpdateFull">Каждые %1$d мин</string>
+    <string name="mainSubscriptionAutoUpdateShort">Провайдер: %1$d мин.</string>
+    <string name="mainSubscriptionAutoUpdateHoursShort">Провайдер: %1$d ч.</string>
+    <string name="mainSubscriptionAutoUpdateFull">Рекомендация провайдера: каждые %1$d мин. (только метаданные)</string>
     <string name="mainSubscriptionLastRefreshShort">%1$s</string>
     <string name="mainConnectionPasswordHidden">Скрыт</string>
     <string name="mainConnectionResolveFailed">Не удалось резолвить</string>
@@ -475,7 +478,7 @@
     <string name="settingsPingAddressLead">URL или хост, через который проверяется задержка у выбранного профиля.</string>
     <string name="settingsPingTypeLead">Выберите способ, которым приложение проверяет жив ли маршрут.</string>
     <string name="settingsPingTimeoutLead">В секундах. Максимальное время ожидания результата пинга, после которого он считается неудачным.</string>
-    <string name="settingsRefreshLinksIntervalLead">В минутах. Используется, если подписка не прислала свой интервал обновления. Минимум 15 минут.</string>
+    <string name="settingsRefreshLinksIntervalLead">В минутах. Используется для подписок без локального интервала в форме источника. Метаданные провайдера не задают расписание. Минимум 15 минут.</string>
     <string name="settingsBypassLanLead">Оставляет локальные IPv4-сети вроде 192.168.x.x и 10.x.x.x вне VPN.</string>
     <string name="settingsSocksUdpLead">Разрешает UDP через локальный SOCKS-inbound. Нужен для QUIC, DNS и части приложений.</string>
     <string name="settingsTun2socksLead">Передает трафик из TUN в локальный SOCKS-прокси. Обычно лучше держать включенным.</string>

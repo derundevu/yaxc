@@ -1,6 +1,8 @@
 package io.github.derundevu.yaxc.presentation.routing
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -12,7 +14,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -58,11 +60,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,15 +71,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
@@ -90,7 +91,6 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEdi
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchRow
-import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,12 +127,15 @@ fun CoreRoutingScreen(
     var previousRulesCount by remember { mutableIntStateOf(rules.size) }
     var actionsExpanded by remember { mutableStateOf(false) }
     var helpVisible by rememberSaveable { mutableStateOf(false) }
-    val ruleSpacingPx = remember(density) { with(density) { 16.dp.toPx() } }
-    val ruleCenters = remember { mutableStateMapOf<String, Float>() }
-    val ruleHeights = remember { mutableStateMapOf<String, Float>() }
-    var draggingRuleId by remember { mutableStateOf<String?>(null) }
-    var draggingOffsetY by remember { mutableFloatStateOf(0f) }
-    var draggingTargetIndex by remember { mutableStateOf<Int?>(null) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val dragHysteresisPx = with(density) { 16.dp.toPx() }
+    val itemSpacingPx = with(density) { spacing.md.toPx() }
+    val reorder = remember(listState, dragHysteresisPx, itemSpacingPx) {
+        RoutingReorderState(listState, scope, dragHysteresisPx, itemSpacingPx)
+    }
+    val ruleKeys = remember(rules) { rules.map { it.id } }
+    val orderedRules = remember(rules, reorder.previewOrder) { reorder.ordered(rules) { it.id } }
 
     LaunchedEffect(savedRevision) {
         if (savedRevision > 0 && editorMode == CoreRoutingEditorMode.Visual) expandedRuleId = null
@@ -147,16 +150,7 @@ fun CoreRoutingScreen(
         previousRulesCount = rules.size
     }
 
-    LaunchedEffect(rules) {
-        val knownIds = rules.mapTo(mutableSetOf()) { it.id }
-        ruleCenters.keys.toList().filterNot(knownIds::contains).forEach(ruleCenters::remove)
-        ruleHeights.keys.toList().filterNot(knownIds::contains).forEach(ruleHeights::remove)
-        if (draggingRuleId != null && draggingRuleId !in knownIds) {
-            draggingRuleId = null
-            draggingOffsetY = 0f
-            draggingTargetIndex = null
-        }
-    }
+    reorder.synchronize(listOf(ruleKeys), !isLoading && !isBusy && editorMode == CoreRoutingEditorMode.Visual)
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -244,7 +238,9 @@ fun CoreRoutingScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
+                        .testTag("core-routing:content")
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(horizontal = spacing.md)
@@ -329,68 +325,15 @@ fun CoreRoutingScreen(
                 }
 
                 else -> itemsIndexed(
-                    items = rules,
+                    items = orderedRules,
                     key = { _, item -> item.id },
-                ) { index, rule ->
-                    val isDragging = draggingRuleId == rule.id
-                    val draggedIndex = draggingRuleId?.let { activeId ->
-                        rules.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
-                    }
-                    val draggedHeight = draggingRuleId?.let { ruleHeights[it] } ?: 0f
-                    val displacedOffsetTarget = when {
-                        isDragging -> draggingOffsetY
-                        draggedIndex == null || draggingTargetIndex == null -> 0f
-                        draggedIndex < draggingTargetIndex!! && index in (draggedIndex + 1)..draggingTargetIndex!! ->
-                            -(draggedHeight + ruleSpacingPx)
-                        draggedIndex > draggingTargetIndex!! && index in draggingTargetIndex!! until draggedIndex ->
-                            draggedHeight + ruleSpacingPx
-                        else -> 0f
-                    }
-                    val displacedOffset by animateFloatAsState(
-                        targetValue = displacedOffsetTarget,
-                        animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
-                        label = "core_routing_rule_displacement",
-                    )
-                    val dragModifier = Modifier.pointerInput(rule.id, rules) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                draggingRuleId = rule.id
-                                draggingOffsetY = 0f
-                                draggingTargetIndex = index
-                            },
-                            onDragCancel = {
-                                draggingRuleId = null
-                                draggingOffsetY = 0f
-                                draggingTargetIndex = null
-                            },
-                            onDragEnd = {
-                                val toIndex = draggingTargetIndex
-                                if (toIndex != null && toIndex != index) {
-                                    onMoveRule(index, toIndex)
-                                }
-                                draggingRuleId = null
-                                draggingOffsetY = 0f
-                                draggingTargetIndex = null
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                draggingOffsetY += dragAmount.y
-                                val ruleCenter = ruleCenters[rule.id] ?: 0f
-                                val finalCenter = ruleCenter + draggingOffsetY
-                                val targetId = rules
-                                    .map { it.id }
-                                    .minByOrNull { candidateId ->
-                                        abs((ruleCenters[candidateId] ?: ruleCenter) - finalCenter)
-                                    }
-                                draggingTargetIndex = rules.indexOfFirst { it.id == targetId }
-                                    .takeIf { it >= 0 }
-                                    ?: index
-                            },
-                        )
-                    }
+                ) { _, rule ->
+                    val modelIndex = rules.indexOfFirst { it.id == rule.id }
                     CoreRoutingRuleCard(
                         rule = rule,
                         isExpanded = expandedRuleId == rule.id,
+                        dragging = reorder.isDragging,
+                        reorderActive = reorder.activeKey != null,
                         onToggleExpanded = {
                             expandedRuleId = if (expandedRuleId == rule.id) null else rule.id
                         },
@@ -398,16 +341,14 @@ fun CoreRoutingScreen(
                         onToggleEnabled = { enabled ->
                             onRuleChange(rule.copy(enabled = enabled))
                         },
-                        dragModifier = dragModifier,
-                        modifier = Modifier
+                        enabled = !isLoading && !isBusy,
+                        index = modelIndex,
+                        total = rules.size,
+                        onMove = { onMoveRule(modelIndex, it) },
+                        dragModifier = reorder.headerModifier(rule.id, ruleKeys, !isLoading && !isBusy, onMove = onMoveRule),
+                        modifier = routingReorderItemModifier(reorder, rule.id)
                             .fillMaxWidth()
-                            .onGloballyPositioned { coordinates ->
-                                ruleCenters[rule.id] =
-                                    coordinates.positionInParent().y + coordinates.size.height / 2f
-                                ruleHeights[rule.id] = coordinates.size.height.toFloat()
-                            }
-                            .graphicsLayer { translationY = displacedOffset }
-                            .zIndex(if (isDragging) 3f else 0f),
+                            .testTag("core-routing:rule:${rule.id}"),
                         onDelete = { onDeleteRule(rule.id) },
                     )
                 }
@@ -472,27 +413,34 @@ private fun CoreRoutingModeTabs(
 private fun CoreRoutingRuleCard(
     rule: CoreRoutingRule,
     isExpanded: Boolean,
+    dragging: Boolean,
+    reorderActive: Boolean,
     onToggleExpanded: () -> Unit,
     onRuleChange: (CoreRoutingRule) -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
+    enabled: Boolean,
+    index: Int,
+    total: Int,
+    onMove: (Int) -> Unit,
     dragModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
     onDelete: () -> Unit,
 ) {
     val expandRotation by animateFloatAsState(
-        targetValue = if (isExpanded) 180f else 0f,
+        targetValue = if (isExpanded && !dragging) 180f else 0f,
         animationSpec = tween(durationMillis = 240),
         label = "routing_rule_expand_rotation",
     )
+    val ruleName = rule.name.ifBlank { textResource(R.string.routingRuleName) }
+    val moveUp = textResource(R.string.liveRoutingMoveUp, ruleName)
+    val moveDown = textResource(R.string.liveRoutingMoveDown, ruleName)
 
     YaxcCard(
-        modifier = modifier
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = 0.92f,
-                    stiffness = 520f,
-                ),
+        modifier = modifier.then(
+            if (reorderActive) Modifier else Modifier.animateContentSize(
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 520f),
             ),
+        ),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -501,8 +449,15 @@ private fun CoreRoutingRuleCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("core-routing:rule-header:${rule.id}")
                     .then(dragModifier)
-                    .clickable(onClick = onToggleExpanded),
+                    .clickable(onClick = onToggleExpanded)
+                    .semantics {
+                        customActions = if (enabled) buildList {
+                            if (index > 0) add(CustomAccessibilityAction(moveUp) { onMove(index - 1); true })
+                            if (index < total - 1) add(CustomAccessibilityAction(moveDown) { onMove(index + 1); true })
+                        } else emptyList()
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -537,13 +492,13 @@ private fun CoreRoutingRuleCard(
                 )
             }
 
-            AnimatedVisibility(
+            if (!dragging) AnimatedVisibility(
                 visible = isExpanded,
-                enter = expandVertically(
+                enter = if (reorderActive) EnterTransition.None else expandVertically(
                     animationSpec = tween(durationMillis = 260),
                     expandFrom = Alignment.Top,
                 ) + fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 40)),
-                exit = shrinkVertically(
+                exit = if (reorderActive) ExitTransition.None else shrinkVertically(
                     animationSpec = tween(durationMillis = 220),
                     shrinkTowards = Alignment.Top,
                 ) + fadeOut(animationSpec = tween(durationMillis = 120)),

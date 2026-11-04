@@ -27,6 +27,7 @@ class YaxcDatabaseMigrationTest {
     @Test fun version6RetainsCustomHeaders() = migrateFrom(6)
     @Test fun version7RetainsSubscriptionMetadata() = migrateFrom(7)
     @Test fun version8RetainsHardwareIdentity() = migrateFrom(8)
+    @Test fun version9RetainsLastRefreshAndDefaultsOverridesToGlobal() = migrateFrom(9)
 
     private fun migrateFrom(version: Int) = runBlocking {
         val app = RuntimeEnvironment.getApplication() as Yaxc
@@ -45,8 +46,8 @@ class YaxcDatabaseMigrationTest {
             .addMigrations(*YaxcDatabase.migrations)
             .build()
         try {
-            // Opening Room performs its real v9 schema validation as well as running the chain.
-            assertEquals(9, migrated.openHelper.writableDatabase.version)
+            // Opening Room performs its real v10 schema validation as well as running the chain.
+            assertEquals(10, migrated.openHelper.writableDatabase.version)
             val dao = migrated.profileDao()
             assertEquals(manualOne, dao.find(manualOne.id))
             assertEquals(manualTwo, dao.find(manualTwo.id))
@@ -82,7 +83,9 @@ class YaxcDatabaseMigrationTest {
                 assertEquals(if (version >= 7) "upload=11; download=29; total=4096" else null,
                     active.subscriptionMetadata)
                 assertEquals(if (version >= 8) "synthetic-migration-hwid" else null, active.xHwid)
-                assertEquals(0L, active.lastRefreshedAt)
+                assertEquals(if (version >= 9) 123456789L else 0L, active.lastRefreshedAt)
+                assertNull(active.refreshIntervalMinutes)
+                assertNull(links.getValue(17).refreshIntervalMinutes)
                 assertFalse(links.getValue(17).isActive)
                 assertEquals(if (version >= 5) listOf(17L, 4L) else listOf(4L, 17L),
                     migrated.linkDao().all().first().map { it.id })
@@ -122,6 +125,7 @@ class YaxcDatabaseMigrationTest {
             if (version >= 6) columns += "custom_headers TEXT"
             if (version >= 7) columns += "subscription_metadata TEXT"
             if (version >= 8) columns += "x_hwid TEXT"
+            if (version >= 9) columns += "last_refreshed_at INTEGER NOT NULL DEFAULT 0"
             db.execSQL("CREATE TABLE links (${columns.joinToString()})")
         }
         val ownership = if (version >= 2) "link_id INTEGER," else ""
@@ -164,6 +168,7 @@ class YaxcDatabaseMigrationTest {
                     columns += "subscription_metadata"; values += "upload=11; download=29; total=4096"
                 }
                 if (version >= 8) { columns += "x_hwid"; values += "synthetic-migration-hwid" }
+                if (version >= 9) { columns += "last_refreshed_at"; values += 123456789L }
                 db.execSQL("INSERT INTO links (${columns.joinToString()}) VALUES (${columns.joinToString { "?" }})",
                     values.toTypedArray())
             }

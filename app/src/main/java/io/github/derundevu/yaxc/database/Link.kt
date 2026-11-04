@@ -35,6 +35,8 @@ data class Link(
     var subscriptionMetadata: String? = null,
     @ColumnInfo(name = "last_refreshed_at")
     var lastRefreshedAt: Long = 0L,
+    @ColumnInfo(name = "refresh_interval_minutes")
+    var refreshIntervalMinutes: Int? = null,
 ) : Parcelable {
     enum class Type(
         val value: Int,

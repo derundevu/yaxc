@@ -108,6 +108,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 userAgent = "  source-agent  "
                 xHwid = "  synthetic-source-device  "
                 customHeaders = "X-HWID: superseded\r\nX-Device-OS: TestAndroid\r\nX-Test: value:with:colons\r\ninvalid\r\n: ignored"
+                refreshIntervalMinutes = 45
             }
             links.update(link)
             val exchange = server.enqueue(body("Тест 🌍"), headers = mapOf(
@@ -128,6 +129,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             val saved = links.find(link.id)!!
             assertEquals("План 🌍", saved.name)
             assertTrue(saved.lastRefreshedAt > 1_000L)
+            assertEquals(45, saved.refreshIntervalMinutes)
             val metadata = SubscriptionMetadata.fromJsonString(saved.subscriptionMetadata)!!
             assertEquals(120, metadata.updateIntervalMinutes)
             assertEquals(6_442_450_944L, metadata.usedBytes)
@@ -142,23 +144,52 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     }
 
     @Test
-    fun dueBoundariesHonorServerIntervalMinimumNeverRefreshedAndFutureClock() = runBlocking {
+    fun creatingAResolvedSubscriptionPersistsItsLocalIntervalWithoutUsingServerAdvice() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = Link(address = server.url, name = "new source", refreshIntervalMinutes = 30)
+            server.enqueue(body("created"), headers = mapOf("Profile-Update-Interval" to "4"))
+            helper().saveResolvedLink(link, helper().resolveProfiles(link), 123_456L)
+            assertTrue(link.id > 0L)
+            assertEquals(link, links.find(link.id))
+            assertEquals(30, links.find(link.id)!!.refreshIntervalMinutes)
+            assertEquals(240,
+                SubscriptionMetadata.fromJsonString(links.find(link.id)!!.subscriptionMetadata)!!.updateIntervalMinutes)
+            assertEquals("created", profiles.linkProfiles(link.id).single().name)
+        }
+    }
+
+    @Test
+    fun dueBoundariesUseLocalThenGlobalAndIgnoreServerMetadata() = runBlocking {
         SubscriptionHttpServer().use { server ->
             settings.refreshLinksIntervalMinutes = 60
-            val now = 10_000_000L
-            val interval = 60 * 60_000L
+            val now = 200_000_000_000_000L
+            val globalInterval = 60 * 60_000L
+            val minimumInterval = Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES * 60_000L
+            val maximumInterval = Int.MAX_VALUE * 60_000L
             val cases = listOf(
-                Link(name = "before", lastRefreshedAt = now - interval + 1),
-                Link(name = "exact", lastRefreshedAt = now - interval),
-                Link(name = "after", lastRefreshedAt = now - interval - 1),
+                Link(name = "before", lastRefreshedAt = now - globalInterval + 1),
+                Link(name = "exact", lastRefreshedAt = now - globalInterval),
+                Link(name = "after", lastRefreshedAt = now - globalInterval - 1),
                 Link(name = "never", lastRefreshedAt = 0),
-                Link(name = "future", lastRefreshedAt = now + interval),
-                Link(name = "server-not-yet", lastRefreshedAt = now - interval,
+                Link(name = "future", lastRefreshedAt = now + globalInterval),
+                Link(name = "server-slow", lastRefreshedAt = now - globalInterval,
                     subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 120).toJsonString()),
-                Link(name = "server-exact", lastRefreshedAt = now - 2 * interval,
+                Link(name = "server-fast", lastRefreshedAt = now - globalInterval + 1,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 15).toJsonString()),
+                Link(name = "minimum-before", lastRefreshedAt = now - minimumInterval + 1,
+                    refreshIntervalMinutes = Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES),
+                Link(name = "minimum-exact", lastRefreshedAt = now - minimumInterval,
+                    refreshIntervalMinutes = Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES,
                     subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 120).toJsonString()),
-                Link(name = "minimum-exact", lastRefreshedAt = now - Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES * 60_000L,
-                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 1).toJsonString()),
+                Link(name = "local-before", lastRefreshedAt = now - 2 * globalInterval + 1,
+                    refreshIntervalMinutes = 120),
+                Link(name = "local-exact", lastRefreshedAt = now - 2 * globalInterval,
+                    refreshIntervalMinutes = 120,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 15).toJsonString()),
+                Link(name = "maximum-before", lastRefreshedAt = now - maximumInterval + 1,
+                    refreshIntervalMinutes = Int.MAX_VALUE),
+                Link(name = "maximum-exact", lastRefreshedAt = now - maximumInterval,
+                    refreshIntervalMinutes = Int.MAX_VALUE),
                 Link(name = "inactive", isActive = false),
                 Link(name = "blank", address = "  \r\n"),
             )
@@ -166,17 +197,72 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 if (link.name != "blank") link.address = server.url
                 link.id = links.insertAtEnd(link)
             }
-            repeat(5) { server.enqueue(body("due-$it")) }
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(5, 5, 0), helper().refreshDueLinks(now))
-            assertEquals(setOf("before", "future", "server-not-yet", "inactive", "blank"),
-                cases.filter { links.find(it.id)!!.lastRefreshedAt != now }.map { it.name }.toSet())
-            assertEquals(5, server.requestCount.get())
+            val dueNames = setOf("exact", "after", "never", "server-slow", "minimum-exact",
+                "local-exact", "maximum-exact")
+            repeat(dueNames.size) { server.enqueue(body("due-$it")) }
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(dueNames.size, dueNames.size, 0),
+                helper().refreshDueLinks(now))
+            assertEquals(dueNames,
+                cases.filter { links.find(it.id)!!.lastRefreshedAt == now }.map { it.name }.toSet())
+            assertEquals(dueNames.size, server.requestCount.get())
             val before = cases.first()
             server.enqueue(body("manual"))
             assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0), helper().refreshLinks(before.id))
             assertEquals("manual", profiles.linkProfiles(before.id).single().name)
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(0, 0, 0), helper().refreshLinks(cases[8].id))
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(0, 0, 0), helper().refreshLinks(cases[9].id))
+            for (name in listOf("inactive", "blank")) {
+                assertEquals(SubscriptionRefreshHelper.RefreshResult(0, 0, 0),
+                    helper().refreshLinks(cases.single { it.name == name }.id))
+            }
+        }
+    }
+
+    @Test
+    fun independentSubscriptionsKeepTheirSchedulesAndClearingOverrideTracksGlobalChanges() = runBlocking {
+        SubscriptionHttpServer().use { localServer ->
+            SubscriptionHttpServer().use { globalServer ->
+                val start = 10_000_000L
+                settings.refreshLinksIntervalMinutes = 60
+                val local = source(localServer.url, "local").copy(
+                    refreshIntervalMinutes = 15,
+                    lastRefreshedAt = start,
+                )
+                val global = source(globalServer.url, "global").copy(
+                    lastRefreshedAt = start,
+                    subscriptionMetadata = SubscriptionMetadata(updateIntervalMinutes = 120).toJsonString(),
+                )
+                links.update(local)
+                links.update(global)
+                localServer.enqueue(body("local-15"), headers = mapOf("Profile-Update-Interval" to "4"))
+                assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
+                    helper().refreshDueLinks(start + 15 * 60_000L))
+                assertEquals(15, links.find(local.id)!!.refreshIntervalMinutes)
+                assertEquals(global, links.find(global.id))
+                assertEquals(0, globalServer.requestCount.get())
+                val profileId = profiles.linkProfiles(local.id).single().id
+
+                settings.refreshLinksIntervalMinutes = 30
+                localServer.enqueue(body("local-30"))
+                globalServer.enqueue(body("global-30"))
+                assertEquals(SubscriptionRefreshHelper.RefreshResult(2, 2, 0),
+                    helper().refreshDueLinks(start + 30 * 60_000L))
+                assertEquals(profileId, profiles.linkProfiles(local.id).single().id)
+                links.update(links.find(local.id)!!.copy(refreshIntervalMinutes = null))
+                settings.refreshLinksIntervalMinutes = 60
+                assertEquals(SubscriptionRefreshHelper.RefreshResult(0, 0, 0),
+                    helper().refreshDueLinks(start + 45 * 60_000L))
+
+                settings.refreshLinksIntervalMinutes = 15
+                localServer.enqueue(body("cleared-follows-global"))
+                globalServer.enqueue(body("global-15"))
+                assertEquals(SubscriptionRefreshHelper.RefreshResult(2, 2, 0),
+                    helper().refreshDueLinks(start + 45 * 60_000L))
+                assertNull(links.find(local.id)!!.refreshIntervalMinutes)
+                assertNull(links.find(global.id)!!.refreshIntervalMinutes)
+                assertEquals(listOf(local.id, global.id), links.orderedIds())
+                assertEquals(profileId, profiles.linkProfiles(local.id).single().id)
+                assertEquals(3, localServer.requestCount.get())
+                assertEquals(2, globalServer.requestCount.get())
+            }
         }
     }
 
@@ -287,6 +373,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             { it.copy(userAgent = "edited-agent") },
             { it.copy(xHwid = "synthetic-new-device") },
             { it.copy(customHeaders = "X-Test: edited") },
+            { it.copy(refreshIntervalMinutes = 90) },
             { it.copy(isActive = false) },
         )
         edits.forEach { edit ->

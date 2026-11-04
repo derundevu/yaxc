@@ -2,8 +2,9 @@ package io.github.derundevu.yaxc.presentation.routing
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -11,7 +12,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -28,7 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -63,17 +65,17 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -91,7 +93,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.zIndex
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.AppDomainRule
 import io.github.derundevu.yaxc.helper.LiveRoutingGroupStatus
@@ -105,7 +106,6 @@ import io.github.derundevu.yaxc.viewmodel.LiveRoutingProfileOption
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,15 +123,23 @@ fun LiveRoutingScreen(
     val runtimeGroups = remember(draft.runtimeStatus.groups) { draft.runtimeStatus.groups.associateBy { it.id } }
     val listState = rememberLazyListState()
     val density = LocalDensity.current
+    val dragHysteresisPx = with(density) { 16.dp.toPx() }
+    val scope = rememberCoroutineScope()
     val itemSpacingPx = with(density) { spacing.md.toPx() }
-    val reorder = remember(listState, itemSpacingPx) { LiveRoutingReorderState(listState, itemSpacingPx) }
+    val reorder = remember(listState, dragHysteresisPx, itemSpacingPx) {
+        RoutingReorderState(listState, scope, dragHysteresisPx, itemSpacingPx)
+    }
     val groupKeys = remember(draft.plan.groups) { draft.plan.groups.map { "group:${it.id}" } }
     val ruleKeys = remember(draft.plan.rules) { draft.plan.rules.map { "rule:${it.id}" } }
+    val groups = remember(draft.plan.groups, reorder.previewOrder) {
+        reorder.ordered(draft.plan.groups) { "group:${it.id}" }
+    }
+    val rules = remember(draft.plan.rules, reorder.previewOrder) {
+        reorder.ordered(draft.plan.rules) { "rule:${it.id}" }
+    }
     var expandedGroupId by rememberSaveable { mutableStateOf<String?>(null) }
     var expandedRuleId by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(editable) {
-        if (!editable) reorder.cancel()
-    }
+    reorder.synchronize(listOf(groupKeys, ruleKeys), editable)
     var profilePicker by rememberSaveable { mutableStateOf<String?>(null) }
     var priorityPicker by rememberSaveable { mutableStateOf<String?>(null) }
     var showHelp by rememberSaveable { mutableStateOf(false) }
@@ -236,7 +244,8 @@ fun LiveRoutingScreen(
                     }
                 }
             }
-            itemsIndexed(draft.plan.groups, key = { _, group -> "group:${group.id}" }) { index, group ->
+            itemsIndexed(groups, key = { _, group -> "group:${group.id}" }) { index, group ->
+                val interactionSource = remember(group.id) { MutableInteractionSource() }
                 GroupCard(
                     group = group,
                     profiles = profilesById,
@@ -247,10 +256,13 @@ fun LiveRoutingScreen(
                     inUse = draft.plan.rules.any { it.target == group.id },
                     isExplicitDefault = draft.plan.defaultGroupId == group.id,
                     expanded = expandedGroupId == group.id,
+                    dragging = reorder.isDragging,
+                    reorderActive = reorder.activeKey != null,
                     index = index,
                     total = draft.plan.groups.size,
-                    modifier = reorderItemModifier(reorder, "group:${group.id}"),
-                    dragModifier = reorder.headerModifier("group:${group.id}", groupKeys, editable, draft::moveGroup),
+                    modifier = routingReorderItemModifier(reorder, "group:${group.id}"),
+                    interactionSource = interactionSource,
+                    dragModifier = reorder.headerModifier("group:${group.id}", groupKeys, editable, interactionSource, draft::moveGroup),
                     onToggleExpanded = { expandedGroupId = if (expandedGroupId == group.id) null else group.id },
                     onMove = { draft.moveGroup(index, it) },
                     onChange = draft::updateGroup,
@@ -269,7 +281,8 @@ fun LiveRoutingScreen(
             if (draft.plan.rules.isEmpty()) item(key = "rules-empty") {
                 Text(stringResource(R.string.liveRoutingNoRules), color = YaxcTheme.extendedColors.textMuted)
             }
-            itemsIndexed(draft.plan.rules, key = { _, rule -> "rule:${rule.id}" }) { index, rule ->
+            itemsIndexed(rules, key = { _, rule -> "rule:${rule.id}" }) { index, rule ->
+                val interactionSource = remember(rule.id) { MutableInteractionSource() }
                 RuleCard(
                     rule = rule,
                     index = index,
@@ -279,8 +292,11 @@ fun LiveRoutingScreen(
                     enabled = editable,
                     appsAvailable = draft.appMatchingAvailable,
                     expanded = expandedRuleId == rule.id,
-                    modifier = reorderItemModifier(reorder, "rule:${rule.id}"),
-                    dragModifier = reorder.headerModifier("rule:${rule.id}", ruleKeys, editable, draft::moveRule),
+                    dragging = reorder.isDragging,
+                    reorderActive = reorder.activeKey != null,
+                    modifier = routingReorderItemModifier(reorder, "rule:${rule.id}"),
+                    interactionSource = interactionSource,
+                    dragModifier = reorder.headerModifier("rule:${rule.id}", ruleKeys, editable, interactionSource, draft::moveRule),
                     onToggleExpanded = { expandedRuleId = if (expandedRuleId == rule.id) null else rule.id },
                     onChange = draft::updateRule,
                     onDomains = { draft.updateDomains(rule.id, it) },
@@ -398,104 +414,6 @@ private fun SectionHeading(title: Int, add: Int, enabled: Boolean, onAdd: () -> 
     }
 }
 
-/** Only visible items in the pressed section can become drop targets; the draft changes on drop. */
-private class LiveRoutingReorderState(
-    private val listState: LazyListState,
-    private val spacingPx: Float,
-) {
-    var draggingKey by mutableStateOf<String?>(null)
-        private set
-    private var offsetY by mutableFloatStateOf(0f)
-    private var targetIndex by mutableStateOf<Int?>(null)
-    private var indices = emptyMap<String, Int>()
-    private var draggedHeight = 0f
-
-    fun cancel() {
-        draggingKey = null
-        offsetY = 0f
-        targetIndex = null
-        indices = emptyMap()
-    }
-
-    fun headerModifier(key: String, sectionKeys: List<String>, enabled: Boolean, onMove: (Int, Int) -> Unit): Modifier {
-        if (!enabled) return Modifier
-        return Modifier.pointerInput(key, sectionKeys) {
-            detectDragGesturesAfterLongPress(
-                onDragStart = {
-                    val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
-                    if (item != null) {
-                        indices = sectionKeys.withIndex().associate { it.value to it.index }
-                        draggedHeight = item.size.toFloat()
-                        offsetY = 0f
-                        targetIndex = indices[key]
-                        draggingKey = key
-                    }
-                },
-                onDragCancel = { cancel() },
-                onDragEnd = {
-                    val from = indices[key]
-                    val to = targetIndex
-                    cancel()
-                    if (from != null && to != null && from != to) onMove(from, to)
-                },
-                onDrag = { change, amount ->
-                    if (draggingKey == key) {
-                        change.consume()
-                        val visible = listState.layoutInfo.visibleItemsInfo
-                        val item = visible.firstOrNull { it.key == key }
-                        if (item != null) {
-                            offsetY += amount.y
-                            // Compare header positions so expanded cards can pass shorter neighbours.
-                            visible.firstOrNull { it.key == sectionKeys.first() }?.let {
-                                offsetY = offsetY.coerceAtLeast((it.offset - item.offset).toFloat())
-                            }
-                            visible.firstOrNull { it.key == sectionKeys.last() }?.let {
-                                offsetY = offsetY.coerceAtMost((it.offset - item.offset).toFloat())
-                            }
-                            val headerOffset = item.offset + offsetY
-                            var distance = Float.POSITIVE_INFINITY
-                            for (candidate in visible) {
-                                val candidateKey = candidate.key as? String ?: continue
-                                val index = indices[candidateKey] ?: continue
-                                val candidateDistance = abs(candidate.offset - headerOffset)
-                                if (candidateDistance < distance) {
-                                    distance = candidateDistance
-                                    targetIndex = index
-                                }
-                            }
-                        }
-                    }
-                },
-            )
-        }
-    }
-
-    fun displacement(key: String): Float {
-        val active = draggingKey ?: return 0f
-        if (active == key) return offsetY
-        val from = indices[active] ?: return 0f
-        val to = targetIndex ?: return 0f
-        val index = indices[key] ?: return 0f
-        return when {
-            from < to && index in (from + 1)..to -> -(draggedHeight + spacingPx)
-            from > to && index in to until from -> draggedHeight + spacingPx
-            else -> 0f
-        }
-    }
-}
-
-@Composable
-private fun reorderItemModifier(reorder: LiveRoutingReorderState, key: String): Modifier {
-    val dragging = reorder.draggingKey == key
-    val target = reorder.displacement(key)
-    val offset by animateFloatAsState(
-        targetValue = target,
-        animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
-        label = "live_routing_item_displacement",
-    )
-    return Modifier.graphicsLayer { translationY = if (dragging) target else offset }.zIndex(if (dragging) 3f else 0f)
-}
-
 @Composable
 private fun RoutingCardHeader(
     name: String,
@@ -506,6 +424,7 @@ private fun RoutingCardHeader(
     total: Int,
     tag: String,
     dragModifier: Modifier,
+    interactionSource: MutableInteractionSource,
     onToggleExpanded: () -> Unit,
     onMove: (Int) -> Unit,
     trailing: @Composable () -> Unit = {},
@@ -517,7 +436,7 @@ private fun RoutingCardHeader(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.weight(1f).then(dragModifier)
-                .clickable(onClickLabel = expansionLabel, onClick = onToggleExpanded)
+                .clickable(interactionSource = interactionSource, indication = null, onClickLabel = expansionLabel, onClick = onToggleExpanded)
                 .semantics {
                     stateDescription = expansionLabel
                     customActions = if (enabled) buildList {
@@ -546,11 +465,15 @@ private fun RoutingCardHeader(
 }
 
 @Composable
-private fun EditorExpansion(expanded: Boolean, content: @Composable ColumnScope.() -> Unit) {
+private fun EditorExpansion(expanded: Boolean, suppressed: Boolean, restoreImmediately: Boolean, content: @Composable ColumnScope.() -> Unit) {
+    // Keep form state in the card, but remove variable-height bodies during a reorder as on Main.
+    if (suppressed) return
     AnimatedVisibility(
         visible = expanded,
-        enter = expandVertically(tween(260), expandFrom = Alignment.Top) + fadeIn(tween(180, delayMillis = 40)),
-        exit = shrinkVertically(tween(220), shrinkTowards = Alignment.Top) + fadeOut(tween(120)),
+        enter = if (restoreImmediately) EnterTransition.None else
+            expandVertically(tween(260), expandFrom = Alignment.Top) + fadeIn(tween(180, delayMillis = 40)),
+        exit = if (restoreImmediately) ExitTransition.None else
+            shrinkVertically(tween(220), shrinkTowards = Alignment.Top) + fadeOut(tween(120)),
     ) {
         Column(Modifier.fillMaxWidth().padding(top = 8.dp), content = content)
     }
@@ -567,10 +490,13 @@ private fun GroupCard(
     inUse: Boolean,
     isExplicitDefault: Boolean,
     expanded: Boolean,
+    dragging: Boolean,
+    reorderActive: Boolean,
     index: Int,
     total: Int,
     modifier: Modifier,
     dragModifier: Modifier,
+    interactionSource: MutableInteractionSource,
     onToggleExpanded: () -> Unit,
     onMove: (Int) -> Unit,
     onChange: (ProxyGroup) -> Unit,
@@ -584,21 +510,25 @@ private fun GroupCard(
     LaunchedEffect(group.name) {
         if (name.text != group.name) name = TextFieldValue(group.name)
     }
-    YaxcCard(modifier = modifier.testTag("live-routing:group:${group.id}")) {
+    YaxcCard(
+        modifier = modifier.testTag("live-routing:group:${group.id}")
+            .clip(MaterialTheme.shapes.large).indication(interactionSource, LocalIndication.current),
+    ) {
         RoutingCardHeader(
             name = group.name.ifBlank { stringResource(R.string.liveRoutingGroupName) },
             summary = stringResource(R.string.liveRoutingGroupSummary, group.profileIds.size, stringResource(group.strategy.titleResource())),
-            expanded = expanded,
+            expanded = expanded && !dragging,
             enabled = enabled,
             index = index,
             total = total,
             tag = "live-routing:group-header:${group.id}",
             dragModifier = dragModifier,
+            interactionSource = interactionSource,
             onToggleExpanded = onToggleExpanded,
             onMove = onMove,
         )
-        RuntimeSummary(group, profiles, saved, running, runtime, matched, compact = !expanded)
-        EditorExpansion(expanded) {
+        RuntimeSummary(group, profiles, saved, running, runtime, matched, compact = !expanded || dragging)
+        EditorExpansion(expanded, suppressed = dragging, restoreImmediately = reorderActive) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it; onChange(group.copy(name = it.text)) },
@@ -796,8 +726,11 @@ private fun RuleCard(
     enabled: Boolean,
     appsAvailable: Boolean,
     expanded: Boolean,
+    dragging: Boolean,
+    reorderActive: Boolean,
     modifier: Modifier,
     dragModifier: Modifier,
+    interactionSource: MutableInteractionSource,
     onToggleExpanded: () -> Unit,
     onChange: (AppDomainRule) -> Unit,
     onDomains: (String) -> Unit,
@@ -818,16 +751,20 @@ private fun RuleCard(
     LaunchedEffect(domains) {
         if (domainValue.text != domains) domainValue = TextFieldValue(domains)
     }
-    YaxcCard(modifier = modifier.testTag("live-routing:rule:${rule.id}")) {
+    YaxcCard(
+        modifier = modifier.testTag("live-routing:rule:${rule.id}")
+            .clip(MaterialTheme.shapes.large).indication(interactionSource, LocalIndication.current),
+    ) {
         RoutingCardHeader(
             name = rule.name.ifBlank { stringResource(R.string.routingRuleName) },
             summary = stringResource(R.string.liveRoutingRuleSummary, rule.packages.size, rule.domains.size, targetName),
-            expanded = expanded,
+            expanded = expanded && !dragging,
             enabled = enabled,
             index = index,
             total = total,
             tag = "live-routing:rule-header:${rule.id}",
             dragModifier = dragModifier,
+            interactionSource = interactionSource,
             onToggleExpanded = onToggleExpanded,
             onMove = onMove,
             trailing = {
@@ -839,7 +776,7 @@ private fun RuleCard(
                 )
             },
         )
-        EditorExpansion(expanded) {
+        EditorExpansion(expanded, suppressed = dragging, restoreImmediately = reorderActive) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.liveRoutingRulePosition, index + 1, total), modifier = Modifier.weight(1f))
                 IconButton(onClick = { onMove(index - 1) }, enabled = enabled && index > 0) {

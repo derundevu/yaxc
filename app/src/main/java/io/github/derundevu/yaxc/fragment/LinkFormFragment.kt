@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +39,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -103,6 +106,7 @@ class LinkFormFragment : DialogFragment() {
                                         userAgent = updated.userAgent,
                                         xHwid = updated.xHwid,
                                         customHeaders = updated.customHeaders,
+                                        refreshIntervalMinutes = updated.refreshIntervalMinutes,
                                         isActive = if (link.id == 0L) true else link.isActive,
                                     ))
                                 },
@@ -151,6 +155,15 @@ class LinkFormFragment : DialogFragment() {
         val subscriptionAddressRequiredText = textResource(R.string.subscriptionAddressRequired)
         val invalidLinkText = textResource(R.string.invalidLink)
         val onlyHttpsText = textResource(R.string.onlyHttps)
+        val refreshIntervalLabel = textResource(R.string.sourceRefreshInterval)
+        val invalidRefreshIntervalText = androidx.compose.ui.res.stringResource(
+            R.string.invalidNumberValue,
+            refreshIntervalLabel,
+        )
+        val shortRefreshIntervalText = androidx.compose.ui.res.stringResource(
+            R.string.sourceRefreshIntervalMinimum,
+            Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES,
+        )
         val initialMode = remember(link.id, link.address) {
             when {
                 link.id == 0L && link.address.isBlank() -> SourceMode.Subscription
@@ -167,6 +180,10 @@ class LinkFormFragment : DialogFragment() {
         var customHeaders by rememberSaveable(link.id) {
             mutableStateOf(link.customHeaders.orEmpty())
         }
+        var refreshInterval by rememberSaveable(link.id) {
+            mutableStateOf(link.refreshIntervalMinutes?.toString().orEmpty())
+        }
+        var refreshIntervalError by rememberSaveable { mutableStateOf<String?>(null) }
         var addressError by rememberSaveable { mutableStateOf<String?>(null) }
 
         fun shouldAutofillName(): Boolean {
@@ -265,6 +282,7 @@ class LinkFormFragment : DialogFragment() {
                                     onClick = {
                                         sourceMode = mode
                                         addressError = null
+                                        refreshIntervalError = null
                                     },
                                     enabled = !busy,
                                     shape = SegmentedButtonDefaults.itemShape(
@@ -323,6 +341,32 @@ class LinkFormFragment : DialogFragment() {
                             supportingText = {
                                 Text(text = addressError ?: textResource(R.string.sourceAddressRemoteLead))
                             },
+                            singleLine = true,
+                        )
+
+                        OutlinedTextField(
+                            value = refreshInterval,
+                            onValueChange = {
+                                refreshInterval = it
+                                refreshIntervalError = null
+                            },
+                            enabled = !busy,
+                            isError = refreshIntervalError != null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("source:refresh-interval"),
+                            label = { Text(text = refreshIntervalLabel) },
+                            supportingText = {
+                                Text(
+                                    text = refreshIntervalError
+                                        ?: androidx.compose.ui.res.stringResource(
+                                            R.string.sourceRefreshIntervalLead,
+                                            settings.refreshLinksIntervalMinutes,
+                                            Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES,
+                                        ),
+                                )
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
                         )
 
@@ -401,6 +445,23 @@ class LinkFormFragment : DialogFragment() {
                                     addressError = onlyHttpsText
                                     return@Button
                                 }
+                                val intervalText = refreshInterval.trim()
+                                val intervalMinutes = if (sourceMode == SourceMode.Subscription &&
+                                    intervalText.isNotEmpty()
+                                ) {
+                                    val parsed = intervalText.toIntOrNull()
+                                    if (parsed == null) {
+                                        refreshIntervalError = invalidRefreshIntervalText
+                                        return@Button
+                                    }
+                                    if (parsed < Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES) {
+                                        refreshIntervalError = shortRefreshIntervalText
+                                        return@Button
+                                    }
+                                    parsed
+                                } else {
+                                    null
+                                }
                                 onConfirm(
                                     UpdatedLinkForm(
                                         name = name.trim().ifBlank { defaultLinkName },
@@ -411,6 +472,7 @@ class LinkFormFragment : DialogFragment() {
                                             .takeIf { sourceMode == SourceMode.Subscription },
                                         customHeaders = customHeaders.trim().ifBlank { null }
                                             .takeIf { sourceMode == SourceMode.Subscription },
+                                        refreshIntervalMinutes = intervalMinutes,
                                     )
                                 )
                             },
@@ -440,5 +502,6 @@ class LinkFormFragment : DialogFragment() {
         val userAgent: String?,
         val xHwid: String?,
         val customHeaders: String?,
+        val refreshIntervalMinutes: Int?,
     )
 }

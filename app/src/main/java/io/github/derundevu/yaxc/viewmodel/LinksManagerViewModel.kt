@@ -63,6 +63,7 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
                 canCancel = false
                 withContext(NonCancellable + Dispatchers.IO) {
                     link.subscriptionMetadata = null
+                    link.refreshIntervalMinutes = null
                     if (link.id == 0L) {
                         link.id = app.linkRepository.insertAndGetId(link)
                     } else {

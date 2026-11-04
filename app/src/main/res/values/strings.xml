@@ -310,6 +310,9 @@
     <string name="sourceAddressLead">Leave the address empty to keep this source manual.</string>
     <string name="sourceAddressManualLead">Leave empty to create a manual group that holds profiles locally.</string>
     <string name="sourceAddressRemoteLead">Use an HTTPS source when profiles should refresh automatically.</string>
+    <string name="sourceRefreshInterval">Refresh interval (minutes)</string>
+    <string name="sourceRefreshIntervalLead">Optional. Leave blank to use the global interval from Settings (%1$d minutes). Minimum: %2$d minutes.</string>
+    <string name="sourceRefreshIntervalMinimum">Enter an interval of at least %1$d minutes.</string>
     <string name="sourceUserAgentLead">Optional. Sent only when this source refreshes from a remote address.</string>
     <string name="sourceXHwidLead">Optional override. Leave empty to use the default x-hwid from settings.</string>
     <string name="sourceHeadersLead">Optional. One header per line in the format Header-Name: value. Useful for extra provider-specific headers beyond the automatic User-Agent and x-hwid/device headers.</string>
@@ -420,7 +423,7 @@
     <string name="mainSubscriptionTrafficLimit">Traffic Limit</string>
     <string name="mainSubscriptionDaysLeft">Days Left</string>
     <string name="mainSubscriptionExpiresAt">Expires At</string>
-    <string name="mainSubscriptionAutoUpdate">Auto Update Interval</string>
+    <string name="mainSubscriptionAutoUpdate">Provider interval (metadata)</string>
     <string name="mainSubscriptionSupportUrl">Support URL</string>
     <string name="mainSubscriptionWebPage">Service Page</string>
     <string name="mainSubscriptionUnlimited">Unlimited</string>
@@ -431,9 +434,9 @@
     <string name="mainSubscriptionUsageShort">%1$s / %2$s</string>
     <string name="mainSubscriptionDaysShort">%1$s d left</string>
     <string name="mainSubscriptionDaysFull">%1$d days</string>
-    <string name="mainSubscriptionAutoUpdateShort">%1$d min</string>
-    <string name="mainSubscriptionAutoUpdateHoursShort">%1$d h</string>
-    <string name="mainSubscriptionAutoUpdateFull">Every %1$d min</string>
+    <string name="mainSubscriptionAutoUpdateShort">Provider: %1$d min</string>
+    <string name="mainSubscriptionAutoUpdateHoursShort">Provider: %1$d h</string>
+    <string name="mainSubscriptionAutoUpdateFull">Provider suggests every %1$d min (metadata only)</string>
     <string name="mainSubscriptionLastRefreshShort">%1$s</string>
     <string name="mainConnectionPasswordHidden">Hidden</string>
     <string name="mainConnectionResolveFailed">Unable to resolve</string>
@@ -475,7 +478,7 @@
     <string name="settingsPingAddressLead">URL or host used for latency checks through the selected profile.</string>
     <string name="settingsPingTypeLead">Choose how the app checks whether the route is alive.</string>
     <string name="settingsPingTimeoutLead">In seconds. Maximum wait time for a ping result before it is treated as failed.</string>
-    <string name="settingsRefreshLinksIntervalLead">In minutes. Used when a subscription does not provide its own update interval. Minimum is 15 minutes.</string>
+    <string name="settingsRefreshLinksIntervalLead">In minutes. Used for subscriptions without a local interval in their source form. Provider metadata does not set the schedule. Minimum is 15 minutes.</string>
     <string name="settingsBypassLanLead">Keeps local IPv4 networks such as 192.168.x.x and 10.x.x.x outside the VPN.</string>
     <string name="settingsSocksUdpLead">Allows UDP through the local SOCKS inbound. Needed for QUIC, DNS and some apps.</string>
     <string name="settingsTun2socksLead">Forwards TUN traffic into the local SOCKS proxy. Usually should stay enabled.</string>

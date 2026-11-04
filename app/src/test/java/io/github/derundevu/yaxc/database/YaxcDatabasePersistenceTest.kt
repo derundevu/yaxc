@@ -30,7 +30,7 @@ class YaxcDatabasePersistenceTest {
             val active = links.insertAndGetId(Link(name = "Active", address = "http://127.0.0.1/active",
                 type = Link.Type.Subscription, userAgent = "reopen-agent/1", xHwid = "synthetic-reopen-hwid",
                 customHeaders = "X-Regression: file", subscriptionMetadata = "download=1024; total=4096",
-                lastRefreshedAt = 987654321L))
+                lastRefreshedAt = 987654321L, refreshIntervalMinutes = 45))
             val inactive = links.insertAndGetId(Link(name = "Inactive", address = "http://127.0.0.1/inactive",
                 isActive = false))
             val manual = profiles.create(Profile(name = "Manual", config = "{\"manual\":true}"))
@@ -70,6 +70,36 @@ class YaxcDatabasePersistenceTest {
             database.openHelper.writableDatabase.query("PRAGMA foreign_key_check").use {
                 assertFalse(it.moveToFirst())
             }
+        } finally {
+            database.close()
+            app.deleteDatabase(name)
+        }
+    }
+
+    @Test
+    fun reopenRetainsIndependentOverridesAndAnExplicitlyClearedOverride() = runBlocking {
+        val app = RuntimeEnvironment.getApplication() as Yaxc
+        val name = "subscription-interval-reopen.db"
+        app.deleteDatabase(name)
+        var database = open(app, name)
+        try {
+            val dao = database.linkDao()
+            val local = Link(name = "Local", address = "https://example.invalid/local",
+                refreshIntervalMinutes = 15).also { it.id = dao.insertAtEnd(it) }
+            val global = Link(name = "Global", address = "https://example.invalid/global")
+                .also { it.id = dao.insertAtEnd(it) }
+            database.close()
+            database = open(app, name)
+            assertEquals(local, database.linkDao().find(local.id))
+            assertEquals(global, database.linkDao().find(global.id))
+
+            val cleared = local.copy(refreshIntervalMinutes = null)
+            val changed = global.copy(refreshIntervalMinutes = Int.MAX_VALUE)
+            database.linkDao().update(cleared)
+            database.linkDao().update(changed)
+            database.close()
+            database = open(app, name)
+            assertEquals(listOf(cleared, changed), database.linkDao().all().first())
         } finally {
             database.close()
             app.deleteDatabase(name)

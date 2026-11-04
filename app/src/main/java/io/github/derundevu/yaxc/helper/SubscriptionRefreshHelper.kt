@@ -222,8 +222,7 @@ class SubscriptionRefreshHelper(
     }
 
     private fun effectiveRefreshIntervalMinutes(link: Link): Int {
-        return SubscriptionMetadata.fromJsonString(link.subscriptionMetadata)
-            ?.updateIntervalMinutes
+        return link.refreshIntervalMinutes
             ?.coerceAtLeast(Settings.MIN_REFRESH_LINKS_INTERVAL_MINUTES)
             ?: settings.refreshLinksIntervalMinutes
     }

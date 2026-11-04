@@ -329,12 +329,14 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         val gate = CompletableDeferred<String>()
         boundary.validationGate = gate
         settings.pingAddress = "http://127.0.0.1:18881/stale"
+        val beforeApply = broadcasts().size
         command(TProxyService.APPLY_ROUTING_SERVICE_ACTION_NAME)
         pumpUntil { boundary.validations == initialValidations + 1 }
         settings.pingAddress = "http://127.0.0.1:18881/latest"
         gate.complete("")
-        pumpUntil { JSONObject(boundary.appliedConfig!!).getJSONObject("_yaxcLiveHealth")
-            .getString("url") == settings.pingAddress }
+        pumpUntil { broadcasts().drop(beforeApply).any { it.action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME } }
+        assertEquals(settings.pingAddress, JSONObject(boundary.appliedConfig!!).getJSONObject("_yaxcLiveHealth")
+            .getString("url"))
         assertEquals(initialValidations + 2, boundary.validations)
         assertEquals(boundary.appliedConfig, settings.xrayConfig().readText())
         assertEquals(1, boundary.coreStarts)
