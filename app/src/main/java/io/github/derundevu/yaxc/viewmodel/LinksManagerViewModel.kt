@@ -42,6 +42,8 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
         private set
     var formError by mutableStateOf<Int?>(null)
         private set
+    var refreshResult by mutableStateOf<SubscriptionRefreshHelper.RefreshResult?>(null)
+        private set
     private val _outcome = MutableStateFlow<Outcome?>(null)
     val outcome: StateFlow<Outcome?> = _outcome.asStateFlow()
 
@@ -50,6 +52,7 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun cancel() {
+        if (refreshResult != null) return
         if (busy && !canCancel) return
         operation?.cancel()
         busy = false
@@ -110,27 +113,8 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
 
     fun refresh(linkId: Long?) {
         runOperation(cancelable = true) {
-            val result = helper.refreshLinks(linkId)
-            when {
-                result.attempted == 0 -> feedback(R.string.feedbackRefreshEmpty, FeedbackKind.Info)
-                result.refreshed == 0 -> FeedbackMessage(
-                    app.resources.getQuantityString(R.plurals.subscriptionRefreshAllFailed, result.failed, result.failed),
-                    FeedbackKind.Error,
-                )
-                result.failed > 0 -> FeedbackMessage(
-                    app.resources.getQuantityString(
-                        R.plurals.feedbackRefreshPartial, result.attempted,
-                        result.refreshed, result.attempted, result.failed,
-                    ),
-                    FeedbackKind.Warning,
-                )
-                else -> FeedbackMessage(
-                    app.resources.getQuantityString(
-                        R.plurals.feedbackRefreshSummary, result.attempted, result.refreshed, result.attempted,
-                    ),
-                    FeedbackKind.Success,
-                )
-            }
+            refreshResult = helper.refreshLinks(linkId)
+            null
         }
     }
 
@@ -158,7 +142,7 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
         form: Boolean = false,
         block: suspend () -> FeedbackMessage?,
     ) {
-        if (busy || outcome.value != null) return
+        if (busy || outcome.value != null || refreshResult != null) return
         busy = true
         canCancel = cancelable
         formError = null

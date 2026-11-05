@@ -18,6 +18,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackMessage
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcProgressDialog
+import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import io.github.derundevu.yaxc.viewmodel.LinksManagerViewModel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterNotNull
@@ -83,7 +84,16 @@ class LinksManagerActivity : AppCompatActivity() {
 
         setContent {
             YaxcAppTheme {
-                if (!isForm && state.busy) {
+                val refreshResult = state.refreshResult
+                if (refreshResult != null) {
+                    SubscriptionRefreshDialog(
+                        result = refreshResult,
+                        onClose = {
+                            setResult(RESULT_OK)
+                            finish()
+                        },
+                    )
+                } else if (!isForm && state.busy) {
                     YaxcProgressDialog(
                         title = getString(if (deleteAction) R.string.feedbackDeletingSource else R.string.feedbackRefreshingSubscriptions),
                         onCancel = if (state.canCancel) ({ state.cancel() }) else null,

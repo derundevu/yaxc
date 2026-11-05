@@ -1,6 +1,8 @@
 package io.github.derundevu.yaxc.helper
 
 import android.content.Context
+import android.util.JsonReader
+import android.util.JsonToken
 import androidx.room.withTransaction
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
@@ -18,6 +20,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.io.StringReader
+import java.math.BigDecimal
 import java.util.WeakHashMap
 
 class SubscriptionRefreshHelper(
@@ -33,10 +37,19 @@ class SubscriptionRefreshHelper(
         internal val requestToken: Any? = null,
     )
 
+    data class SourceChanges(
+        val sourceId: Long,
+        val sourceName: String,
+        val added: List<String>,
+        val removed: List<String>,
+        val modified: List<String>,
+    )
+
     data class RefreshResult(
         val attempted: Int,
         val refreshed: Int,
         val failed: Int,
+        val changes: List<SourceChanges> = emptyList(),
     )
 
     companion object {
@@ -53,7 +66,7 @@ class SubscriptionRefreshHelper(
             val links = linkDao.activeLinks()
                 .filter { it.address.isNotBlank() }
                 .filter { isRefreshDue(it, now) }
-            refreshLinks(links, now)
+            refreshLinks(links, now, collectChanges = false)
         }
     }
 
@@ -62,7 +75,7 @@ class SubscriptionRefreshHelper(
             val links = linkDao.activeLinks()
                 .filter { it.address.isNotBlank() }
                 .filter { linkId == null || it.id == linkId }
-            refreshLinks(links, System.currentTimeMillis())
+            refreshLinks(links, System.currentTimeMillis(), collectChanges = true)
         }
     }
 
@@ -116,12 +129,14 @@ class SubscriptionRefreshHelper(
         parsed: ParsedLinkSource,
         now: Long,
         notifyRuntime: Boolean,
-    ) {
+        collectChanges: Boolean = false,
+    ): SourceChanges? {
         try {
-            withContext(Dispatchers.IO) {
+            return withContext(Dispatchers.IO) {
                 check(parsed.profiles.isNotEmpty()) { "No profiles detected" }
                 val source = parsed.sourceSnapshot ?: link.copy()
                 val removedIds = mutableSetOf<Long>()
+                var changes: SourceChanges? = null
                 val saved = database.withTransaction {
                     currentCoroutineContext().ensureActive()
                     check(link == source) { "Source changed while refreshing" }
@@ -145,6 +160,7 @@ class SubscriptionRefreshHelper(
                     } else {
                         linkDao.update(updated)
                     }
+                    if (collectChanges) changes = sourceChanges(updated, existing, parsed.profiles)
                     manageProfiles(updated, existing, parsed.profiles, removedIds)
                     updated
                 }
@@ -159,6 +175,7 @@ class SubscriptionRefreshHelper(
                     link.lastRefreshedAt = saved.lastRefreshedAt
                     if (notifyRuntime) reconcileRuntime()
                 }
+                changes
             }
         } finally {
             releaseRequest(parsed.sourceSnapshot?.id ?: link.id, parsed.requestToken)
@@ -178,9 +195,11 @@ class SubscriptionRefreshHelper(
     private suspend fun refreshLinks(
         links: List<Link>,
         now: Long,
+        collectChanges: Boolean,
     ): RefreshResult {
         var refreshed = 0
         var failed = 0
+        val changes = if (collectChanges) mutableListOf<SourceChanges>() else null
         var applyAttempted = false
         try {
             links.forEach { link ->
@@ -190,7 +209,10 @@ class SubscriptionRefreshHelper(
                     // A cancellation can arrive after Room commits but before the caller resumes.
                     // Reconcile committed state once for the batch, including partial cancellation.
                     applyAttempted = true
-                    applyResolvedLink(link, parsed, now, notifyRuntime = false)
+                    val sourceChanges = applyResolvedLink(
+                        link, parsed, now, notifyRuntime = false, collectChanges = collectChanges,
+                    )
+                    if (sourceChanges != null) changes?.add(sourceChanges)
                     refreshed += 1
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -206,7 +228,76 @@ class SubscriptionRefreshHelper(
             attempted = links.size,
             refreshed = refreshed,
             failed = failed,
+            changes = changes ?: emptyList(),
         )
+    }
+
+    private data class ProfileContent(val name: String, val config: Any?)
+
+    private fun sourceChanges(link: Link, before: List<Profile>, after: List<Profile>): SourceChanges {
+        val configs = HashMap<String, Any?>()
+        fun content(profile: Profile) = ProfileContent(
+            profile.name,
+            configs.getOrPut(profile.config) {
+                JsonReader(StringReader(profile.config)).use { reader ->
+                    readSemanticJson(reader).also {
+                        check(reader.peek() == JsonToken.END_DOCUMENT) { "Unexpected content after JSON" }
+                    }
+                }
+            },
+        )
+        val old = before.map(::content)
+        val new = after.map(::content)
+        val matchedOld = BooleanArray(old.size)
+        val matchedNew = BooleanArray(new.size)
+        val modified = arrayOfNulls<String>(new.size)
+
+        fun <K> match(key: (ProfileContent) -> K, onMatch: (Int, Int) -> Unit = { _, _ -> }) {
+            val candidates = HashMap<K, ArrayDeque<Int>>()
+            old.forEachIndexed { index, profile ->
+                if (!matchedOld[index]) candidates.getOrPut(key(profile)) { ArrayDeque() }.addLast(index)
+            }
+            new.forEachIndexed { index, profile ->
+                if (matchedNew[index]) return@forEachIndexed
+                val previous = candidates[key(profile)]?.removeFirstOrNull() ?: return@forEachIndexed
+                matchedOld[previous] = true
+                matchedNew[index] = true
+                onMatch(previous, index)
+            }
+        }
+
+        // Preserve exact pairs before matching changed names/configs, including duplicate occurrences.
+        match({ it })
+        match({ it.name }) { _, current -> modified[current] = new[current].name }
+        match({ it.config }) { previous, current ->
+            modified[current] = "${old[previous].name} → ${new[current].name}"
+        }
+        return SourceChanges(
+            sourceId = link.id,
+            sourceName = link.name,
+            added = new.indices.filter { !matchedNew[it] }.map { new[it].name },
+            removed = old.indices.filter { !matchedOld[it] }.map { old[it].name },
+            modified = modified.filterNotNull(),
+        )
+    }
+
+    private fun readSemanticJson(reader: JsonReader): Any? = when (reader.peek()) {
+        JsonToken.BEGIN_OBJECT -> mutableMapOf<String, Any?>().apply {
+            reader.beginObject()
+            while (reader.hasNext()) put(reader.nextName(), readSemanticJson(reader))
+            reader.endObject()
+        }
+        JsonToken.BEGIN_ARRAY -> mutableListOf<Any?>().apply {
+            reader.beginArray()
+            while (reader.hasNext()) add(readSemanticJson(reader))
+            reader.endArray()
+        }
+        JsonToken.STRING -> reader.nextString()
+        JsonToken.BOOLEAN -> reader.nextBoolean()
+        JsonToken.NULL -> { reader.nextNull(); null }
+        // BigDecimal avoids rounding large integers and makes numeric formatting insignificant.
+        JsonToken.NUMBER -> BigDecimal(reader.nextString()).stripTrailingZeros()
+        else -> error("Expected a JSON value")
     }
 
     private fun reconcileRuntime() {

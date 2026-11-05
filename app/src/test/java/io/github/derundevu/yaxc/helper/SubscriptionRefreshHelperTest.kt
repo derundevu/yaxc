@@ -31,11 +31,14 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     private val links get() = database.linkDao()
     private val profiles get() = database.profileDao()
     private fun helper() = SubscriptionRefreshHelper(app, settings)
-    private fun body(vararg names: String): String = JSONArray().apply {
-        names.forEach { name ->
+    private fun body(vararg names: String): String =
+        bodyWithIdentities(*names.map { it to it }.toTypedArray())
+
+    private fun bodyWithIdentities(vararg entries: Pair<String, String>): String = JSONArray().apply {
+        entries.forEach { (name, identity) ->
             put(JSONObject().put("remarks", name)
                 .put("outbounds", JSONArray().put(JSONObject().put("protocol", "freedom")))
-                .put("future", JSONObject().put("identity", name).put("counter", 9007199254740993L)))
+                .put("future", JSONObject().put("identity", identity).put("counter", 9007199254740993L)))
         }
     }.toString()
 
@@ -71,7 +74,10 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             settings.selectedProfile = initial.first().id
 
             server.enqueue(body("C", "D"))
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0), helper().refreshLinks(link.id))
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0, listOf(
+                SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
+                    added = listOf("D", "C"), removed = listOf("B", "A"), modified = emptyList()),
+            )), helper().refreshLinks(link.id))
             val equal = profiles.linkProfiles(link.id)
             assertEquals(initial.map { it.id }, equal.map { it.id })
             assertEquals(listOf("D", "C"), equal.map { it.name })
@@ -97,6 +103,99 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             assertEquals(unrelatedId, profiles.orderedPositions().last().id)
             assertDenseIndices()
             assertEquals(4, server.requestCount.get())
+        }
+    }
+
+    @Test
+    fun manualChangesMatchContentRatherThanPositionAndKeepExactLargeNumbers() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = seed(server, "removed", "same", "keep")
+            val response = JSONArray(body("keep", "added", "same"))
+            response.getJSONObject(2).getJSONObject("future").put("counter", 9007199254740992L)
+            server.enqueue(response.toString(), headers = mapOf("Profile-Title" to "Current title"))
+
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0, listOf(
+                SubscriptionRefreshHelper.SourceChanges(link.id, "Current title",
+                    added = listOf("added"), removed = listOf("removed"), modified = listOf("same")),
+            )), helper().refreshLinks(link.id))
+            assertEquals(listOf("same", "added", "keep"), profiles.linkProfiles(link.id).map { it.name })
+            assertEquals(9007199254740992L,
+                JSONObject(profiles.linkProfiles(link.id).first().config).getJSONObject("future").getLong("counter"))
+        }
+    }
+
+    @Test
+    fun manualChangesIgnoreProfileOrderWhitespaceAndObjectKeyOrderButNotArrayOrder() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = seed(server, "Alpha", "Beta")
+            profiles.linkProfiles(link.id).forEach { profile ->
+                profiles.update(profile.copy(config = """
+                    {
+                      "outbounds": [ { "protocol": "freedom" } ],
+                      "future": {
+                        "optional": null, "enabled": true, "limit": 1.0,
+                        "features": ["one", "two"], "counter": 9007199254740993,
+                        "identity": "${profile.name}"
+                      }
+                    }
+                """.trimIndent()))
+            }
+            val response = """
+                [
+                  {
+                    "future": {
+                      "identity": "Beta", "counter": 9007199254740993, "features": ["one", "two"],
+                      "limit": 1, "enabled": true, "optional": null
+                    },
+                    "remarks": "Beta", "outbounds": [{"protocol": "freedom"}]
+                  },
+                  {
+                    "future": {
+                      "identity": "Alpha", "counter": 9007199254740993, "features": ["one", "two"],
+                      "limit": 1, "enabled": true, "optional": null
+                    },
+                    "outbounds": [{"protocol": "freedom"}], "remarks": "Alpha"
+                  }
+                ]
+            """.trimIndent()
+            server.enqueue(response)
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0, listOf(
+                SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
+                    added = emptyList(), removed = emptyList(), modified = emptyList()),
+            )), helper().refreshLinks(link.id))
+            assertEquals(listOf("Alpha", "Beta"), profiles.linkProfiles(link.id).map { it.name })
+
+            val changedArray = JSONArray(response)
+            changedArray.getJSONObject(1).getJSONObject("future")
+                .put("features", JSONArray().put("two").put("one"))
+            server.enqueue(changedArray.toString())
+            assertEquals(listOf(SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
+                added = emptyList(), removed = emptyList(), modified = listOf("Alpha"))),
+                helper().refreshLinks(link.id).changes)
+        }
+    }
+
+    @Test
+    fun manualChangesPreserveDuplicateOccurrencesAndMatchExactPairsBeforeChangesAndRenames() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = source(server.url)
+            server.enqueue(bodyWithIdentities(
+                "duplicate" to "a", "duplicate" to "a", "duplicate" to "b",
+                "Old" to "rename", "Old" to "rename",
+            ))
+            helper().saveResolvedLink(link, helper().resolveProfiles(link))
+            server.enqueue(bodyWithIdentities(
+                "duplicate" to "b", "duplicate" to "changed", "New" to "rename", "New" to "rename",
+                "added" to "first-addition", "added" to "second-addition",
+            ))
+
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0, listOf(
+                SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
+                    added = listOf("added", "added"), removed = listOf("duplicate"),
+                    modified = listOf("Old → New", "Old → New", "duplicate")),
+            )), helper().refreshLinks(link.id))
+            assertEquals(listOf("added", "added", "New", "New", "duplicate", "duplicate"),
+                profiles.linkProfiles(link.id).map { it.name })
         }
     }
 
@@ -207,7 +306,10 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             assertEquals(dueNames.size, server.requestCount.get())
             val before = cases.first()
             server.enqueue(body("manual"))
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0), helper().refreshLinks(before.id))
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0, listOf(
+                SubscriptionRefreshHelper.SourceChanges(before.id, before.name,
+                    added = listOf("manual"), removed = emptyList(), modified = emptyList()),
+            )), helper().refreshLinks(before.id))
             assertEquals("manual", profiles.linkProfiles(before.id).single().name)
             for (name in listOf("inactive", "blank")) {
                 assertEquals(SubscriptionRefreshHelper.RefreshResult(0, 0, 0),
@@ -295,13 +397,23 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             val first = source(server.url, "first")
             val second = source(server.url, "second")
             val third = source(server.url, "third")
+            server.enqueue(body("second-original"))
+            helper().saveResolvedLink(second, helper().resolveProfiles(second), 1_000L)
+            val secondBefore = profiles.linkProfiles(second.id)
+            val secondLinkBefore = links.find(second.id)
             server.enqueue(body("first-profile"))
             server.enqueue("unavailable", 500)
             server.enqueue(body("third-profile"))
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(3, 2, 1), helper().refreshLinks())
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(3, 2, 1, listOf(
+                SubscriptionRefreshHelper.SourceChanges(first.id, first.name,
+                    added = listOf("first-profile"), removed = emptyList(), modified = emptyList()),
+                SubscriptionRefreshHelper.SourceChanges(third.id, third.name,
+                    added = listOf("third-profile"), removed = emptyList(), modified = emptyList()),
+            )), helper().refreshLinks())
             assertEquals("first-profile", profiles.linkProfiles(first.id).single().name)
-            assertTrue(profiles.linkProfiles(second.id).isEmpty())
-            assertEquals(0L, links.find(second.id)!!.lastRefreshedAt)
+            assertEquals(secondBefore.map { Triple(it.id, it.name, it.config) },
+                profiles.linkProfiles(second.id).map { Triple(it.id, it.name, it.config) })
+            assertEquals(secondLinkBefore, links.find(second.id))
             assertEquals("third-profile", profiles.linkProfiles(third.id).single().name)
             assertDenseIndices()
         }

@@ -1,6 +1,12 @@
 <resources>
     <string name="subscriptionSourceLoadFailed">Не удалось загрузить пригодные профили. Проверьте адрес и заголовки запроса, затем попробуйте снова. Источник не сохранён.</string>
     <string name="subscriptionSourceSaveFailed">Не удалось сохранить источник. Введённые данные сохранены в форме; попробуйте снова.</string>
+    <string name="subscriptionRefreshResultTitle">Обновление подписок</string>
+    <string name="subscriptionRefreshNothingNew">Ничего нового</string>
+    <string name="subscriptionRefreshUnchangedPartial">В обновлённых подписках изменений нет</string>
+    <string name="subscriptionRefreshAdded">Добавлены</string>
+    <string name="subscriptionRefreshRemoved">Удалены</string>
+    <string name="subscriptionRefreshModified">Изменены</string>
     <plurals name="subscriptionRefreshAllFailed">
         <item quantity="one">Не удалось обновить %1$d источник. Повторите попытку или измените его настройки.</item>
         <item quantity="few">Не удалось обновить %1$d источника. Повторите попытку или измените настройки источников.</item>

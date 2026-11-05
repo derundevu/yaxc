@@ -209,8 +209,8 @@ class VpnDeviceIntegrationTest {
                     source.address = subscription.url
                     db.linkDao().update(source)
                     assertEquals(
-                        SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
-                        SubscriptionRefreshHelper(context, settings).refreshLinks(source.id),
+                        1,
+                        SubscriptionRefreshHelper(context, settings).refreshLinks(source.id).refreshed,
                     )
                     subscription.awaitServed()
                     awaitUnchangedAcknowledgement(renamed)
@@ -233,8 +233,8 @@ class VpnDeviceIntegrationTest {
                         otherSource.address = subscription.url
                         db.linkDao().update(otherSource)
                         assertEquals(
-                            SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
-                            SubscriptionRefreshHelper(context, settings).refreshLinks(otherSource.id),
+                            1,
+                            SubscriptionRefreshHelper(context, settings).refreshLinks(otherSource.id).refreshed,
                         )
                         subscription.awaitServed()
                         awaitUnchangedAcknowledgement(renamed)
@@ -256,8 +256,8 @@ class VpnDeviceIntegrationTest {
             source.address = subscription.url
             db.linkDao().update(source)
             assertEquals(
-                SubscriptionRefreshHelper.RefreshResult(1, 1, 0),
-                SubscriptionRefreshHelper(context, settings).refreshLinks(source.id),
+                1,
+                SubscriptionRefreshHelper(context, settings).refreshLinks(source.id).refreshed,
             )
             subscription.awaitServed()
             await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
