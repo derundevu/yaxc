@@ -23,7 +23,7 @@ internal class LiveAvailabilityPeer(name: String, initialProbeStatus: Int = 204)
     data class Request(val method: String, val path: String, val host: String)
     data class ProbeRequest(val generation: Long, val startedAt: Long, val elapsedAt: Long)
     data class ProbeResponse(val generation: Long, val status: Int, val sentAt: Long, val elapsedAt: Long)
-    private data class ProbeControl(val generation: Long, val status: Int, val gate: CountDownLatch?)
+    private data class ProbeControl(val generation: Long, val status: Int, val gate: CountDownLatch?, val delayMillis: Long = 0)
 
     val payload = byteArrayOf(0, 1, 0x7f, 0xff.toByte()) + " availability:$name 東京\n".toByteArray()
     val requests = LinkedBlockingQueue<Request>()
@@ -52,10 +52,11 @@ internal class LiveAvailabilityPeer(name: String, initialProbeStatus: Int = 204)
 
     /** The returned generation identifies only requests that start after this change. */
     @Synchronized
-    fun configureProbes(status: Int, hold: Boolean = false): Long {
+    fun configureProbes(status: Int, hold: Boolean = false, delayMillis: Long = 0): Long {
         require(status == 204 || status == 503)
+        require(delayMillis in 0..4_000)
         control.gate?.countDown()
-        control = ProbeControl(control.generation + 1, status, if (hold) CountDownLatch(1) else null)
+        control = ProbeControl(control.generation + 1, status, if (hold) CountDownLatch(1) else null, delayMillis)
         return control.generation
     }
 
@@ -89,6 +90,7 @@ internal class LiveAvailabilityPeer(name: String, initialProbeStatus: Int = 204)
                         // Native production timeout is five seconds. A held reply lets the test
                         // observe a replacement's real checking state and one genuine timeout.
                         if (snapshot.gate != null && !snapshot.gate.await(10, TimeUnit.SECONDS)) return
+                        if (snapshot.delayMillis > 0) Thread.sleep(snapshot.delayMillis)
                         val sentAt = System.currentTimeMillis()
                         val reason = if (snapshot.status == 204) "No Content" else "Service Unavailable"
                         socket.getOutputStream().apply {

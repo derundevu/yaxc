@@ -52,8 +52,9 @@ type healthGroupConfig struct {
 }
 
 type healthConfig struct {
-	URL    string              `json:"url"`
-	Groups []healthGroupConfig `json:"groups"`
+	URL             string              `json:"url"`
+	IntervalSeconds *int                `json:"intervalSeconds"`
+	Groups          []healthGroupConfig `json:"groups"`
 }
 
 type healthRecord struct {
@@ -64,6 +65,7 @@ type healthRecord struct {
 	checkedAt           time.Time
 	delayMs             int64
 	next                time.Time
+	lastStarted         time.Time
 	inFlight            bool
 	cancel              context.CancelFunc
 }
@@ -95,6 +97,7 @@ type healthGroup struct {
 
 type healthPlan struct {
 	url     string
+	options liveHealthOptions
 	groups  []*healthGroup
 	records map[string]*healthRecord
 }
@@ -122,6 +125,9 @@ func parseHealthConfig(document map[string]any, entries map[string]*liveOutbound
 	if !exists {
 		return nil, nil
 	}
+	if interval, exists := object(value)["intervalSeconds"]; exists && interval == nil {
+		return nil, errors.New("managed availability intervalSeconds must be an integer from 5 to 3600")
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -134,6 +140,9 @@ func parseHealthConfig(document map[string]any, entries map[string]*liveOutbound
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, errors.New("invalid managed availability metadata")
+	}
+	if config.IntervalSeconds != nil && (*config.IntervalSeconds < 5 || *config.IntervalSeconds > 3600) {
+		return nil, errors.New("managed availability intervalSeconds must be an integer from 5 to 3600")
 	}
 	probeURL, err := url.Parse(config.URL)
 	if err != nil || (probeURL.Scheme != "http" && probeURL.Scheme != "https") || probeURL.Hostname() == "" || probeURL.User != nil || probeURL.Fragment != "" || len(config.Groups) == 0 {
@@ -155,7 +164,7 @@ func parseHealthConfig(document map[string]any, entries map[string]*liveOutbound
 			return nil, errors.New("invalid or duplicate managed availability group")
 		}
 		groupIDs[group.ID], balancerIDs[group.BalancerTag] = true, true
-		if group.Strategy != "Select" && group.Strategy != "Random" && group.Strategy != "RoundRobin" {
+		if group.Strategy != "Select" && group.Strategy != "Random" && group.Strategy != "RoundRobin" && group.Strategy != "LeastPing" {
 			return nil, errors.New("unknown managed availability strategy")
 		}
 		block := entries[group.BlockTag]
@@ -226,7 +235,12 @@ func prepareLiveHealth(server *core.Instance, document map[string]any, entries m
 	}
 	monitor.mu.Lock()
 	defer monitor.mu.Unlock()
-	plan := &healthPlan{url: config.URL, records: make(map[string]*healthRecord)}
+	options := monitor.options
+	if config.IntervalSeconds != nil {
+		options.interval = time.Duration(*config.IntervalSeconds) * time.Second
+		options.staleAfter = 3*options.interval + options.timeout
+	}
+	plan := &healthPlan{url: config.URL, options: options, records: make(map[string]*healthRecord)}
 	for _, config := range config.Groups {
 		group := &healthGroup{config: config, rejectTag: outboundRuntimeTag(entries[config.BlockTag]), candidates: &healthCandidates{}}
 		for _, member := range config.Members {
@@ -241,7 +255,7 @@ func prepareLiveHealth(server *core.Instance, document map[string]any, entries m
 				record = monitor.plan.records[key]
 			}
 			if record == nil {
-				record = &healthRecord{key: key, tag: version, state: "checking"}
+				record = &healthRecord{key: key, tag: version, state: "checking", delayMs: -1}
 			}
 			plan.records[key] = record
 			group.records = append(group.records, record)
@@ -300,6 +314,13 @@ func (h *liveHealth) replaceLocked(plan *healthPlan) {
 			}
 		}
 	}
+	if h.plan != nil && h.plan.options.interval != plan.options.interval {
+		for _, record := range plan.records {
+			if !record.lastStarted.IsZero() {
+				record.next = record.lastStarted.Add(plan.options.interval)
+			}
+		}
+	}
 	h.plan = plan
 	h.failed = false
 	h.publishLocked(time.Now())
@@ -315,29 +336,34 @@ func (h *liveHealth) publishPlanLocked(plan *healthPlan, now time.Time) {
 		return
 	}
 	for _, record := range plan.records {
-		if record.state == "available" && !now.Before(record.checkedAt.Add(h.options.staleAfter)) {
+		if record.state == "available" && !now.Before(record.checkedAt.Add(plan.options.staleAfter)) {
 			record.state, record.recovering, record.successes = "checking", true, 0
 		}
 	}
 	for _, group := range plan.groups {
+		single := group.config.Strategy == "Select" || group.config.Strategy == "LeastPing"
+		selected := -1
+		if single {
+			selected = group.preferredIndex()
+		}
 		previous := group.candidates.snapshot.Load()
 		count := 0
 		sameTags := previous != nil
 		var expiry time.Time
 		if !h.failed && h.ctx.Err() == nil {
 			for i, record := range group.records {
-				if record.state != "available" {
+				if record.state != "available" || (single && i != selected) {
 					continue
 				}
 				if previous == nil || count >= len(previous.tags) || previous.tags[count] != group.tags[i] {
 					sameTags = false
 				}
 				count++
-				deadline := record.checkedAt.Add(h.options.staleAfter)
+				deadline := record.checkedAt.Add(plan.options.staleAfter)
 				if expiry.IsZero() || deadline.Before(expiry) {
 					expiry = deadline
 				}
-				if group.config.Strategy == "Select" {
+				if single {
 					break
 				}
 			}
@@ -352,9 +378,9 @@ func (h *liveHealth) publishPlanLocked(plan *healthPlan, now time.Time) {
 		} else if count != 0 {
 			tags = make([]string, 0, count)
 			for i, record := range group.records {
-				if record.state == "available" {
+				if record.state == "available" && (!single || i == selected) {
 					tags = append(tags, group.tags[i])
-					if group.config.Strategy == "Select" {
+					if single {
 						break
 					}
 				}
@@ -362,6 +388,26 @@ func (h *liveHealth) publishPlanLocked(plan *healthPlan, now time.Time) {
 		}
 		group.candidates.snapshot.Store(&healthCandidateSnapshot{tags: tags, validUntil: expiry})
 	}
+}
+
+// A strict comparison retains configured priority when measured delays tie.
+func (g *healthGroup) preferredIndex() int {
+	if g.config.Strategy != "Select" && g.config.Strategy != "LeastPing" {
+		return -1
+	}
+	selected := -1
+	for i, record := range g.records {
+		if record.state != "available" {
+			continue
+		}
+		if g.config.Strategy == "Select" {
+			return i
+		}
+		if record.delayMs >= 0 && (selected < 0 || record.delayMs < g.records[selected].delayMs) {
+			selected = i
+		}
+	}
+	return selected
 }
 
 func (h *liveHealth) start() {
@@ -387,13 +433,13 @@ func (h *liveHealth) close() {
 	h.workers.Wait()
 }
 
-func (h *liveHealth) probe(ctx context.Context, tag, probeURL string) (result observatory.ProbeResult, failed bool) {
+func (h *liveHealth) probe(ctx context.Context, tag, probeURL string, timeout time.Duration) (result observatory.ProbeResult, failed bool) {
 	defer func() {
 		if recover() != nil {
 			failed = true
 		}
 	}()
-	return observatory.Probe(ctx, h.dispatcher, tag, probeURL, h.options.timeout), false
+	return observatory.Probe(ctx, h.dispatcher, tag, probeURL, timeout), false
 }
 
 func (h *liveHealth) worker() {
@@ -411,7 +457,7 @@ func (h *liveHealth) worker() {
 		if h.plan != nil && !h.failed {
 			for _, record := range h.plan.records {
 				if record.state == "available" {
-					expiry := record.checkedAt.Add(h.options.staleAfter)
+					expiry := record.checkedAt.Add(h.plan.options.staleAfter)
 					if next.IsZero() || expiry.Before(next) {
 						next = expiry
 					}
@@ -452,10 +498,11 @@ func (h *liveHealth) worker() {
 		}
 		probeCtx, cancel := context.WithCancel(h.ctx)
 		selected.inFlight, selected.cancel = true, cancel
-		selected.next = now.Add(h.options.interval)
+		options := h.plan.options
+		selected.lastStarted, selected.next = now, now.Add(options.interval)
 		probeURL := h.plan.url
 		h.mu.Unlock()
-		result, failed := h.probe(probeCtx, selected.tag, probeURL)
+		result, failed := h.probe(probeCtx, selected.tag, probeURL, options.timeout)
 		cancel()
 		h.mu.Lock()
 		selected.inFlight, selected.cancel = false, nil
@@ -471,18 +518,18 @@ func (h *liveHealth) worker() {
 				h.mu.Unlock()
 				continue
 			}
-			selected.checkedAt, selected.delayMs = time.Now(), result.Delay
+			selected.checkedAt = time.Now()
 			if result.Alive {
+				selected.delayMs = result.Delay
 				selected.failures = 0
 				selected.successes++
-				if selected.state == "available" || (!selected.recovering && selected.state == "checking") || selected.successes >= h.options.recoveryThreshold {
+				if selected.state == "available" || (!selected.recovering && selected.state == "checking") || selected.successes >= h.plan.options.recoveryThreshold {
 					selected.state, selected.recovering = "available", false
 				}
 			} else {
 				selected.successes = 0
 				selected.failures++
-				selected.delayMs = 0
-				if selected.failures >= h.options.failureThreshold {
+				if selected.failures >= h.plan.options.failureThreshold {
 					selected.state, selected.recovering = "unavailable", true
 				}
 			}
@@ -528,6 +575,7 @@ func LiveRoutingStatus() string {
 			for _, group := range h.plan.groups {
 				row := liveHealthGroupStatus{ID: group.config.ID, Strategy: group.config.Strategy, SelectedProfileID: group.config.SelectedProfileID, State: "unavailable", EligibleProfileIDs: []int64{}, Members: []liveHealthMemberStatus{}}
 				checking := false
+				preferred := group.preferredIndex()
 				for i, record := range group.records {
 					member := group.config.Members[i]
 					checkedAt := int64(0)
@@ -536,9 +584,9 @@ func LiveRoutingStatus() string {
 					}
 					row.Members = append(row.Members, liveHealthMemberStatus{ProfileID: member.ProfileID, Fingerprint: member.Fingerprint, State: record.state, LastCheckedAt: checkedAt, DelayMs: record.delayMs})
 					checking = checking || record.state == "checking"
-					if record.state == "available" && !h.failed {
+					if record.state == "available" && !h.failed && (group.config.Strategy != "LeastPing" || record.delayMs >= 0) {
 						row.EligibleProfileIDs = append(row.EligibleProfileIDs, member.ProfileID)
-						if row.ActiveProfileID == nil && group.config.Strategy == "Select" {
+						if i == preferred && (group.config.Strategy == "Select" || group.config.Strategy == "LeastPing") {
 							id := member.ProfileID
 							row.ActiveProfileID = &id
 						}

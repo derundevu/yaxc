@@ -8,6 +8,7 @@ import io.github.derundevu.yaxc.helper.AppDomainRule
 import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.helper.LiveRoutingPlan
 import io.github.derundevu.yaxc.helper.ProxyGroup
+import io.github.derundevu.yaxc.helper.ProxyGroupStrategy
 import io.github.derundevu.yaxc.testing.MainDispatcherRule
 import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.RoomTestSupport
@@ -108,6 +109,37 @@ class LiveRoutingViewModelTest : RoomTestSupport() {
     }
 
     @Test
+    fun leastPingPollingClearsWinnerOnFailureAndAllDownWithoutFallingBackToManualSelection() = runEditorTest {
+        var response = runtimeJson("available", active = 8, eligible = listOf(7, 8),
+            first = "available", second = "available").replace("\"Select\"", "\"LeastPing\"")
+        var failure = false
+        val editor = editor(runtimeStatusReader = {
+            check(!failure) { "controlled status failure" }
+            response
+        }, runtimeActive = { true })
+        fun tick() {
+            mainDispatcher.dispatcher.scheduler.advanceTimeBy(1_000)
+            mainDispatcher.dispatcher.scheduler.runCurrent()
+        }
+        assertEquals(ProxyGroupStrategy.LeastPing, editor.runtimeStatus.groups.single().strategy)
+        assertEquals(7L, editor.runtimeStatus.groups.single().selectedProfileId)
+        assertEquals(8L, editor.runtimeStatus.groups.single().activeProfileId)
+        failure = true
+        tick()
+        val failed = editor.runtimeStatus.groups.single()
+        assertEquals("error", failed.state)
+        assertNull(failed.activeProfileId)
+        assertTrue(failed.eligibleProfileIds.isEmpty())
+        failure = false
+        response = runtimeJson("unavailable", first = "unavailable", second = "unavailable")
+            .replace("\"Select\"", "\"LeastPing\"")
+        tick()
+        assertEquals("unavailable", editor.runtimeStatus.groups.single().state)
+        assertNull(editor.runtimeStatus.groups.single().activeProfileId)
+        assertTrue(editor.runtimeStatus.groups.single().eligibleProfileIds.isEmpty())
+    }
+
+    @Test
     fun malformedNativeStatusNeverBecomesAvailableAndPollingRecoversWithoutReplacingDraft() = runEditorTest {
         var response = """{"running":"true","groups":[]}"""
         val editor = editor(runtimeStatusReader = { response }, runtimeActive = { true })
@@ -144,6 +176,58 @@ class LiveRoutingViewModelTest : RoomTestSupport() {
         assertEquals(saved, editor.savedPlan)
         assertEquals(saved, editor().plan)
         assertFalse(editor.runtimeStatus.running)
+    }
+
+    @Test
+    fun choosingLeastPingEnablesHealthAndPreservesPriorityAndSelectionAcrossSaveAndReopen() = runEditorTest {
+        val first = database.profileDao().insert(Profile(name = "Priority one", config = "{}"))
+        val second = database.profileDao().insert(Profile(name = "Priority two", config = "{}"))
+        val group = ProxyGroup(id = "fastest", name = "Fastest", profileIds = listOf(second, first), selectedProfileId = first)
+        settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(groups = listOf(group)))
+        val editor = editor()
+        editor.selectGroupStrategy(group.id, ProxyGroupStrategy.LeastPing)
+        val changed = editor.plan.groups.single()
+        assertEquals(ProxyGroupStrategy.LeastPing, changed.strategy)
+        assertTrue(changed.checkAvailability)
+        assertEquals(listOf(second, first), changed.profileIds)
+        assertEquals(first, changed.selectedProfileId)
+        assertEquals(group, editor.savedPlan!!.groups.single())
+        save(editor)
+        assertNull(editor.error)
+        assertEquals(changed, editor().plan.groups.single())
+
+        editor.selectGroupStrategy(group.id, ProxyGroupStrategy.Random)
+        assertTrue(editor.plan.groups.single().checkAvailability)
+        editor.updateGroup(editor.plan.groups.single().copy(checkAvailability = false))
+        editor.selectGroupStrategy(group.id, ProxyGroupStrategy.RoundRobin)
+        assertFalse(editor.plan.groups.single().checkAvailability)
+        editor.selectGroupStrategy(group.id, ProxyGroupStrategy.LeastPing)
+        assertTrue(editor.plan.groups.single().checkAvailability)
+    }
+
+    @Test
+    fun malformedLeastPingAvailabilityIsRejectedWithoutRewritingDraftOrStoredPlan() = runEditorTest {
+        val member = database.profileDao().insert(Profile(name = "Member", config = "{}"))
+        val group = ProxyGroup(id = "fastest", name = "Fastest", profileIds = listOf(member),
+            strategy = ProxyGroupStrategy.LeastPing, checkAvailability = true)
+        val valid = LiveRoutingHelper.encode(LiveRoutingPlan(groups = listOf(group)))
+        settings.liveRoutingPlan = valid
+        val editor = editor()
+        editor.updateGroup(group.copy(checkAvailability = false))
+        save(editor)
+        assertEquals(R.string.liveRoutingInvalidPlan, editor.error)
+        assertFalse(editor.plan.groups.single().checkAvailability)
+        assertEquals(valid, settings.liveRoutingPlan)
+
+        val malformed = valid.replace("\"checkAvailability\":true", "\"checkAvailability\":false")
+        settings.liveRoutingPlan = malformed
+        val corrupt = editor()
+        assertEquals(R.string.liveRoutingLoadFailed, corrupt.error)
+        assertTrue(corrupt.canReload)
+        assertNull(corrupt.savedPlan)
+        corrupt.selectGroupStrategy(group.id, ProxyGroupStrategy.Select)
+        save(corrupt)
+        assertEquals(malformed, settings.liveRoutingPlan)
     }
 
     @Test

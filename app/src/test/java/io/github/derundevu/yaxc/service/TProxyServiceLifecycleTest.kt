@@ -319,24 +319,29 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     }
 
     @Test
-    fun probeUrlChangedDuringValidationCommitsOnlyLatestCoherentHealthMetadata() {
+    fun healthSettingsChangedDuringValidationCommitOnlyLatestCoherentMetadata() {
         val group = ProxyGroup(id = "health", name = "Health", profileIds = listOf(profile.id), checkAvailability = true)
         settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(groups = listOf(group)))
         settings.pingAddress = "http://127.0.0.1:18881/start"
+        settings.liveRoutingHealthIntervalSeconds = 5
         startAndAwait()
         val device = boundary.devices.single()
         val initialValidations = boundary.validations
         val gate = CompletableDeferred<String>()
         boundary.validationGate = gate
         settings.pingAddress = "http://127.0.0.1:18881/stale"
+        settings.liveRoutingHealthIntervalSeconds = 15
         val beforeApply = broadcasts().size
         command(TProxyService.APPLY_ROUTING_SERVICE_ACTION_NAME)
         pumpUntil { boundary.validations == initialValidations + 1 }
         settings.pingAddress = "http://127.0.0.1:18881/latest"
+        settings.liveRoutingHealthIntervalSeconds = 8
         gate.complete("")
         pumpUntil { broadcasts().drop(beforeApply).any { it.action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME } }
         assertEquals(settings.pingAddress, JSONObject(boundary.appliedConfig!!).getJSONObject("_yaxcLiveHealth")
             .getString("url"))
+        assertEquals(8, JSONObject(boundary.appliedConfig!!).getJSONObject("_yaxcLiveHealth")
+            .getInt("intervalSeconds"))
         assertEquals(initialValidations + 2, boundary.validations)
         assertEquals(boundary.appliedConfig, settings.xrayConfig().readText())
         assertEquals(1, boundary.coreStarts)
@@ -1156,7 +1161,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
             val third = Link(name = "Never requested source", address = server.url)
             val unselected = Profile(
                 name = "Previously unselected",
-                config = profileConfig("committed-before-cancel"),
+                config = profileConfig("still-unselected"),
                 index = 0,
             )
             runBlocking {
@@ -1174,11 +1179,11 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
             while (shadowOf(app).nextStartedService != null) {
                 // Observe only the reconciliation dispatched by this actual HTTP refresh.
             }
-            // Reverse the two source entries. IDs remain positional, so the selected row's
-            // effective configuration changes and must be applied rather than skipped by ID.
-            val movedToSelected = JSONObject(unselected.config).put("remarks", unselected.name)
-            val movedFromSelected = JSONObject(profile.config).put("remarks", profile.name)
-            server.enqueue("[$movedFromSelected,$movedToSelected]")
+            // A unique source label keeps the selected identity while its config changes.
+            // Cancellation must still reconcile that committed edit rather than skip by ID.
+            val changedSelected = JSONObject(profileConfig("committed-before-cancel")).put("remarks", profile.name)
+            val unchangedUnselected = JSONObject(unselected.config).put("remarks", unselected.name)
+            server.enqueue("[$unchangedUnselected,$changedSelected]")
             val held = server.enqueue(JSONObject(profileConfig("must-not-commit")).put("remarks", "Cancelled").toString(), held = true)
             val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             val pending = refreshScope.async { SubscriptionRefreshHelper(app, settings).refreshLinks() }
@@ -1191,7 +1196,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
                 )
                 assertEquals(profile.id, settings.selectedProfile)
                 assertEquals(
-                    "first",
+                    "still-unselected",
                     runBlocking { JSONObject(database.profileDao().find(unselected.id).config).getString("regressionMarker") },
                 )
                 pending.cancel()

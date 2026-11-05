@@ -103,6 +103,7 @@ data class SettingsFormState(
     val transparentProxy: Boolean,
     val languageTag: String,
     val themeStyle: String,
+    val liveRoutingHealthInterval: String,
 ) {
     companion object {
         val Saver: Saver<SettingsFormState, Any> = listSaver(
@@ -146,6 +147,7 @@ data class SettingsFormState(
                     it.languageTag,
                     it.themeStyle,
                     it.xHwid,
+                    it.liveRoutingHealthInterval,
                 )
             },
             restore = { values ->
@@ -188,6 +190,8 @@ data class SettingsFormState(
                     transparentProxy = values.getOrNull(34) as? Boolean ?: false,
                     languageTag = values.getOrNull(35) as? String ?: "system",
                     themeStyle = values.getOrNull(36) as? String ?: io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle.System.value,
+                    liveRoutingHealthInterval = values.getOrNull(38) as? String
+                        ?: Settings.DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS.toString(),
                 )
             },
         )
@@ -231,6 +235,7 @@ data class SettingsFormState(
             transparentProxy = settings.transparentProxy,
             languageTag = settings.languageTag,
             themeStyle = settings.themeStyle.value,
+            liveRoutingHealthInterval = settings.liveRoutingHealthIntervalSeconds.toString(),
         )
     }
 }
@@ -414,7 +419,7 @@ fun SettingsScreen(
                     IconButton(onClick = onSave) {
                         Icon(
                             imageVector = Icons.Outlined.Done,
-                            contentDescription = null,
+                            contentDescription = textResource(R.string.save),
                         )
                     }
                 },
@@ -710,6 +715,21 @@ private fun BasicSettingsTab(
                 onValueChange = { onFormStateChange(formState.copy(refreshLinksInterval = it)) },
                 keyboardType = KeyboardType.Number,
                 helperText = textResource(R.string.settingsRefreshLinksIntervalLead),
+            )
+        }
+
+        SettingsSection(title = textResource(R.string.liveRouting))
+        SettingsCard {
+            SettingsTextField(
+                label = textResource(R.string.liveRoutingHealthInterval),
+                value = formState.liveRoutingHealthInterval,
+                onValueChange = { onFormStateChange(formState.copy(liveRoutingHealthInterval = it)) },
+                keyboardType = KeyboardType.Number,
+                helperText = resources.getString(
+                    R.string.liveRoutingHealthIntervalHint,
+                    Settings.MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
+                    Settings.MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
+                ),
             )
         }
 

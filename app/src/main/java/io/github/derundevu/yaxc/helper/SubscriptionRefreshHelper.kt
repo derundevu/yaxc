@@ -160,8 +160,14 @@ class SubscriptionRefreshHelper(
                     } else {
                         linkDao.update(updated)
                     }
-                    if (collectChanges) changes = sourceChanges(updated, existing, parsed.profiles)
-                    manageProfiles(updated, existing, parsed.profiles, removedIds)
+                    val configs = HashMap<String, Any?>()
+                    val oldContent = profileContents(existing, configs)
+                    val newContent = profileContents(parsed.profiles, configs)
+                    if (collectChanges) changes = sourceChanges(updated, oldContent, newContent)
+                    manageProfiles(
+                        updated, existing, parsed.profiles,
+                        matchProfiles(oldContent, newContent, safeIdentity = true), removedIds,
+                    )
                     updated
                 }
                 // A rollback must not clear selection or mutate the caller's unsaved source.
@@ -234,50 +240,88 @@ class SubscriptionRefreshHelper(
 
     private data class ProfileContent(val name: String, val config: Any?)
 
-    private fun sourceChanges(link: Link, before: List<Profile>, after: List<Profile>): SourceChanges {
-        val configs = HashMap<String, Any?>()
-        fun content(profile: Profile) = ProfileContent(
-            profile.name,
-            configs.getOrPut(profile.config) {
+    private fun profileContents(
+        profiles: List<Profile>,
+        configs: MutableMap<String, Any?>,
+    ): List<ProfileContent> {
+        return profiles.map { profile ->
+            ProfileContent(profile.name, configs.getOrPut(profile.config) {
                 JsonReader(StringReader(profile.config)).use { reader ->
                     readSemanticJson(reader).also {
                         check(reader.peek() == JsonToken.END_DOCUMENT) { "Unexpected content after JSON" }
                     }
                 }
-            },
-        )
-        val old = before.map(::content)
-        val new = after.map(::content)
-        val matchedOld = BooleanArray(old.size)
-        val matchedNew = BooleanArray(new.size)
-        val modified = arrayOfNulls<String>(new.size)
+            })
+        }
+    }
 
-        fun <K> match(key: (ProfileContent) -> K, onMatch: (Int, Int) -> Unit = { _, _ -> }) {
+    // Each new occurrence points to an old occurrence, or -1 when it needs a new identity.
+    private fun matchProfiles(
+        old: List<ProfileContent>,
+        new: List<ProfileContent>,
+        safeIdentity: Boolean,
+    ): IntArray {
+        val matchedOld = BooleanArray(old.size)
+        val matches = IntArray(new.size) { -1 }
+
+        fun <K> match(
+            key: (ProfileContent) -> K,
+            unique: Boolean = false,
+            originallyUnique: Boolean = false,
+        ) {
             val candidates = HashMap<K, ArrayDeque<Int>>()
             old.forEachIndexed { index, profile ->
                 if (!matchedOld[index]) candidates.getOrPut(key(profile)) { ArrayDeque() }.addLast(index)
             }
+            val newCounts = if (unique) new.indices.filter { matches[it] < 0 }
+                .groupingBy { key(new[it]) }.eachCount() else emptyMap()
+            val originalOldCounts = if (originallyUnique) old.groupingBy(key).eachCount() else emptyMap()
+            val originalNewCounts = if (originallyUnique) new.groupingBy(key).eachCount() else emptyMap()
             new.forEachIndexed { index, profile ->
-                if (matchedNew[index]) return@forEachIndexed
-                val previous = candidates[key(profile)]?.removeFirstOrNull() ?: return@forEachIndexed
+                if (matches[index] >= 0) return@forEachIndexed
+                val value = key(profile)
+                val previousCandidates = candidates[value] ?: return@forEachIndexed
+                if (unique && (previousCandidates.size != 1 || newCounts[value] != 1)) return@forEachIndexed
+                if (originallyUnique && (originalOldCounts[value] != 1 || originalNewCounts[value] != 1)) {
+                    return@forEachIndexed
+                }
+                val previous = previousCandidates.removeFirstOrNull() ?: return@forEachIndexed
                 matchedOld[previous] = true
-                matchedNew[index] = true
-                onMatch(previous, index)
+                matches[index] = previous
             }
         }
 
-        // Preserve exact pairs before matching changed names/configs, including duplicate occurrences.
+        // Exact duplicate occurrences are interchangeable, paired in their existing order.
         match({ it })
-        match({ it.name }) { _, current -> modified[current] = new[current].name }
-        match({ it.config }) { previous, current ->
-            modified[current] = "${old[previous].name} → ${new[current].name}"
+        if (safeIdentity) {
+            // The endpoint takes priority over its label. Never infer a changed endpoint from
+            // a duplicate label, even if exact matching leaves only one unmatched occurrence.
+            match({ it.config }, unique = true)
+            match({ it.name }, unique = true, originallyUnique = true)
+        } else {
+            // Reports describe edits more liberally; they must not assign persistent identity.
+            match({ it.name })
+            match({ it.config })
         }
+        return matches
+    }
+
+    private fun sourceChanges(link: Link, old: List<ProfileContent>, new: List<ProfileContent>): SourceChanges {
+        val matches = matchProfiles(old, new, safeIdentity = false)
+        val matchedOld = matches.filter { it >= 0 }.toSet()
         return SourceChanges(
             sourceId = link.id,
             sourceName = link.name,
-            added = new.indices.filter { !matchedNew[it] }.map { new[it].name },
-            removed = old.indices.filter { !matchedOld[it] }.map { old[it].name },
-            modified = modified.filterNotNull(),
+            added = new.indices.filter { matches[it] < 0 }.map { new[it].name },
+            removed = old.indices.filter { it !in matchedOld }.map { old[it].name },
+            modified = new.indices.mapNotNull { current ->
+                val previous = matches[current]
+                when {
+                    previous < 0 || old[previous] == new[current] -> null
+                    old[previous].name == new[current].name -> new[current].name
+                    else -> "${old[previous].name} → ${new[current].name}"
+                }
+            },
         )
     }
 
@@ -366,31 +410,26 @@ class SubscriptionRefreshHelper(
         link: Link,
         linkProfiles: List<Profile>,
         newProfiles: List<Profile>,
+        matches: IntArray,
         removedIds: MutableSet<Long>,
     ) {
-        if (newProfiles.size >= linkProfiles.size) {
-            newProfiles.forEachIndexed { index, newProfile ->
-                if (index >= linkProfiles.size) {
-                    profileDao.create(newProfile.copy(id = 0L, linkId = link.id, index = -1))
-                } else {
-                    updateProfile(linkProfiles[index], newProfile)
-                }
+        val retained = matches.filter { it >= 0 }.toSet()
+        linkProfiles.forEachIndexed { index, profile ->
+            if (index !in retained) {
+                profileDao.remove(profile)
+                removedIds.add(profile.id)
             }
-            return
         }
-
-        linkProfiles.forEachIndexed { index, linkProfile ->
-            if (index >= newProfiles.size) {
-                profileDao.remove(linkProfile)
-                removedIds.add(linkProfile.id)
+        newProfiles.forEachIndexed { index, profile ->
+            val previous = matches[index]
+            if (previous < 0) {
+                profileDao.create(profile.copy(id = 0L, linkId = link.id, index = -1))
             } else {
-                updateProfile(linkProfile, newProfiles[index])
+                // Removal/insertion may have shifted the global index since the snapshot.
+                // Update content only, preserving both those shifts and user rearrangements.
+                profileDao.updateContent(linkProfiles[previous].id, link.id, profile.name, profile.config)
             }
         }
-    }
-
-    private suspend fun updateProfile(linkProfile: Profile, newProfile: Profile) {
-        profileDao.update(linkProfile.copy(name = newProfile.name, config = newProfile.config))
     }
 
 }

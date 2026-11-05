@@ -64,45 +64,166 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     }
 
     @Test
-    fun equalGrowAndShrinkKeepPositionalIdsGlobalOrderAndSelection() = runBlocking {
+    fun reorderInsertAndRemoveKeepLogicalIdsAndDeletedLiveMembersStayMissing() = runBlocking {
         SubscriptionHttpServer().use { server ->
-            val unrelated = Profile(name = "standalone", config = body("standalone"))
-            val unrelatedId = profiles.create(unrelated)
-            val link = seed(server, "A", "B")
-            val initial = profiles.linkProfiles(link.id)
-            assertEquals(listOf("B", "A"), initial.map { it.name })
-            settings.selectedProfile = initial.first().id
+            val unrelatedId = profiles.create(Profile(name = "standalone", config = body("standalone")))
+            val link = seed(server, "A", "B", "C")
+            val initial = profiles.linkProfiles(link.id).associateBy { it.name }
+            val memberId = initial.getValue("B").id
+            settings.selectedProfile = memberId
+            settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(
+                groups = listOf(ProxyGroup(id = "group", profileIds = listOf(memberId))),
+            ))
+            val plan = settings.liveRoutingPlan
 
-            server.enqueue(body("C", "D"))
-            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 1, 0, listOf(
-                SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
-                    added = listOf("D", "C"), removed = listOf("B", "A"), modified = emptyList()),
-            )), helper().refreshLinks(link.id))
-            val equal = profiles.linkProfiles(link.id)
-            assertEquals(initial.map { it.id }, equal.map { it.id })
-            assertEquals(listOf("D", "C"), equal.map { it.name })
-            assertEquals(initial.first().id, settings.selectedProfile)
+            server.enqueue(body("C", "A", "B"))
+            helper().refreshLinks(link.id)
+            assertEquals(initial.mapValues { it.value.id },
+                profiles.linkProfiles(link.id).associate { it.name to it.id })
+            assertEquals(listOf("C", "B", "A"), profiles.linkProfiles(link.id).map { it.name })
+            assertEquals(memberId, settings.selectedProfile)
             assertDenseIndices()
 
-            server.enqueue(body("E", "F", "G"))
+            server.enqueue(body("D", "C", "A", "B"))
             helper().refreshLinks(link.id)
-            val grown = profiles.linkProfiles(link.id)
-            assertEquals(listOf("G", "F", "E"), grown.map { it.name })
-            assertEquals(initial.map { it.id }, grown.take(2).map { it.id })
-            assertTrue(grown.last().id !in initial.map { it.id })
-            assertEquals("standalone", profiles.find(unrelatedId).name)
+            val grown = profiles.linkProfiles(link.id).associateBy { it.name }
+            initial.forEach { (name, profile) -> assertEquals(profile.id, grown.getValue(name).id) }
+            assertTrue(grown.getValue("D").id !in initial.values.map { it.id })
             assertDenseIndices()
 
-            settings.selectedProfile = grown.last().id
-            server.enqueue(body("H"))
+            server.enqueue(body("D", "C", "A", "E"))
             helper().refreshLinks(link.id)
-            val shrunk = profiles.linkProfiles(link.id)
-            assertEquals(listOf(initial.first().id), shrunk.map { it.id })
-            assertEquals("H", shrunk.single().name)
+            val remaining = profiles.linkProfiles(link.id).associateBy { it.name }
+            listOf("A", "C", "D").forEach { name ->
+                assertEquals(grown.getValue(name).id, remaining.getValue(name).id)
+            }
+            assertTrue(remaining.getValue("E").id !in grown.values.map { it.id })
+            assertFalse(profiles.orderedPositions().any { it.id == memberId })
             assertEquals(0L, settings.selectedProfile)
+            assertEquals(plan, settings.liveRoutingPlan)
+            assertEquals(listOf(memberId), LiveRoutingHelper.decode(plan).groups.single().profileIds)
+            val missing = expectFailure {
+                LiveRoutingHelper.compile(
+                    base = """{"outbounds":[]}""",
+                    plan = LiveRoutingHelper.decode(plan),
+                    profiles = remaining.values.associateBy { it.id },
+                    packageUids = emptyMap(),
+                    socksUsername = "",
+                    socksPassword = "",
+                )
+            }
+            assertTrue(missing.message.orEmpty().contains("missing profile $memberId"))
             assertEquals(unrelatedId, profiles.orderedPositions().last().id)
             assertDenseIndices()
-            assertEquals(4, server.requestCount.get())
+
+            server.enqueue(body("unrelated replacement"))
+            helper().refreshLinks(link.id)
+            assertTrue(profiles.linkProfiles(link.id).single().id !in remaining.values.map { it.id })
+            assertEquals(plan, settings.liveRoutingPlan)
+            assertDenseIndices()
+        }
+    }
+
+    @Test
+    fun unchangedConfigRenameAndUniqueNameConfigEditKeepIdsEvenWhenLabelsSwap() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = seed(server, "A", "B", "C")
+            val initial = profiles.linkProfiles(link.id).associateBy { it.name }
+            profiles.updateContent(initial.getValue("A").id, link.id, "A", """
+                {"future":{"counter":9007199254740993.0,"identity":"A"},
+                 "outbounds":[{"protocol":"freedom"}]}
+            """.trimIndent())
+            settings.selectedProfile = initial.getValue("A").id
+            server.enqueue(bodyWithIdentities("C" to "C", "Renamed" to "A", "B" to "edited"))
+            helper().refreshLinks(link.id)
+            val changed = profiles.linkProfiles(link.id).associateBy { it.name }
+            assertEquals(initial.getValue("A").id, changed.getValue("Renamed").id)
+            assertEquals(initial.getValue("B").id, changed.getValue("B").id)
+            assertEquals(initial.getValue("C").id, changed.getValue("C").id)
+            assertEquals(initial.getValue("A").id, settings.selectedProfile)
+
+            server.enqueue(bodyWithIdentities("Renamed" to "edited", "B" to "A", "C" to "C"))
+            helper().refreshLinks(link.id)
+            val swapped = profiles.linkProfiles(link.id).associateBy { it.name }
+            assertEquals(initial.getValue("A").id, swapped.getValue("B").id)
+            assertEquals(initial.getValue("B").id, swapped.getValue("Renamed").id)
+            assertDenseIndices()
+        }
+    }
+
+    @Test
+    fun refreshUsesTransactionLocalProfilesAndKeepsGlobalUserOrderAcrossSources() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val first = seed(server, "A", "B")
+            val second = seed(server, "A", "B")
+            val standaloneId = profiles.create(Profile(name = "standalone", config = "{}"))
+            val held = server.enqueue(body("B", "A"), held = true)
+            val pending = async(Dispatchers.IO) { helper().refreshLinks(first.id) }
+            held.awaitRequest()
+            val old = profiles.linkProfiles(first.id)
+            val moved = old.first()
+            profiles.moveUp(0, moved.index, moved.id)
+            val edited = old.last()
+            profiles.updateContent(edited.id, first.id, "local rename", edited.config)
+            val order = profiles.orderedPositions()
+            val secondBefore = profiles.linkProfiles(second.id)
+            held.release()
+            assertEquals(1, pending.await().refreshed)
+            assertEquals(order, profiles.orderedPositions())
+            assertEquals(old.map { it.id }.toSet(), profiles.linkProfiles(first.id).map { it.id }.toSet())
+            assertEquals(secondBefore, profiles.linkProfiles(second.id))
+            assertEquals("standalone", profiles.find(standaloneId).name)
+            assertDenseIndices()
+        }
+    }
+
+    @Test
+    fun duplicateExactMatchesAreDeterministicButDuplicateNameConfigChangesNeedNewIds() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = source(server.url)
+            server.enqueue(bodyWithIdentities("duplicate" to "a", "duplicate" to "a", "duplicate" to "b"))
+            helper().saveResolvedLink(link, helper().resolveProfiles(link))
+            val before = profiles.linkProfiles(link.id)
+            settings.selectedProfile = before.last().id
+            server.enqueue(bodyWithIdentities("duplicate" to "changed", "duplicate" to "b", "duplicate" to "a"))
+            helper().refreshLinks(link.id)
+            fun identity(profile: Profile) = JSONObject(profile.config).getJSONObject("future").getString("identity")
+            val after = profiles.linkProfiles(link.id).associateBy(::identity)
+            assertEquals(before.first().id, after.getValue("b").id)
+            assertEquals(before[1].id, after.getValue("a").id)
+            assertTrue(after.getValue("changed").id !in before.map { it.id })
+            assertEquals(0L, settings.selectedProfile)
+            val stable = profiles.linkProfiles(link.id).map { it.id }
+            server.enqueue(bodyWithIdentities("duplicate" to "a", "duplicate" to "changed", "duplicate" to "b"))
+            helper().refreshLinks(link.id)
+            assertEquals(stable, profiles.linkProfiles(link.id).map { it.id })
+            assertDenseIndices()
+        }
+    }
+
+    @Test
+    fun duplicateNamesWithAllChangedConfigsAndAmbiguousRenamesNeverReuseIds() = runBlocking {
+        val cases = listOf(
+            listOf("duplicate" to "a", "duplicate" to "b") to
+                listOf("duplicate" to "c", "duplicate" to "d"),
+            listOf("A" to "shared", "B" to "shared") to
+                listOf("C" to "shared", "D" to "shared"),
+            listOf("duplicate" to "a", "duplicate" to "b") to
+                listOf("duplicate" to "c"),
+            listOf("duplicate" to "a") to
+                listOf("duplicate" to "b", "duplicate" to "c"),
+        )
+        SubscriptionHttpServer().use { server ->
+            for ((before, after) in cases) {
+                val link = source(server.url)
+                server.enqueue(bodyWithIdentities(*before.toTypedArray()))
+                helper().saveResolvedLink(link, helper().resolveProfiles(link))
+                val oldIds = profiles.linkProfiles(link.id).map { it.id }.toSet()
+                server.enqueue(bodyWithIdentities(*after.toTypedArray()))
+                helper().refreshLinks(link.id)
+                assertTrue(profiles.linkProfiles(link.id).none { it.id in oldIds })
+                assertDenseIndices()
+            }
         }
     }
 
@@ -118,9 +239,9 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 SubscriptionRefreshHelper.SourceChanges(link.id, "Current title",
                     added = listOf("added"), removed = listOf("removed"), modified = listOf("same")),
             )), helper().refreshLinks(link.id))
-            assertEquals(listOf("same", "added", "keep"), profiles.linkProfiles(link.id).map { it.name })
             assertEquals(9007199254740992L,
-                JSONObject(profiles.linkProfiles(link.id).first().config).getJSONObject("future").getLong("counter"))
+                JSONObject(profiles.linkProfiles(link.id).single { it.name == "same" }.config)
+                    .getJSONObject("future").getLong("counter"))
         }
     }
 
@@ -128,6 +249,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     fun manualChangesIgnoreProfileOrderWhitespaceAndObjectKeyOrderButNotArrayOrder() = runBlocking {
         SubscriptionHttpServer().use { server ->
             val link = seed(server, "Alpha", "Beta")
+            val initialIds = profiles.linkProfiles(link.id).associate { it.name to it.id }
             profiles.linkProfiles(link.id).forEach { profile ->
                 profiles.update(profile.copy(config = """
                     {
@@ -163,7 +285,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
                     added = emptyList(), removed = emptyList(), modified = emptyList()),
             )), helper().refreshLinks(link.id))
-            assertEquals(listOf("Alpha", "Beta"), profiles.linkProfiles(link.id).map { it.name })
+            assertEquals(initialIds, profiles.linkProfiles(link.id).associate { it.name to it.id })
 
             val changedArray = JSONArray(response)
             changedArray.getJSONObject(1).getJSONObject("future")
@@ -172,6 +294,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             assertEquals(listOf(SubscriptionRefreshHelper.SourceChanges(link.id, link.name,
                 added = emptyList(), removed = emptyList(), modified = listOf("Alpha"))),
                 helper().refreshLinks(link.id).changes)
+            assertEquals(initialIds, profiles.linkProfiles(link.id).associate { it.name to it.id })
         }
     }
 
@@ -194,8 +317,6 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                     added = listOf("added", "added"), removed = listOf("duplicate"),
                     modified = listOf("Old → New", "Old → New", "duplicate")),
             )), helper().refreshLinks(link.id))
-            assertEquals(listOf("added", "added", "New", "New", "duplicate", "duplicate"),
-                profiles.linkProfiles(link.id).map { it.name })
         }
     }
 
@@ -340,14 +461,12 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 assertEquals(15, links.find(local.id)!!.refreshIntervalMinutes)
                 assertEquals(global, links.find(global.id))
                 assertEquals(0, globalServer.requestCount.get())
-                val profileId = profiles.linkProfiles(local.id).single().id
 
                 settings.refreshLinksIntervalMinutes = 30
                 localServer.enqueue(body("local-30"))
                 globalServer.enqueue(body("global-30"))
                 assertEquals(SubscriptionRefreshHelper.RefreshResult(2, 2, 0),
                     helper().refreshDueLinks(start + 30 * 60_000L))
-                assertEquals(profileId, profiles.linkProfiles(local.id).single().id)
                 links.update(links.find(local.id)!!.copy(refreshIntervalMinutes = null))
                 settings.refreshLinksIntervalMinutes = 60
                 assertEquals(SubscriptionRefreshHelper.RefreshResult(0, 0, 0),
@@ -361,7 +480,6 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 assertNull(links.find(local.id)!!.refreshIntervalMinutes)
                 assertNull(links.find(global.id)!!.refreshIntervalMinutes)
                 assertEquals(listOf(local.id, global.id), links.orderedIds())
-                assertEquals(profileId, profiles.linkProfiles(local.id).single().id)
                 assertEquals(3, localServer.requestCount.get())
                 assertEquals(2, globalServer.requestCount.get())
             }
@@ -430,7 +548,8 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 CREATE TRIGGER reject_profile_update BEFORE UPDATE ON profiles
                 WHEN NEW.name = 'reject' BEGIN SELECT RAISE(ABORT, 'synthetic rejection'); END
             """.trimIndent())
-            server.enqueue(body("reject", "changed-before-failure"), headers = mapOf("Profile-Title" to "must rollback"))
+            server.enqueue(bodyWithIdentities("reject" to "first", "changed-before-failure" to "second"),
+                headers = mapOf("Profile-Title" to "must rollback"))
             val parsed = helper().resolveProfiles(link)
             expectFailure { helper().saveResolvedLink(link, parsed, 90_000L) }
             assertEquals(beforeLink, links.find(link.id))

@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.helper
 
 import android.util.JsonReader
 import android.util.JsonToken
+import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Profile
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,7 +13,7 @@ import java.net.URI
 import java.security.MessageDigest
 import java.util.UUID
 
-enum class ProxyGroupStrategy { Select, Random, RoundRobin }
+enum class ProxyGroupStrategy { Select, Random, RoundRobin, LeastPing }
 
 data class ProxyGroup(
     val id: String = UUID.randomUUID().toString(),
@@ -202,6 +203,9 @@ object LiveRoutingHelper {
             require(group.selectedProfileId == null || group.selectedProfileId in group.profileIds) {
                 "$label selected profile ${group.selectedProfileId} is not a member; choose a member again."
             }
+            require(group.strategy != ProxyGroupStrategy.LeastPing || group.checkAvailability) {
+                "$label LeastPing strategy requires availability checks."
+            }
         }
         require(plan.defaultGroupId == null || plan.defaultGroupId in groupIds) {
             "Default group '${plan.defaultGroupId}' is missing; choose an existing default group."
@@ -235,8 +239,12 @@ object LiveRoutingHelper {
         socksPassword: String,
         standalone: Boolean = false,
         pingAddress: String = "",
+        healthIntervalSeconds: Int = Settings.DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
     ): String {
         validate(plan)
+        require(healthIntervalSeconds in
+            Settings.MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS..Settings.MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS
+        ) { "Availability check interval is outside the supported range." }
         require(!standalone || plan.defaultGroup != null) {
             "Live routing needs a default proxy group; add a group before connecting."
         }
@@ -344,7 +352,7 @@ object LiveRoutingHelper {
                 managedBalancers.put(JSONObject().put("tag", tag)
                     .put("selector", jsonArray(if (group.checkAvailability) listOf(blockTag) else members))
                     .put("strategy", JSONObject().put("type", when (group.strategy) {
-                        ProxyGroupStrategy.Select, ProxyGroupStrategy.Random -> "random"
+                        ProxyGroupStrategy.Select, ProxyGroupStrategy.Random, ProxyGroupStrategy.LeastPing -> "random"
                         ProxyGroupStrategy.RoundRobin -> "roundrobin"
                     })))
                 targets[group.id] = "balancerTag" to tag
@@ -407,7 +415,8 @@ object LiveRoutingHelper {
         if (outbounds.length() > baseOutbounds.size) root.put("outbounds", outbounds)
         if (managedRules.length() > 0 || managedBalancers.length() > 0) root.put("routing", routing)
         if (healthGroups.length() > 0) {
-            root.put("_yaxcLiveHealth", JSONObject().put("url", pingAddress).put("groups", healthGroups))
+            root.put("_yaxcLiveHealth", JSONObject().put("url", pingAddress)
+                .put("intervalSeconds", healthIntervalSeconds).put("groups", healthGroups))
         }
         return root.toString()
     }

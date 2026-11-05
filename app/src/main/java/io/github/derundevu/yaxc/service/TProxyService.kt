@@ -342,6 +342,7 @@ class TProxyService : VpnService() {
                         base, plan, profiles, packageUids, settings.socksUsername.trim(), settings.socksPassword.trim(),
                         standalone = standalone,
                         pingAddress = settings.pingAddress.trim(),
+                        healthIntervalSeconds = settings.liveRoutingHealthIntervalSeconds,
                     )
                     ConfigCandidate(
                         if (standalone) getString(R.string.liveRouting) else checkNotNull(profile).name,

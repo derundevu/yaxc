@@ -94,6 +94,9 @@ class Settings(private val context: Context) {
         const val DEFAULT_ANTIFILTER_ADDRESS = AntifilterHelper.DEFAULT_URL
         const val MIN_REFRESH_LINKS_INTERVAL_MINUTES = 15
         const val DEFAULT_REFRESH_LINKS_INTERVAL_MINUTES = 60
+        const val DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS = 10
+        const val MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS = 5
+        const val MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS = 3600
         val USERNAME_ALPHABET: CharArray = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
         val PASSWORD_ALPHABET: CharArray =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray()
@@ -156,6 +159,17 @@ class Settings(private val context: Context) {
     var liveRoutingPlan: String
         get() = sharedPreferences.getString("liveRoutingPlan", "{}")!!
         set(value) = sharedPreferences.edit { putString("liveRoutingPlan", value) }
+    var liveRoutingHealthIntervalSeconds: Int
+        get() = sharedPreferences.getInt(
+            "liveRoutingHealthIntervalSeconds",
+            DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
+        ).coerceIn(MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS, MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS)
+        set(value) = sharedPreferences.edit {
+            putInt(
+                "liveRoutingHealthIntervalSeconds",
+                value.coerceIn(MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS, MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS),
+            )
+        }
 
     /** Tun Routes */
     var tunRoutes: Set<String>

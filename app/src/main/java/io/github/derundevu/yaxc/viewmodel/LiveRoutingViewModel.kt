@@ -17,6 +17,7 @@ import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.helper.LiveRoutingPlan
 import io.github.derundevu.yaxc.helper.LiveRoutingRuntimeStatus
 import io.github.derundevu.yaxc.helper.ProxyGroup
+import io.github.derundevu.yaxc.helper.ProxyGroupStrategy
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.CancellationException
@@ -222,6 +223,14 @@ class LiveRoutingViewModel internal constructor(
     fun updateGroup(group: ProxyGroup) = change(plan.copy(groups = plan.groups.map {
         if (it.id == group.id) group else it
     }))
+
+    fun selectGroupStrategy(groupId: String, strategy: ProxyGroupStrategy) {
+        val current = plan.groups.firstOrNull { it.id == groupId } ?: return
+        updateGroup(current.copy(
+            strategy = strategy,
+            checkAvailability = current.checkAvailability || strategy == ProxyGroupStrategy.LeastPing,
+        ))
+    }
 
     fun selectProfiles(groupId: String, ids: List<Long>, selected: Long?) {
         val current = plan.groups.firstOrNull { it.id == groupId } ?: return

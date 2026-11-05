@@ -79,6 +79,20 @@ class SettingsActivity : AppCompatActivity() {
             ?: return showInvalidNumber(R.string.pingTimeout)
         val refreshLinksIntervalMinutes = formState.refreshLinksInterval.toIntOrNull()
             ?: return showInvalidNumber(R.string.refreshLinksInterval)
+        val healthIntervalSeconds = formState.liveRoutingHealthInterval.toIntOrNull()
+        if (healthIntervalSeconds == null ||
+            healthIntervalSeconds !in Settings.MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS..Settings.MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS
+        ) {
+            feedback.show(
+                getString(
+                    R.string.liveRoutingHealthIntervalInvalid,
+                    Settings.MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
+                    Settings.MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
+                ),
+                FeedbackKind.Warning,
+            )
+            return
+        }
         val tunMtu = formState.tunMtu.toIntOrNull()
             ?: return showInvalidNumber(R.string.tunMtu)
         val tunPrefix = formState.tunPrefix.toIntOrNull()
@@ -119,6 +133,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldLanguageTag = settings.languageTag
         val oldThemeStyle = settings.themeStyle
         val oldPingAddress = settings.pingAddress.trim()
+        val oldHealthIntervalSeconds = settings.liveRoutingHealthIntervalSeconds
 
         val newSocksAddress = formState.socksAddress.trim()
         val newSocksPort = formState.socksPort.trim()
@@ -201,6 +216,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.pingType = newPingType
             settings.pingTimeout = pingTimeout
             settings.refreshLinksIntervalMinutes = refreshLinksIntervalMinutes
+            settings.liveRoutingHealthIntervalSeconds = healthIntervalSeconds
             settings.bypassLan = formState.bypassLan
             settings.enableIpV6 = formState.enableIpV6
             settings.socksUdp = formState.socksUdp
@@ -239,7 +255,9 @@ class SettingsActivity : AppCompatActivity() {
 
             if (restartService) {
                 TProxyService.restart(this@SettingsActivity)
-            } else if (oldPingAddress != settings.pingAddress.trim() && TProxyService.isActive()) {
+            } else if ((oldPingAddress != settings.pingAddress.trim() ||
+                    oldHealthIntervalSeconds != healthIntervalSeconds) && TProxyService.isActive()
+            ) {
                 val healthEnabled = withContext(Dispatchers.IO) {
                     runCatching { LiveRoutingHelper.decode(settings.liveRoutingPlan).groups.any { it.checkAvailability } }
                         .getOrDefault(false)

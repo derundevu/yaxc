@@ -60,7 +60,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Real production-cadence availability tests, explicitly opted into on a disposable emulator.
  * Only shell-owned sockets enter TUN; the regression application and its synthetic peers do not.
- * No shortened health intervals or test-only native settings are used (10s / 5s / 2 / 3).
+ * Uses the production timeout/thresholds and supported user-configurable intervals, never test-only native options.
  */
 @RunWith(AndroidJUnit4::class)
 class LiveRoutingAvailabilityIntegrationTest {
@@ -111,6 +111,7 @@ class LiveRoutingAvailabilityIntegrationTest {
         files += SavedFile.capture(settings.xrayConfig())
         files += SavedFile.capture(settings.tun2socksConfig())
         settings.liveRoutingPlan = "{}"
+        settings.liveRoutingHealthIntervalSeconds = Settings.DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS
         settings.transparentProxy = false
         settings.tun2socks = true
         settings.tproxyHotspot = false
@@ -356,6 +357,50 @@ class LiveRoutingAvailabilityIntegrationTest {
             flow.exchange("retained-old-primary-stream-after-all-down")
             networkObserver!!.assertUnchanged(network)
             assertEquals("Regular selected connection was changed", ordinaryProfile.id, settings.selectedProfile)
+        }
+        assertPeerHealth()
+    }
+
+    @Test
+    fun leastPingAndChangedIntervalMoveNewFlowsWithoutReplacingEstablishedTun() = runBlocking {
+        val firstPeer = peer("least-ping-first")
+        val secondPeer = peer("least-ping-second")
+        firstPeer.configureProbes(204, delayMillis = 700)
+        val initialGeneration = secondPeer.configureProbes(204, delayMillis = 20)
+        val first = createProfile("First priority but slower", firstPeer)
+        val second = createProfile("Second priority but faster", secondPeer)
+        val group = healthGroup(first, second).copy(
+            strategy = io.github.derundevu.yaxc.helper.ProxyGroupStrategy.LeastPing,
+        )
+        settings.liveRoutingHealthIntervalSeconds = 5
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+        savePlan(group, independent = true)
+        start()
+        val network = networkObserver!!.awaitFirst()
+        awaitHealth {
+            it.activeProfileId == second.id && member(it, first).state == "available" &&
+                member(it, second).state == "available"
+        }
+        requireAllIndependentTargets(secondPeer, "least-ping-initial")
+        val initial = awaitProbe(secondPeer, initialGeneration, 204)
+        val repeated = awaitProbe(secondPeer, initialGeneration, 204)
+        assertTrue("Configured five-second cadence was not used", repeated.elapsedAt - initial.elapsedAt in 4_000L..7_500L)
+        ShellHeldFlow(firstPeer.port, EXPLICIT_HOST, secondPeer).use { flow ->
+            flow.exchange("least-ping-held-before-change")
+            val firstGeneration = firstPeer.configureProbes(204, delayMillis = 20)
+            val secondGeneration = secondPeer.configureProbes(204, delayMillis = 700)
+            settings.liveRoutingHealthIntervalSeconds = 8
+            TProxyService.applyRouting(context)
+            awaitService(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+            awaitProbe(firstPeer, firstGeneration, 204)
+            val changed = awaitProbe(secondPeer, secondGeneration, 204)
+            awaitHealth { it.activeProfileId == first.id }
+            requireAllIndependentTargets(firstPeer, "least-ping-after-delay-change")
+            flow.exchange("least-ping-held-after-change")
+            val next = awaitProbe(secondPeer, secondGeneration, 204)
+            assertTrue("Hot-applied eight-second cadence was not used", next.elapsedAt - changed.elapsedAt in 7_000L..11_000L)
+            networkObserver!!.assertUnchanged(network)
+            flow.exchange("least-ping-held-after-interval")
         }
         assertPeerHealth()
     }

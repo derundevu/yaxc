@@ -177,21 +177,23 @@ For domain/IP rules, open **Routing → Core Routing**. Rules are evaluated from
 
 ### Live Routing
 
-**Subscription safety:** disable **Settings → Preferences → Auto-refresh subscriptions** and refresh manually.
-Profile IDs are matched by position, not permanent server identity: a provider reordering entries can silently put
-a different server into an existing group. **Do not use Live Routing with subscriptions returned in random order.**
-Manual refresh does not fix randomized ordering. Review membership, endpoints and priorities after each refresh.
-An active session can apply a manual refresh immediately; stop Live Routing first if you need to inspect changes
-before using them, then review and reconnect.
+**Subscription identity:** reordering a source keeps its existing group members. Matching uses source-local names
+and semantic configurations, not list positions; JSON formatting alone does not change identity. Unchanged-config
+renames and unambiguous unique-name edits retain IDs. Ambiguous duplicate-name changes, deleted profiles and
+simultaneous name/config replacements leave old members explicitly missing rather than selecting a new server.
+Review real content changes after refresh. Updates can apply immediately; stop Live Routing before refreshing
+if inspection must precede use, then review and reconnect.
+If an older positional refresh already changed a member, review that existing plan once: the app cannot reconstruct
+its original server choice from provider history.
 
 Open **Routing → Live Routing**:
 
 1. Choose **Add proxy group**, give it a name and choose member profiles from any subscription or local profiles.
 2. Choose a strategy: **Select** uses the configured member; **Random** chooses a member per new connection;
-   **Round robin** cycles through members per new connection.
+   **Round robin** cycles through members; **Least ping** chooses the eligible member with the lowest measured HTTP delay.
 3. Optionally enable **Consider node availability**. Select then uses the first healthy member in the explicit
    **Primary and backup order**; Random/Round robin keep distributing connections among all healthy members.
-   This option is off for old and new groups until you enable it.
+   Checks are off by default for these three strategies. Least ping always enables them; configured priority breaks equal-delay ties.
 4. Choose the **default group** for unmatched traffic. The first group is used automatically until you choose another.
    Reordering groups changes this automatic fallback; an explicitly chosen default group stays selected.
 5. Add an ordered rule, choose apps and/or enter domains, then choose a group, **Default route**, **Direct** or **Block**.
@@ -207,6 +209,8 @@ Tap a group or rule header to expand or collapse its editor; new entries open au
 unsaved fields and text selection. For offscreen positions, scroll and drag again or use the arrows in the expanded
 card. Selected apps appear first in the app picker; **Select all visible apps** affects only the current search results
 and leaves hidden selections untouched.
+During a drag, expanded editors temporarily compact and reopen on release or cancellation. The preview does not
+change rule precedence until you drop the card.
 
 The first matching enabled rule wins, before **Core Routing**. When a rule contains both apps and domains, **both**
 criteria must match (AND); any value within either list is enough (OR). After Core Routing, unmatched traffic uses
@@ -228,16 +232,18 @@ Availability checks perform an HTTP GET to the existing **Ping Address** setting
 outbound graph, not a direct server-port test. The URL must be HTTP(S); only 2xx succeeds and redirects are not
 followed. The manual ping type/timeout do not change these background checks.
 
-- Checks start immediately, then every **10 seconds per member** when a worker is available; timeout **5 seconds**,
-  at most **4 concurrent probes** across all groups. Large groups can queue.
+- Checks start immediately. Set **Settings → Preferences → Basic → Live Routing → Availability check interval**
+  to **5–3600 seconds**, default **10**. Saving applies the interval to active health-enabled routing without reconnecting.
+  The timeout remains **5 seconds**, with at most **4 concurrent probes** across groups. Large groups can queue.
 - An untested member is **checking**, not healthy. Its first success admits it; **2 consecutive failures** remove
-  it, and **3 consecutive successes** restore it. Observations older than **35 seconds** expire to checking and
-  need three successes again. Endpoint/graph or probe-URL changes cannot inherit old observations.
-- Without queueing, failure detection is approximately **10–25 seconds**; recovery is approximately **20–35 seconds**
-  after service returns. The UI refreshes status about once a second. These are not user-request timeouts.
-- Select returns new connections to the highest-priority eligible node. Random/Round robin have multiple eligible
-  participants, not one active node. The editor distinguishes configured primary, actual runtime choice and unsaved
-  or outdated configuration.
+  it, and **3 consecutive successes** restore it. Observations expire after **3 × interval + 5 seconds** (35 by default)
+  and need three successes again. Endpoint/graph or probe-URL changes cannot inherit old observations.
+- At the default interval and without queueing, failure detection is approximately **10–25 seconds**; recovery is
+  approximately **20–35 seconds** after service returns. Longer intervals slow both. The UI refreshes status about
+  once a second. These are not user-request timeouts.
+- Select returns new connections to the highest-priority eligible node. Least ping uses the lowest last successful
+  measured delay; a transient failure retains that delay until health thresholds remove the member. Random/Round robin
+  have multiple eligible participants, not one active node. The editor distinguishes configuration, runtime and unsaved edits.
 - With checks enabled, **no eligible member means rejection of new group traffic**, including during startup or a
   controller error. It never escapes through the ordinary profile, another group, default outbound or direct route.
   This also applies when that group is the independent default or is reached through Default route/Core Routing.
@@ -263,12 +269,20 @@ Keep those credentials private: a direct SOCKS client with the password can choo
 
 ## Subscription updates
 
-Automatic refresh is optional. Enable **Settings → Preferences → Auto-refresh subscriptions** and set the refresh interval;
-provider-supplied intervals are used when available. Android may defer background work.
+Automatic refresh is optional. Enable **Settings → Preferences → Auto-refresh subscriptions** and set the global interval.
+To override it for one subscription, edit that source and enter **Refresh interval (minutes)**. Leave the field blank
+to follow the current global setting. The minimum is 15 minutes; provider-supplied intervals are informational, not
+the refresh schedule. Android may defer background work. Manual refresh does not wait for the interval.
 
-For Live Routing, keep automatic refresh **off** and inspect explicit updates. Positional profile IDs mean reordering,
-insertion or deletion can change which server a retained group member represents. Randomized provider ordering is
-not supported safely, even with manual refresh or availability checks.
+Manual refresh of one or all subscriptions opens a report of **Added**, **Removed** and **Modified** profiles,
+grouped by source with names and counts. If nothing changed, it shows **Nothing new**. Dismiss it with **Close**;
+automatic refresh does not open this dialog. The report describes updates already applied, not changes awaiting approval.
+Reordering and JSON formatting alone do not count as content changes. A rename with unchanged configuration appears
+as **old name → new name**; if both the name and configuration change, it appears as a removal and an addition.
+
+Live Routing references survive source reordering and insertions. Deleted or ambiguously changed profiles remain
+missing in their groups; the app never assigns their old IDs to unrelated additions. Resolve missing members in the
+group picker. Automatic refresh does not require stable provider ordering, but still applies content changes without approval.
 
 Each source is updated as a complete batch: a failed or malformed refresh keeps that source's previous profiles.
 Cancellation before commit also keeps them; an update already committing finishes before reporting its result.

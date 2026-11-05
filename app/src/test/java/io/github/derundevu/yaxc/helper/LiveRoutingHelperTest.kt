@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,6 +42,33 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     }
 
     @Test
+    fun leastPingRequiresHealthRatherThanSilentlyReinterpretingStoredOrProgrammaticPlans() {
+        val invalid = LiveRoutingPlan(listOf(group(ProxyGroupStrategy.LeastPing)))
+        expectError("requires availability checks") { LiveRoutingHelper.encode(invalid) }
+        expectError("requires availability checks") { compile(invalid, mapOf(1L to profile(1))) }
+        listOf("", ""","checkAvailability":false""").forEach { availability ->
+            expectError("requires availability checks") {
+                LiveRoutingHelper.decode("""{"groups":[{"id":"group","profileIds":[1],"strategy":"LeastPing"$availability}]}""")
+            }
+        }
+        val valid = invalid.copy(groups = invalid.groups.map { it.copy(checkAvailability = true) })
+        assertEquals(valid, LiveRoutingHelper.decode(LiveRoutingHelper.encode(valid)))
+        expectError("ping URL") { compile(valid, mapOf(1L to profile(1))) }
+    }
+
+    @Test
+    fun invalidHealthIntervalsCannotProduceLiveRoutingConfiguration() {
+        val plan = LiveRoutingPlan(listOf(group(ProxyGroupStrategy.LeastPing, listOf(2, 1))
+            .copy(checkAvailability = true)))
+        val profiles = (1L..2L).associateWith { profile(it) }
+        listOf(Int.MIN_VALUE, -1, 0, 4, 3601, Int.MAX_VALUE).forEach { seconds ->
+            assertThrows(IllegalArgumentException::class.java) {
+                compile(plan, profiles, pingAddress = "https://probe.test/204", healthIntervalSeconds = seconds)
+            }
+        }
+    }
+
+    @Test
     fun availabilityStartsBlockedForEveryStrategyAndRoutesEveryIndependentTargetThroughItsBalancer() {
         val profiles = (1L..3L).associateWith { profile(it) }
         ProxyGroupStrategy.entries.forEach { strategy ->
@@ -58,6 +86,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
                 standalone = true, pingAddress = "https://probe.test/204?q=one")
             val health = built.getJSONObject("_yaxcLiveHealth")
             assertEquals("https://probe.test/204?q=one", health.getString("url"))
+            assertEquals(10, health.getInt("intervalSeconds"))
             val metadata = health.getJSONArray("groups").getJSONObject(0)
             assertEquals(group.id, metadata.getString("id"))
             assertEquals(strategy.name, metadata.getString("strategy"))
@@ -290,6 +319,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     fun standaloneDefaultStrategiesReplaceProxyTargetsWithoutDefeatingCoreRulePrecedence() {
         ProxyGroupStrategy.entries.forEach { strategy ->
             val fallback = group(strategy, listOf(1, 2), 2)
+                .copy(checkAvailability = strategy == ProxyGroupStrategy.LeastPing)
             val other = group(members = listOf(3)).copy(id = "other")
             val base = base()
             base.getJSONArray("outbounds").getJSONObject(0).put("tag", "global-proxy")
@@ -305,7 +335,8 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
             val plan = LiveRoutingPlan(listOf(other, fallback), listOf(
                 rule(id = "live-proxy"), rule(id = "live-direct", target = "direct"), rule(id = "live-block", target = "block"),
             ), fallback.id)
-            val built = compile(plan, (1L..3L).associateWith { profile(it) }, base, standalone = true)
+            val built = compile(plan, (1L..3L).associateWith { profile(it) }, base, standalone = true,
+                pingAddress = "https://probe.test/204")
             val rules = built.getJSONObject("routing").getJSONArray("rules")
             val key = if (strategy == ProxyGroupStrategy.Select) "outboundTag" else "balancerTag"
             val opposite = if (key == "outboundTag") "balancerTag" else "outboundTag"
@@ -315,9 +346,10 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
             } else {
                 val balancer = built.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0)
                 assertEquals(target, balancer.getString("tag"))
-                assertEquals(if (strategy == ProxyGroupStrategy.Random) "random" else "roundrobin",
+                assertEquals(if (strategy == ProxyGroupStrategy.RoundRobin) "roundrobin" else "random",
                     balancer.getJSONObject("strategy").getString("type"))
-                assertEquals(2, balancer.getJSONArray("selector").length())
+                assertEquals(if (strategy == ProxyGroupStrategy.LeastPing) 1 else 2,
+                    balancer.getJSONArray("selector").length())
             }
             assertEquals(10, rules.length())
             listOf(0, 4, 5, 9).forEach { index ->
@@ -668,8 +700,10 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     private fun compile(
         plan: LiveRoutingPlan, profiles: Map<Long, Profile> = emptyMap(), base: JSONObject = base(),
         uids: Map<String, Int> = emptyMap(), username: String = "test-user", password: String = "test-password",
-        standalone: Boolean = false, pingAddress: String = "",
-    ): JSONObject = JSONObject(LiveRoutingHelper.compile(base.toString(), plan, profiles, uids, username, password, standalone, pingAddress))
+        standalone: Boolean = false, pingAddress: String = "", healthIntervalSeconds: Int = 10,
+    ): JSONObject = JSONObject(LiveRoutingHelper.compile(
+        base.toString(), plan, profiles, uids, username, password, standalone, pingAddress, healthIntervalSeconds,
+    ))
 
     private fun group(
         strategy: ProxyGroupStrategy = ProxyGroupStrategy.Select, members: List<Long> = listOf(1), selected: Long? = null,

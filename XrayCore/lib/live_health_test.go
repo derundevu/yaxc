@@ -36,6 +36,7 @@ type healthTestNode struct {
 	server  *httptest.Server
 	marker  byte
 	status  atomic.Int32
+	delay   atomic.Int64
 	manual  atomic.Bool
 	probes  atomic.Int64
 	streams atomic.Int64
@@ -76,6 +77,15 @@ func newHealthTestNode(t *testing.T, marker byte, status int, manual bool) *heal
 				case code = <-event.reply:
 				case <-r.Context().Done():
 					event.canceled <- time.Now()
+					return
+				}
+			}
+			if delay := time.Duration(node.delay.Load()); delay > 0 {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-r.Context().Done():
 					return
 				}
 			}
@@ -878,6 +888,21 @@ func TestLiveHealthInvalidMetadataCannotReplaceHealthyRuntime(t *testing.T) {
 		{"unsupported URL", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) {
 			metadata["url"] = "ftp://probe.invalid/probe"
 		}},
+		{"interval too short", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) { metadata["intervalSeconds"] = 4 }},
+		{"interval too long", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) {
+			metadata["intervalSeconds"] = 3601
+		}},
+		{"interval zero", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) { metadata["intervalSeconds"] = 0 }},
+		{"interval negative", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) { metadata["intervalSeconds"] = -5 }},
+		{"interval string", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) {
+			metadata["intervalSeconds"] = "5"
+		}},
+		{"interval fractional", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) {
+			metadata["intervalSeconds"] = 5.5
+		}},
+		{"interval null", func(_ map[string]any, metadata, _ map[string]any, _ map[string]any) {
+			metadata["intervalSeconds"] = nil
+		}},
 		{"missing outbound", func(_ map[string]any, _ map[string]any, group, _ map[string]any) {
 			group["members"].([]any)[0].(map[string]any)["tag"] = "missing-member"
 		}},
@@ -1074,4 +1099,272 @@ func TestLiveHealthRoutingOnlyHotApplyNeverInterruptsNewOrHeldFlows(t *testing.T
 	if backup.streams.Load() != 0 || defaultNode.streams.Load() != 0 {
 		t.Fatal("routing-only applies sent healthy Select traffic to a backup or the default outbound")
 	}
+}
+
+func TestLiveHealthLeastPingPublicationIsStableAndFailClosed(t *testing.T) {
+	now := time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	records := []*healthRecord{
+		{state: "available", delayMs: 30, checkedAt: now},
+		{state: "available", delayMs: 10, checkedAt: now},
+		{state: "available", delayMs: 10, checkedAt: now},
+	}
+	group := &healthGroup{
+		config: healthGroupConfig{Strategy: "LeastPing"}, records: records,
+		tags: []string{"first", "second", "third"}, candidates: &healthCandidates{},
+	}
+	plan := &healthPlan{options: liveHealthDefaults, groups: []*healthGroup{group}, records: map[string]*healthRecord{"a": records[0], "b": records[1], "c": records[2]}}
+	monitor := &liveHealth{ctx: ctx, plan: plan}
+	requireCandidates := func(want []string) {
+		t.Helper()
+		monitor.publishLocked(now)
+		if got := group.candidates.Candidates(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("least-ping candidates = %v, want %v", got, want)
+		}
+	}
+	requireCandidates([]string{"second"})
+	snapshot := group.candidates.snapshot.Load()
+	requireCandidates([]string{"second"})
+	if group.candidates.snapshot.Load() != snapshot {
+		t.Fatal("unchanged least-ping observations allocated a new candidate snapshot")
+	}
+	records[0].delayMs = 10
+	requireCandidates([]string{"first"})
+	records[0].delayMs = -1
+	requireCandidates([]string{"second"})
+	records[1].state = "unavailable"
+	requireCandidates([]string{"third"})
+	records[2].delayMs = -1
+	requireCandidates(nil)
+	records[2].delayMs = 0
+	requireCandidates([]string{"third"})
+	monitor.failed = true
+	requireCandidates(nil)
+	monitor.failed = false
+	cancel()
+	requireCandidates(nil)
+}
+
+func TestLiveHealthIntervalPlansAndStaleness(t *testing.T) {
+	node := newHealthTestNode(t, 'A', 204, false)
+	config := healthTestConfig(t, 10808, "http://probe.invalid/probe", "LeastPing", []*healthTestNode{node}, []int64{1}, true, node)
+	var document map[string]any
+	if err := json.Unmarshal([]byte(config), &document); err != nil {
+		t.Fatal(err)
+	}
+	ordered, err := outboundDocuments(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make(map[string]*liveOutbound)
+	for _, entry := range ordered {
+		entries[entry.key] = entry
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	monitor := &liveHealth{ctx: ctx, options: liveHealthDefaults, changed: make(chan struct{})}
+	_, initial, err := prepareLiveHealth(nil, document, entries, monitor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.options.interval != 10*time.Second || initial.options.staleAfter != 35*time.Second {
+		t.Fatalf("omitted interval changed production defaults: %+v", initial.options)
+	}
+	monitor.replace(initial)
+	var record *healthRecord
+	for _, member := range initial.records {
+		record = member
+	}
+	record.inFlight = true
+	canceled := false
+	record.cancel = func() { canceled = true }
+	record.lastStarted = time.Now()
+	record.next = record.lastStarted.Add(initial.options.interval)
+	metadata := document[liveHealthMetadata].(map[string]any)
+	for _, seconds := range []int{3600, 5} {
+		metadata["intervalSeconds"] = seconds
+		_, plan, err := prepareLiveHealth(nil, document, entries, monitor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		interval := time.Duration(seconds) * time.Second
+		if plan.options.interval != interval || plan.options.staleAfter != 3*interval+5*time.Second {
+			t.Fatalf("interval %d options: %+v", seconds, plan.options)
+		}
+		if plan.records[record.key] != record {
+			t.Fatal("interval-only plan discarded an unchanged observation")
+		}
+		if monitor.plan.options.interval == interval {
+			t.Fatal("preparing an interval changed the committed plan before acceptance")
+		}
+		monitor.replace(plan)
+		if canceled || !record.inFlight {
+			t.Fatal("interval-only apply canceled a matching in-flight probe")
+		}
+		if want := record.lastStarted.Add(interval); !record.next.Equal(want) {
+			t.Fatalf("hot interval scheduled next=%s, want last start + %s", record.next, interval)
+		}
+		now := time.Now()
+		record.state, record.recovering, record.successes = "available", false, 1
+		record.checkedAt, record.delayMs = now.Add(-plan.options.staleAfter+time.Second), 5
+		monitor.publishLocked(now)
+		if got := plan.groups[0].candidates.Candidates(); len(got) != 1 {
+			t.Fatalf("interval %d prematurely expired a fresh observation: %v", seconds, got)
+		}
+		record.checkedAt = now.Add(-plan.options.staleAfter)
+		monitor.publishLocked(now)
+		if got := plan.groups[0].candidates.Candidates(); len(got) != 0 || record.state != "checking" || !record.recovering || record.successes != 0 {
+			t.Fatalf("interval %d did not expire at its staleness boundary: record=%+v candidates=%v", seconds, record, got)
+		}
+	}
+	if monitor.options.interval != 10*time.Second || initial.options.interval != 10*time.Second {
+		t.Fatal("hot interval mutated shared monitor or retained plan options")
+	}
+}
+
+func TestLiveHealthLeastPingRealTrafficAndIntervalHotApply(t *testing.T) {
+	// Production timeout, interval bounds and worker pool: no accelerated defaults.
+	a := newHealthTestNode(t, 'A', 204, false)
+	b := newHealthTestNode(t, 'B', 204, false)
+	defaultNode := newHealthTestNode(t, 'D', 204, false)
+	a.delay.Store(int64(300 * time.Millisecond))
+	b.delay.Store(int64(5 * time.Millisecond))
+	address, port := healthTestListenAddress(t)
+	config := healthTestConfig(t, port, "http://probe.invalid/probe", "LeastPing", []*healthTestNode{a, b}, []int64{1, 2}, true, defaultNode)
+	var document map[string]any
+	if err := json.Unmarshal([]byte(config), &document); err != nil {
+		t.Fatal(err)
+	}
+	metadata := document[liveHealthMetadata].(map[string]any)
+	encode := func(seconds int) string {
+		t.Helper()
+		metadata["intervalSeconds"] = seconds
+		encoded, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	startHealthTestCore(t, encode(3600))
+	first := time.Now()
+	nextHealthTestProbe(t, a)
+	nextHealthTestProbe(t, b)
+	group := waitHealthTestGroup(t, "lowest measured delay, not configured first", func(group healthTestGroupStatus) bool {
+		return healthTestActive(group, 2) && len(group.EligibleIDs) == 2
+	})
+	if healthTestMember(group, 1).DelayMS <= healthTestMember(group, 2).DelayMS {
+		t.Fatalf("synthetic latency separation was not measured: %+v", group)
+	}
+	held, marker, err := dialHealthTestStream(address, "group.invalid")
+	if err != nil || marker != 'B' {
+		t.Fatalf("initial least-ping stream: marker=%q err=%v", marker, err)
+	}
+	defer held.Close()
+	requireHealthTestPayload(t, held, "held on initially fastest member")
+	requireHealthTestTarget(t, address, 'B')
+	beforeA, beforeB := healthTestMember(group, 1).LastCheckedAt, healthTestMember(group, 2).LastCheckedAt
+	a.delay.Store(int64(5 * time.Millisecond))
+	b.delay.Store(int64(300 * time.Millisecond))
+	if err := ApplyRouting(encode(5)); err != nil {
+		t.Fatal(err)
+	}
+	after := readHealthTestStatus(t)
+	if len(after.Groups) != 1 || !healthTestActive(after.Groups[0], 2) || healthTestMember(after.Groups[0], 1).LastCheckedAt != beforeA || healthTestMember(after.Groups[0], 2).LastCheckedAt != beforeB {
+		t.Fatalf("interval-only apply lost the accepted observations: %+v", after)
+	}
+	select {
+	case <-a.events:
+		if elapsed := time.Since(first); elapsed < 4*time.Second || elapsed > 8*time.Second {
+			t.Fatalf("hot 3600s -> 5s interval probe started after %s", elapsed)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("shorter interval did not wake and reschedule the existing monitor")
+	}
+	select {
+	case <-b.events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shorter interval did not reschedule the second member")
+	}
+	waitHealthTestGroup(t, "new lowest measured delay after hot interval", func(group healthTestGroupStatus) bool {
+		return healthTestActive(group, 1) && healthTestMember(group, 1).LastCheckedAt > beforeA && healthTestMember(group, 2).LastCheckedAt > beforeB
+	})
+	requireHealthTestTarget(t, address, 'A')
+	requireHealthTestPayload(t, held, "existing stream retains old fastest member")
+	if err := ApplyRouting(encode(3600)); err != nil {
+		t.Fatal(err)
+	}
+	// A fixed old 5s schedule would issue another request during this window.
+	for range 11 {
+		select {
+		case <-a.events:
+			t.Fatal("longer hot interval retained the old member A schedule")
+		case <-b.events:
+			t.Fatal("longer hot interval retained the old member B schedule")
+		case <-time.After(500 * time.Millisecond):
+		}
+		requireHealthTestTarget(t, address, 'A')
+		requireHealthTestPayload(t, held, "retained stream during longer interval")
+	}
+	if defaultNode.streams.Load() != 0 || defaultNode.probes.Load() != 0 {
+		t.Fatal("least-ping traffic or probes escaped to the default outbound")
+	}
+}
+
+func TestLiveHealthLeastPingFailuresKeepLatencyAndBlockAllDown(t *testing.T) {
+	useFastHealthTestOptions(t)
+	a := newHealthTestNode(t, 'A', 204, false)
+	b := newHealthTestNode(t, 'B', 204, true)
+	defaultNode := newHealthTestNode(t, 'D', 204, false)
+	address, port := healthTestListenAddress(t)
+	config := healthTestConfig(t, port, "http://probe.invalid/probe", "LeastPing", []*healthTestNode{a, b}, []int64{1, 2}, true, defaultNode)
+	startHealthTestCore(t, config)
+	waitHealthTestGroup(t, "first measured healthy recipient", func(group healthTestGroupStatus) bool { return healthTestActive(group, 1) })
+	// The manual member has a deliberately slower successful observation.
+	event := nextHealthTestProbe(t, b)
+	time.Sleep(100 * time.Millisecond)
+	event.reply <- 204
+	healthy := waitHealthTestGroup(t, "both measured healthy", func(group healthTestGroupStatus) bool {
+		return healthTestActive(group, 1) && len(group.EligibleIDs) == 2
+	})
+	slowDelay := healthTestMember(healthy, 2).DelayMS
+	if slowDelay < 80 {
+		t.Fatalf("controlled slow probe delay = %dms", slowDelay)
+	}
+	firstFailure := answerHealthTestProbe(t, b, 2, 503)
+	if healthTestMember(firstFailure, 2).DelayMS != slowDelay || !healthTestActive(firstFailure, 1) || len(firstFailure.EligibleIDs) != 2 {
+		t.Fatalf("transient failure replaced measured latency or eligibility: %+v", firstFailure)
+	}
+	secondFailure := answerHealthTestProbe(t, b, 2, 503)
+	if healthTestMember(secondFailure, 2).State != "unavailable" || !healthTestActive(secondFailure, 1) {
+		t.Fatalf("sustained failure did not remove the slow member: %+v", secondFailure)
+	}
+	held, marker, err := dialHealthTestStream(address, "group.invalid")
+	if err != nil || marker != 'A' {
+		t.Fatalf("held least-ping stream: marker=%q err=%v", marker, err)
+	}
+	defer held.Close()
+	a.status.Store(503)
+	waitHealthTestGroup(t, "all least-ping members unavailable", func(group healthTestGroupStatus) bool {
+		return group.State == "unavailable" && len(group.EligibleIDs) == 0 && group.ActiveProfileID == nil
+	})
+	requireHealthTestBlocked(t, address, defaultNode)
+	requireHealthTestPayload(t, held, "least-ping held stream survives all-down")
+	b.delay.Store(int64(100 * time.Millisecond))
+	for success := 1; success <= 3; success++ {
+		recovery := answerHealthTestProbe(t, b, 2, 204)
+		if success < 3 && recovery.ActiveProfileID != nil {
+			t.Fatalf("least-ping recovered before three successes: %+v", recovery)
+		}
+	}
+	waitHealthTestGroup(t, "recovered slower backup wins when fastest is unavailable", func(group healthTestGroupStatus) bool {
+		return healthTestActive(group, 2)
+	})
+	requireHealthTestTarget(t, address, 'B')
+	requireHealthTestPayload(t, held, "held fastest stream survives backup recovery")
+	a.status.Store(204)
+	waitHealthTestGroup(t, "fastest member wins after hysteretic recovery", func(group healthTestGroupStatus) bool {
+		return healthTestActive(group, 1) && len(group.EligibleIDs) == 2
+	})
+	requireHealthTestTarget(t, address, 'A')
 }

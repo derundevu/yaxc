@@ -266,6 +266,7 @@ fun LiveRoutingScreen(
                     onToggleExpanded = { expandedGroupId = if (expandedGroupId == group.id) null else group.id },
                     onMove = { draft.moveGroup(index, it) },
                     onChange = draft::updateGroup,
+                    onStrategyChange = { draft.selectGroupStrategy(group.id, it) },
                     onProfiles = { profilePicker = group.id },
                     onPriority = { priorityPicker = group.id },
                     onDelete = { draft.deleteGroup(group.id) },
@@ -500,6 +501,7 @@ private fun GroupCard(
     onToggleExpanded: () -> Unit,
     onMove: (Int) -> Unit,
     onChange: (ProxyGroup) -> Unit,
+    onStrategyChange: (ProxyGroupStrategy) -> Unit,
     onProfiles: () -> Unit,
     onPriority: () -> Unit,
     onDelete: () -> Unit,
@@ -538,7 +540,7 @@ private fun GroupCard(
                 modifier = Modifier.fillMaxWidth().testTag("live-routing:group-name:${group.id}"),
             )
             Text(stringResource(R.string.liveRoutingStrategy), Modifier.padding(top = spacing.sm), style = MaterialTheme.typography.labelLarge)
-            // Three fixed strategy choices, not a profile list.
+            // Fixed strategy choices, not a profile list.
             ProxyGroupStrategy.entries.forEach { strategy ->
                 val label = stringResource(strategy.titleResource())
                 Row(
@@ -546,7 +548,7 @@ private fun GroupCard(
                         selected = group.strategy == strategy,
                         enabled = enabled,
                         role = Role.RadioButton,
-                        onClick = { onChange(group.copy(strategy = strategy)) },
+                        onClick = { onStrategyChange(strategy) },
                     ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -557,13 +559,14 @@ private fun GroupCard(
             Row(
                 Modifier.fillMaxWidth().toggleable(
                     value = group.checkAvailability,
-                    enabled = enabled,
+                    enabled = enabled && group.strategy != ProxyGroupStrategy.LeastPing,
                     role = Role.Checkbox,
                     onValueChange = { onChange(group.copy(checkAvailability = it)) },
                 ).padding(vertical = spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = group.checkAvailability, onCheckedChange = null, enabled = enabled)
+                Checkbox(checked = group.checkAvailability, onCheckedChange = null,
+                    enabled = enabled && group.strategy != ProxyGroupStrategy.LeastPing)
                 Text(stringResource(R.string.liveRoutingCheckAvailability), Modifier.padding(start = spacing.sm))
             }
             FilledTonalButton(onClick = onProfiles, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
@@ -588,11 +591,17 @@ private fun GroupCard(
                 }
             } else if (group.checkAvailability) {
                 Text(
-                    stringResource(R.string.liveRoutingHealthFilterHint),
+                    stringResource(if (group.strategy == ProxyGroupStrategy.LeastPing)
+                        R.string.liveRoutingLeastPingHint else R.string.liveRoutingHealthFilterHint),
                     Modifier.padding(top = spacing.sm),
                     color = YaxcTheme.extendedColors.textMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (group.strategy == ProxyGroupStrategy.LeastPing) {
+                    TextButton(onClick = onPriority, enabled = enabled && group.profileIds.isNotEmpty()) {
+                        Text(stringResource(R.string.liveRoutingEditPriority))
+                    }
+                }
             }
             if (isExplicitDefault || inUse) Text(
                 stringResource(if (isExplicitDefault) R.string.liveRoutingDefaultGroupInUse else R.string.liveRoutingGroupInUse),
@@ -671,11 +680,12 @@ private fun RuntimeSummary(
         matched.state != "available" && matched.state != "unavailable" -> stringResource(R.string.liveRoutingHealthUnknown)
         matched.state == "unavailable" || matched.eligibleProfileIds.isEmpty() ->
             stringResource(R.string.liveRoutingHealthNoAvailable)
-        group.strategy == ProxyGroupStrategy.Select -> {
+        group.strategy == ProxyGroupStrategy.Select || group.strategy == ProxyGroupStrategy.LeastPing -> {
             val active = matched.activeProfileId?.takeIf { it in matched.eligibleProfileIds }
             val name = active?.let { profiles[it]?.name }
             if (name == null) stringResource(R.string.liveRoutingHealthUnknown)
-            else stringResource(R.string.liveRoutingHealthActive, name)
+            else stringResource(if (group.strategy == ProxyGroupStrategy.LeastPing)
+                R.string.liveRoutingLeastPingActive else R.string.liveRoutingHealthActive, name)
         }
         else -> stringResource(R.string.liveRoutingHealthParticipants, matched.eligibleProfileIds.size, group.profileIds.size)
     }
@@ -902,9 +912,12 @@ private fun ProfilePicker(
                             )
                             RuntimeMember(
                                 member = members[option.id],
-                                active = matched?.state == "available" && group.strategy == ProxyGroupStrategy.Select &&
+                                active = matched?.state == "available" &&
+                                    (group.strategy == ProxyGroupStrategy.Select || group.strategy == ProxyGroupStrategy.LeastPing) &&
                                     matched.activeProfileId == option.id && option.id in eligible,
-                                eligible = matched?.state == "available" && group.strategy != ProxyGroupStrategy.Select && option.id in eligible,
+                                eligible = matched?.state == "available" &&
+                                    group.strategy != ProxyGroupStrategy.Select && group.strategy != ProxyGroupStrategy.LeastPing &&
+                                    option.id in eligible,
                             )
                         }
                     }
@@ -946,14 +959,16 @@ private fun PriorityPicker(
         title = stringResource(R.string.liveRoutingPriorityTitle),
         onDismiss = onDismiss,
         onConfirm = {
-            if (unchanged) onConfirm(group.profileIds, group.selectedProfileId) else onConfirm(order, order.firstOrNull())
+            if (unchanged) onConfirm(group.profileIds, group.selectedProfileId)
+            else onConfirm(order, if (group.strategy == ProxyGroupStrategy.Select) order.firstOrNull() else group.selectedProfileId)
         },
         confirmEnabled = order.isNotEmpty(),
     ) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "priority-help") {
                 Column(Modifier.padding(16.dp)) {
-                    Text(stringResource(R.string.liveRoutingPriorityHint))
+                    Text(stringResource(if (group.strategy == ProxyGroupStrategy.LeastPing)
+                        R.string.liveRoutingLeastPingHint else R.string.liveRoutingPriorityHint))
                     RuntimeSummary(group, profiles, saved && unchanged, running, runtime, matched)
                 }
             }
@@ -963,14 +978,16 @@ private fun PriorityPicker(
                 val primaryDescription = stringResource(R.string.liveRoutingSetPrimary, name)
                 Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(
+                        if (group.strategy == ProxyGroupStrategy.Select) RadioButton(
                             selected = index == 0,
                             onClick = { if (index > 0) order = listOf(id) + order.filterNot { it == id } },
                             modifier = Modifier.semantics { contentDescription = primaryDescription },
                         )
                         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                             Text(
-                                if (index == 0) stringResource(R.string.liveRoutingPrimary)
+                                if (group.strategy == ProxyGroupStrategy.LeastPing)
+                                    stringResource(R.string.liveRoutingPriorityNumber, index + 1)
+                                else if (index == 0) stringResource(R.string.liveRoutingPrimary)
                                 else stringResource(R.string.liveRoutingBackupNumber, index),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
@@ -1286,6 +1303,7 @@ private fun ProxyGroupStrategy.titleResource(): Int = when (this) {
     ProxyGroupStrategy.Select -> R.string.liveRoutingStrategySelect
     ProxyGroupStrategy.Random -> R.string.liveRoutingStrategyRandom
     ProxyGroupStrategy.RoundRobin -> R.string.liveRoutingStrategyRoundRobin
+    ProxyGroupStrategy.LeastPing -> R.string.liveRoutingLeastPing
 }
 
 @Composable
