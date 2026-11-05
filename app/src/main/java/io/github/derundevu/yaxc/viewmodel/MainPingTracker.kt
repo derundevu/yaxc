@@ -9,50 +9,97 @@ internal data class MainPingSnapshot(
     val total: Int = 0,
 )
 
-/** Only the current operation may settle its pending profiles or clear its progress. */
-internal class MainPingTracker {
+/** Main-thread scheduler; a reservation owns its worker until native teardown completes. */
+internal class MainPingTracker(
+    private val workerCount: Int = 5,
+    private val singleQueueCapacity: Int = 10,
+) {
+    data class Request(val id: Long, val profileId: Long, val single: Boolean)
+
     private var nextId = 0L
-    private var operationId: Long? = null
-    private val pending = mutableSetOf<Long>()
+    private val active = linkedMapOf<Long, Request>()
+    private val singles = linkedSetOf<Long>()
+    private var batchProfiles: Set<Long>? = null
+    private val batchPending = linkedSetOf<Long>()
+
     var snapshot = MainPingSnapshot()
         private set
 
-    fun start(profileIds: List<Long>, sourceId: Long? = null, batch: Boolean = false): Long {
-        val states = snapshot.profiles.mapValues { (_, state) ->
-            if (state == MainPingState.Loading) MainPingState.Idle else state
-        }.toMutableMap()
-        pending.clear()
-        pending.addAll(profileIds)
-        pending.forEach { states[it] = MainPingState.Loading }
-        snapshot = MainPingSnapshot(states, sourceId, total = if (batch) pending.size else 0)
-        return (++nextId).also { operationId = it }
+    fun requestSingle(profileId: Long): Boolean {
+        if (active.values.any { it.profileId == profileId }) {
+            // An explicitly requested, reintroduced profile may rejoin its native probe.
+            if (profileId !in snapshot.profiles) markLoading(profileId)
+            return true
+        }
+        if (profileId in singles) return true
+        if (singles.size >= singleQueueCapacity) return false
+        singles.add(profileId)
+        markLoading(profileId)
+        return true
     }
 
-    fun isCurrent(id: Long) = operationId == id
+    fun requestBatch(profileIds: List<Long>, sourceId: Long? = null) {
+        val profiles = profileIds.toSet()
+        if (batchProfiles == profiles && snapshot.sourceId == sourceId) return
 
-    fun result(id: Long, profileId: Long, state: MainPingState) {
-        if (!isCurrent(id) || !pending.remove(profileId)) return
-        snapshot = snapshot.copy(
-            profiles = snapshot.profiles + (profileId to state),
-            completed = if (snapshot.total > 0) snapshot.total - pending.size else 0,
+        val states = snapshot.profiles.toMutableMap()
+        for (profileId in batchPending) {
+            if (profileId !in profiles && profileId !in singles &&
+                active.values.none { it.profileId == profileId } &&
+                states[profileId] == MainPingState.Loading
+            ) {
+                states[profileId] = MainPingState.Idle
+            }
+        }
+        for (profileId in profiles) states[profileId] = MainPingState.Loading
+        batchProfiles = profiles.takeIf { it.isNotEmpty() }
+        batchPending.clear()
+        batchPending.addAll(profiles)
+        snapshot = MainPingSnapshot(
+            profiles = states,
+            sourceId = sourceId.takeIf { profiles.isNotEmpty() },
+            total = profiles.size,
         )
+    }
+
+    fun takeNext(): Request? {
+        if (active.size >= workerCount) return null
+        val singleProfile = if (active.values.none { it.single }) singles.firstOrNull() else null
+        val profileId = singleProfile ?: batchPending.firstOrNull { profileId ->
+            profileId !in singles && active.values.none { it.profileId == profileId }
+        } ?: return null
+        if (singleProfile != null) singles.remove(profileId)
+        return Request(++nextId, profileId, single = singleProfile != null).also {
+            active[it.id] = it
+        }
+    }
+
+    fun complete(requestId: Long, state: MainPingState) {
+        val request = active.remove(requestId) ?: return
+        // retain() may have deleted the profile while its native worker was still occupied.
+        if (request.profileId in snapshot.profiles) {
+            snapshot = snapshot.copy(profiles = snapshot.profiles + (request.profileId to state))
+        }
+        if (batchPending.remove(request.profileId)) updateBatchProgress()
     }
 
     fun retain(profileIds: Set<Long>) {
-        pending.retainAll(profileIds)
-        snapshot = snapshot.copy(
-            profiles = snapshot.profiles.filterKeys { it in profileIds },
-            completed = if (snapshot.total > 0) snapshot.total - pending.size else 0,
-        )
+        singles.retainAll(profileIds)
+        batchPending.retainAll(profileIds)
+        snapshot = snapshot.copy(profiles = snapshot.profiles.filterKeys { it in profileIds })
+        updateBatchProgress()
     }
 
-    fun finish(id: Long) {
-        if (!isCurrent(id)) return
-        val states = snapshot.profiles.mapValues { (profileId, state) ->
-            if (profileId in pending && state == MainPingState.Loading) MainPingState.Idle else state
+    private fun markLoading(profileId: Long) {
+        snapshot = snapshot.copy(profiles = snapshot.profiles + (profileId to MainPingState.Loading))
+    }
+
+    private fun updateBatchProgress() {
+        if (batchPending.isEmpty()) {
+            batchProfiles = null
+            snapshot = snapshot.copy(sourceId = null, completed = 0, total = 0)
+        } else {
+            snapshot = snapshot.copy(completed = snapshot.total - batchPending.size)
         }
-        operationId = null
-        pending.clear()
-        snapshot = MainPingSnapshot(profiles = states)
     }
 }

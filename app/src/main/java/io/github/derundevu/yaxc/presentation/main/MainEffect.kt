@@ -7,12 +7,6 @@ sealed interface MainEffect {
     data object HandleToggleVpn : MainEffect
     data object RetryConnection : MainEffect
     data class OpenConnectionResources(val filename: String) : MainEffect
-    data class RunPing(val operationId: Long, val profileId: Long) : MainEffect
-    data class RunBatchPing(
-        val operationId: Long,
-        val sourceId: Long?,
-        val profileIds: List<Long>,
-    ) : MainEffect
     data object RefreshLinks : MainEffect
     data class RefreshSelectedSource(val linkId: Long) : MainEffect
     data object OpenNewProfile : MainEffect

@@ -14,11 +14,13 @@ import io.github.derundevu.yaxc.helper.ConnectionFailure
 import io.github.derundevu.yaxc.helper.ConnectionFailureState
 import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.helper.LiveRoutingPlan
+import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
 import io.github.derundevu.yaxc.presentation.main.MainProfileItem
 import io.github.derundevu.yaxc.presentation.main.MainUiState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -33,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -58,11 +61,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settings = Settings(application)
     private val linkRepository by lazy { getApplication<Yaxc>().linkRepository }
     private val profileRepository by lazy { getApplication<Yaxc>().profileRepository }
+    private val configRepository by lazy { getApplication<Yaxc>().configRepository }
 
     private val selectedTabId = MutableStateFlow(settings.selectedLink)
     private val selectedProfileId = MutableStateFlow(settings.selectedProfile)
     private val isRunning = MutableStateFlow(false)
-    private val pingTracker = MainPingTracker()
+    private val pingTracker = MainPingTracker(workerCount = XrayBatchPingHelper.workerCount)
     private val pingState = MutableStateFlow(pingTracker.snapshot)
     private val pingResultPattern = "(\\d+)\\s*(ms|мс)".toRegex(RegexOption.IGNORE_CASE)
     private val _effects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
@@ -74,6 +78,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val validProfileIds = profiles.map { it.id }.toSet()
         pingTracker.retain(validProfileIds)
         pingState.value = pingTracker.snapshot
+        pumpPings()
         if (selectedProfileId.value > 0L && profiles.none { it.id == selectedProfileId.value }) {
             clearSelectedProfile()
         }
@@ -220,17 +225,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isRunning.value = running
     }
 
-    fun isCurrentPingOperation(operationId: Long): Boolean = pingTracker.isCurrent(operationId)
-
-    private fun startPing(profileIds: List<Long>, sourceId: Long? = null, batch: Boolean = false): Long {
-        val id = pingTracker.start(profileIds, sourceId, batch)
-        pingState.value = pingTracker.snapshot
-        return id
-    }
-
-    private fun finishPing(operationId: Long) {
-        pingTracker.finish(operationId)
-        pingState.value = pingTracker.snapshot
+    private fun pumpPings() {
+        while (true) {
+            val request = pingTracker.takeNext() ?: break
+            // Admission happens before launch: only active worker slots own coroutines.
+            viewModelScope.launch {
+                val result = try {
+                    withContext(Dispatchers.IO) {
+                        XrayBatchPingHelper.measureProfileDelay(
+                            context = getApplication(),
+                            settings = settings,
+                            globalConfig = configRepository.get(),
+                            profile = profileRepository.find(request.profileId),
+                            options = XrayBatchPingHelper.Options.from(settings),
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    error.message ?: getApplication<Application>().getString(R.string.pingFailedGeneric)
+                }
+                pingTracker.complete(request.id, parsePingState(result))
+                pingState.value = pingTracker.snapshot
+                pumpPings()
+            }
+        }
     }
 
     private fun parsePingState(result: String): MainPingState {
@@ -247,9 +266,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun updatePingResult(operationId: Long, profileId: Long, result: String) {
-        pingTracker.result(operationId, profileId, parsePingState(result))
+    private fun requestSinglePing(profileId: Long) {
+        if (!pingTracker.requestSingle(profileId)) {
+            _effects.tryEmit(
+                MainEffect.ShowMessage(
+                    getApplication<Application>().getString(R.string.mainPingQueueFull)
+                )
+            )
+            return
+        }
         pingState.value = pingTracker.snapshot
+        pumpPings()
     }
 
     private fun requestBatchPing(sourceId: Long?, profileIds: List<Long>) {
@@ -261,14 +288,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             return
         }
-        val operationId = startPing(profileIds, sourceId, batch = true)
-        _effects.tryEmit(
-            MainEffect.RunBatchPing(
-                operationId = operationId,
-                sourceId = sourceId,
-                profileIds = profileIds,
-            )
-        )
+        pingTracker.requestBatch(profileIds, sourceId)
+        pingState.value = pingTracker.snapshot
+        pumpPings()
     }
 
     fun onAction(action: MainAction) {
@@ -288,8 +310,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _effects.tryEmit(MainEffect.OpenConnectionResources(filename))
                 }
             }
-            is MainAction.PingResultReceived -> updatePingResult(action.operationId, action.profileId, action.result)
-            is MainAction.PingFinished -> finishPing(action.operationId)
             is MainAction.SelectProfile -> {
                 if (selectedProfileId.value == action.profileId) return
                 if (action.profileId == LiveRoutingHelper.CONNECTION_PROFILE_ID && !uiState.value.liveRoutingAvailable) return
@@ -363,8 +383,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MainAction.PingClicked -> {
                 val profileId = selectedProfileId.value
                 if (profileId <= 0L) return
-                val operationId = startPing(listOf(profileId))
-                _effects.tryEmit(MainEffect.RunPing(operationId, profileId))
+                requestSinglePing(profileId)
             }
             MainAction.PingAllProfilesClicked -> {
                 requestBatchPing(

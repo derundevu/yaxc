@@ -1,0 +1,29 @@
+## What's new in 1.5.4
+
+### Runtime logs
+
+- Redesigned the log viewer with separate lazy rows, timestamps, severity colors and source labels.
+- Added text search, level/source filters, pause, per-record copying and filtered UTF-8 file export through the system picker.
+- Reading older entries stops auto-scroll; "To latest" resumes it. Screen rotation preserves the reader, filters, pause and reading position.
+- Bounded history to 5,000 rows and 4 MiB, with visible truncation of oversized rows. VPN/helper messages are no longer excluded by the old tag filter.
+- Clearing the viewer no longer clears runtime log buffers or files. Oversized clipboard selections are rejected with a file-export hint rather than silently truncated.
+
+### Ping
+
+- Single-profile checks no longer cancel a running batch. Both share five workers, with one standalone single check at a time and up to ten queued distinct singles.
+- Duplicate requests share one measurement; a queued batch member requested individually moves to single-check priority without corrupting batch progress.
+- Screen rotation preserves in-flight checks; closing the screen releases native workers safely.
+
+### Live Routing
+
+- Added LeastPing selection: choose the available member with the lowest last successful HTTP delay, using configured priority to break ties.
+- Added an availability-check interval setting from 5 to 3,600 seconds. Interval and Ping Address changes apply to health-enabled plans without restarting the VPN.
+- Improved the Live Routing editor, in-app help and connection-screen feedback.
+
+### Subscriptions
+
+- Preserve profile identity and ordering across subscription reordering and unambiguous name/config changes instead of matching by list position.
+- Ambiguous replacements no longer inherit another profile's ID; removed Live Routing members remain explicitly missing rather than silently switching to another server.
+- Added completion feedback after manual subscription refreshes.
+
+Embedded Xray-core remains 26.10.31. Native dependency versions, the package ID and the Room schema are unchanged. The separately managed root-mode Xray executable is not upgraded by this release. Review logs for sensitive data before sharing.

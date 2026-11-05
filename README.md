@@ -30,6 +30,7 @@ The standard Android VPN mode does **not** require root.
 - Keep multiple sources organized alongside your manually created profiles.
 - Refresh subscriptions manually or automatically; see traffic usage and expiry when your provider supplies them.
 - Check a single profile or compare a group with batch latency checks. Choose HTTP GET, HTTP HEAD or TCP checks.
+- Single-profile checks do not cancel a running batch. Checks share five workers; duplicate requests are combined and the single-check queue is capped at ten profiles.
 
 ### Routing you control
 
@@ -42,7 +43,8 @@ The standard Android VPN mode does **not** require root.
 ### Tools for everyday use and advanced setups
 
 - A full-screen JSON editor with syntax diagnostics, formatting, undo/redo and find/replace.
-- Connection details and live runtime logs for troubleshooting.
+- Connection details for troubleshooting local proxy access and subscription metadata.
+- Live runtime logs with search, level/source filters, pause, per-record copying and filtered text-file export. Reading older entries stops auto-scroll; “To latest” resumes it. History is bounded, and clearing the viewer does not erase runtime logs. Review logs for sensitive data before sharing.
 - English and Russian interfaces, system-following appearance and four theme presets, including Mint Graphite and Light Slate.
 - In-app release checks and APK updates.
 - A Quick Settings tile for connection control, plus optional start on boot.

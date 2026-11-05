@@ -35,14 +35,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
-import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.AppUpdateManager
 import io.github.derundevu.yaxc.helper.LinkHelper
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
-import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
@@ -56,15 +54,12 @@ import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URI
-import kotlin.reflect.cast
 
 class MainActivity : AppCompatActivity() {
 
@@ -73,9 +68,6 @@ class MainActivity : AppCompatActivity() {
     private val appUpdateManager by lazy { AppUpdateManager(applicationContext, settings) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val mainViewModel: MainViewModel by viewModels()
-    private val configRepository by lazy { Yaxc::class.cast(application).configRepository }
-    private val profileRepository by lazy { Yaxc::class.cast(application).profileRepository }
-    private var pingJob: Job? = null
     private var subscriptionRefreshJob: Job? = null
     private val feedback = YaxcFeedbackState()
     private var linksOperationActive = false
@@ -318,8 +310,6 @@ class MainActivity : AppCompatActivity() {
                         .putExtra(AssetsActivity.EXTRA_FOCUS_ASSET, effect.filename)
                 )
             }
-            is MainEffect.RunPing -> runPing(effect.operationId, listOf(effect.profileId))
-            is MainEffect.RunBatchPing -> runPing(effect.operationId, effect.profileIds)
             MainEffect.RefreshLinks -> refreshLinks()
             is MainEffect.RefreshSelectedSource -> refreshSource(effect.linkId)
             MainEffect.OpenNewProfile -> {
@@ -545,58 +535,6 @@ class MainActivity : AppCompatActivity() {
         openLinksManager(intent)
     }
 
-    private fun runPing(operationId: Long, profileIds: List<Long>) {
-        if (!mainViewModel.isCurrentPingOperation(operationId)) return
-        val previous = pingJob
-        previous?.cancel()
-        pingJob = lifecycleScope.launch {
-            try {
-                // Cancellation keeps the worker bound until its native core has actually closed.
-                previous?.join()
-                val options = XrayBatchPingHelper.Options.from(settings)
-                val globalConfig = withContext(Dispatchers.IO) { configRepository.get() }
-                coroutineScope {
-                    // Only five long-lived loops, not one coroutine per profile. The iterator and
-                    // ViewModel updates stay on Main; lookup, config and native work run on IO.
-                    val remaining = profileIds.iterator()
-                    repeat(minOf(XrayBatchPingHelper.workerCount, profileIds.size)) {
-                        launch {
-                            while (remaining.hasNext()) {
-                                ensureActive()
-                                val profileId = remaining.next()
-                                val result = try {
-                                    withContext(Dispatchers.IO) {
-                                        XrayBatchPingHelper.measureProfileDelay(
-                                            context = applicationContext,
-                                            settings = settings,
-                                            globalConfig = globalConfig,
-                                            profile = profileRepository.find(profileId),
-                                            options = options,
-                                        )
-                                    }
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (error: Exception) {
-                                    error.message ?: getString(R.string.pingFailedGeneric)
-                                }
-                                ensureActive()
-                                mainViewModel.onAction(MainAction.PingResultReceived(operationId, profileId, result))
-                            }
-                        }
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                val result = error.message ?: getString(R.string.pingFailedGeneric)
-                profileIds.forEach { profileId ->
-                    mainViewModel.onAction(MainAction.PingResultReceived(operationId, profileId, result))
-                }
-            } finally {
-                mainViewModel.onAction(MainAction.PingFinished(operationId))
-            }
-        }
-    }
 
     private fun hasPostNotification(): Boolean {
         val sharedPref = getSharedPreferences("app", MODE_PRIVATE)

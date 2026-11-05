@@ -9,8 +9,6 @@ sealed interface MainAction {
     data class DismissConnectionFailure(val failure: ConnectionFailure) : MainAction
     data class RetryConnectionFailure(val failure: ConnectionFailure) : MainAction
     data class OpenConnectionResources(val failure: ConnectionFailure) : MainAction
-    data class PingResultReceived(val operationId: Long, val profileId: Long, val result: String) : MainAction
-    data class PingFinished(val operationId: Long) : MainAction
     data class SelectProfile(val profileId: Long, val reloadRuntime: Boolean = true) : MainAction
     data class PingSourceClicked(val linkId: Long) : MainAction
     data class RefreshSourceClicked(val linkId: Long) : MainAction
