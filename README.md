@@ -44,6 +44,7 @@ The standard Android VPN mode does **not** require root.
 
 - A full-screen JSON editor with syntax diagnostics, formatting, undo/redo and find/replace.
 - Connection details for troubleshooting local proxy access and subscription metadata.
+- Connection analytics in both directions: app → configurations and configuration → apps, with actual Live Routing member attribution, active/finished connections and bounded optional history. See [Connections and history](#connections-and-history).
 - Live runtime logs with search, level/source filters, pause, per-record copying and filtered text-file export. Reading older entries stops auto-scroll; “To latest” resumes it. History is bounded, and clearing the viewer does not erase runtime logs. Review logs for sensitive data before sharing.
 - English and Russian interfaces, system-following appearance and four theme presets, including Mint Graphite and Light Slate.
 - In-app release checks and APK updates.
@@ -177,14 +178,46 @@ filter; tap it again to clear those matches. Selections hidden by the filters ar
 
 For domain/IP rules, open **Routing → Core Routing**. Rules are evaluated from top to bottom; higher rules take precedence.
 
+### Connections and history
+
+Tap the **large connection card** on **Connect** to open analytics. Ping and connection Info remain separate
+buttons; the compact bottom control keeps its existing behavior. Switch between **By app** and **By config**,
+then filter active, finished or all retained connections.
+
+Each row shows its captured configuration, route/outbound, destination/domain, protocol, start/end, state and
+upload/download. These are actual runtime observations, not an interpretation of the currently selected profile.
+An established Live Routing stream keeps its original member when new connections switch to another member.
+Labels belong to the applied runtime configuration and do not retroactively rename historical rows.
+
+App attribution requires Android 10+ VPN owner lookup and authenticated local SOCKS identities. Unresolved owners,
+no-auth and SOCKS-only clients stay explicitly unknown. Shared UIDs list all associated packages; the originating
+package cannot be distinguished. A reused UID or changed shared-UID membership remains unattributed for the rest of
+that app process, including core reloads, rather than assigning another app's traffic. This does not change routing.
+Clients holding SOCKS credentials can claim managed identities; this is not an authorization boundary.
+
+UDP rows are associations and can contain several observed destinations, not independent per-destination totals.
+Counters describe logical proxy payload bytes, not IP headers, outer transport/encryption overhead or provider quota.
+Zero-copy download totals can remain incomplete until copying ends. An opaque write failure can leave final totals
+unknown; incomplete values are labeled. Root mode uses an external Xray without this observer and is explicitly unavailable.
+
+Capture continues when this screen closes. In-memory history is limited to **5,000 connections / 8 MiB**; finished
+rows expire after **24 hours**. The native buffer holds at most **2,048 observations** and can omit even active flows
+under pressure. Buffer drop/eviction counts are not a count of unique missing rows: native evictions may already
+have been collected. Totals cover only retained rows matching the filter.
+
+**Save history on this device** is off by default. Enabling it stores bounded checkpoints in private storage excluded
+from Android backups; destinations and app identities are sensitive. No payloads, credentials or raw configurations
+are recorded. Restored active rows become interrupted. Disabling persistence deletes saved history but keeps memory;
+**Clear finished history** keeps active connections and their counters and never stops traffic or deletes profiles/logs.
+
 ### Live Routing
 
 **Subscription identity:** reordering a source keeps its existing group members. Matching uses source-local names
 and semantic configurations, not list positions; JSON formatting alone does not change identity. Unchanged-config
 renames and unambiguous unique-name edits retain IDs. Ambiguous duplicate-name changes, deleted profiles and
 simultaneous name/config replacements leave old members explicitly missing rather than selecting a new server.
-Review real content changes after refresh. Updates can apply immediately; stop Live Routing before refreshing
-if inspection must precede use, then review and reconnect.
+Review real content changes after refresh. Updates can apply immediately to an active Live Routing session; stop
+Live Routing before refreshing if inspection must precede use, then review and reconnect.
 If an older positional refresh already changed a member, review that existing plan once: the app cannot reconstruct
 its original server choice from provider history.
 
@@ -200,8 +233,9 @@ Open **Routing → Live Routing**:
    Reordering groups changes this automatic fallback; an explicitly chosen default group stays selected.
 5. Add an ordered rule, choose apps and/or enter domains, then choose a group, **Default route**, **Direct** or **Block**.
    Long-press a group or rule header and drag to reorder within its section; disabled rules do not match.
-6. Tap **Save**. This persists the plan locally and requests a live update if a session is active; it does not connect
-   a stopped session. A local save is not confirmation that the running core accepted it: check **Connect** for errors.
+6. Tap **Save**. This persists the plan locally and requests a live update only if a Live Routing session is active;
+   it does not connect a stopped session or affect an ordinary profile connection. A local save is not confirmation
+   that the running core accepted it: check **Connect** for errors.
 7. On **Connect**, select the special **Live Routing** group and tap the usual connection button. No individual
    profile needs to be selected. Ordinary subscription groups and profile selection remain available.
 
@@ -214,28 +248,31 @@ and leaves hidden selections untouched.
 During a drag, expanded editors temporarily compact and reopen on release or cancellation. The preview does not
 change rule precedence until you drop the card.
 
-The first matching enabled rule wins, before **Core Routing**. When a rule contains both apps and domains, **both**
-criteria must match (AND); any value within either list is enough (OR). After Core Routing, unmatched traffic uses
-the default group's strategy in a Live Routing connection. **Default route** and Core Routing proxy targets also use
-that group; explicit direct/block routes keep their meaning. With a regular profile selected, these rules remain an
-overlay and the selected profile supplies the default route. Domain entries are one per line: a bare hostname such as `example.com` or
+Only the special **Live Routing** connection uses these groups and rules. Ordinary profile connections use the
+selected profile with global settings and **Core Routing**; they do not read or apply the saved Live Routing plan.
+In a Live Routing connection, the first matching enabled rule wins, before **Core Routing**. When a rule contains
+both apps and domains, **both** criteria must match (AND); any value within either list is enough (OR). After Core
+Routing, unmatched traffic uses the default group's strategy. **Default route** and Core Routing proxy targets
+also use that group; explicit direct/block routes keep their meaning. Domain entries are one per line: a bare hostname such as `example.com` or
 `domain:example.com` matches that domain and its subdomains; `full:example.com` is exact. `regexp:`, `geosite:` and
 `ext:<file>:<tag>` matchers are also supported. Hostnames are normalized to ASCII for internationalized domains.
 Xray must know the destination hostname from the proxy request or sniffing; an IP-only connection may not match.
 
 Groups compose each member's outbound graph, including supported outbound chains, rather than switching whole
 configurations. A Live Routing connection uses the app's global DNS, inbound and Core Routing settings, not one
-member's full configuration. A regular profile connection still shares those settings with the selected profile.
-Unsupported or incomplete graphs are rejected; missing members or an invalid default-group choice are never silently
-replaced. All group members stay loaded, so changing the default group, selected member or strategy alone does not
-allocate new native handlers.
+member's full configuration. An ordinary profile connection uses its own configuration with global settings and
+Core Routing, independently of the saved Live Routing plan. Unsupported or incomplete graphs, missing members or
+an invalid default-group choice reject Live Routing start/update; they never silently select replacements and do
+not block ordinary profile connections. The saved plan need not be edited or deleted to use an ordinary profile.
+All group members stay loaded in Live Routing, so changing the default group, selected member or strategy alone
+does not allocate new native handlers.
 
 Availability checks perform an HTTP GET to the existing **Ping Address** setting through each member's complete
 outbound graph, not a direct server-port test. The URL must be HTTP(S); only 2xx succeeds and redirects are not
 followed. The manual ping type/timeout do not change these background checks.
 
 - Checks start immediately. Set **Settings → Preferences → Basic → Live Routing → Availability check interval**
-  to **5–3600 seconds**, default **10**. Saving applies the interval to active health-enabled routing without reconnecting.
+  to **5–3600 seconds**, default **10**. Saving updates only an active health-enabled Live Routing session without reconnecting.
   The timeout remains **5 seconds**, with at most **4 concurrent probes** across groups. Large groups can queue.
 - An untested member is **checking**, not healthy. Its first success admits it; **2 consecutive failures** remove
   it, and **3 consecutive successes** restore it. Observations expire after **3 × interval + 5 seconds** (35 by default)
@@ -292,10 +329,10 @@ An unchanged active configuration keeps the connection running. Validated routin
 apply live, retaining established streams, when shared core and platform settings are unchanged. Other validated
 core changes reload Xray; changed VPN/platform settings require a restart. Invalid candidates or rejected live
 updates keep the previous runtime and report an error; a reconnect-required rejection never forces a reconnect.
-If conditional subscription reconciliation (`NEW_CONFIG`) finds that the selected default profile was removed, it
-stops the runtime rather than silently selecting another profile. A missing Live Routing group member instead rejects
-the update without substituting a member. When refreshing multiple sources, successful sources can still update;
-the result reports any partial failures.
+If conditional subscription reconciliation (`NEW_CONFIG`) finds that the selected ordinary profile was removed, it
+stops the runtime rather than silently selecting another profile. A missing Live Routing group member instead
+rejects a Live Routing start/update without substituting a member; it does not affect an ordinary profile connection.
+When refreshing multiple sources, successful sources can still update; the result reports any partial failures.
 
 ## FAQ
 

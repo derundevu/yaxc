@@ -9,9 +9,12 @@ Use JDK 21, Android SDK platform 36/build-tools 36.0.0, and NDK 28.2.13676358.
 Set `JAVA_HOME` and `ANDROID_HOME` to existing installations. The selected core candidate uses **Go 1.27.3**
 (`GOTOOLCHAIN=go1.27.3`); gomobile/gobind are pinned through `XrayCore/go.mod` and installed from that locked
 module graph. XrayHelper selects the same Go patch. Use the Gradle wrapper.
+If `ANDROID_SDK_ROOT` is already set, make it match `ANDROID_HOME` (or unset it for the command); AGP rejects conflicting SDK paths.
 
-Native builds use published fork commits pinned by the parent gitlinks; see [Native dependencies](NATIVE.md#sources-and-versions).
-Local scripts and CI build those sources directly without applying patches. Do not reset edited submodules to older parent gitlinks.
+Native builds use submodule sources directly; see [Native dependencies](NATIVE.md#sources-and-versions).
+The parent pins published 26.10.31 core/wrapper and Live Routing tunnel forks; see the exact commits in
+[Native dependencies](NATIVE.md#sources-and-versions). Hosted CI passed on `518e3a9`; later uncommitted work is
+not covered by that run. Local scripts and CI apply no patches; preserve any local submodule edits.
 
 On a fresh checkout with no local submodule edits:
 
@@ -35,6 +38,16 @@ Each helper build keeps only the selected ABI assets and removes the old flat he
 Native scripts install the pinned gomobile tool and download Go modules; do not use their optional setup/refresh arguments for routine builds.
 See [Native dependencies](NATIVE.md) before changing native code or pinned versions.
 
+`:app:preBuild` runs `:app:verifyNativeArtifacts` before packaging. Every ABI in `abiTarget` must have
+`jni/<ABI>/libgojni.so` inside `app/libs/XrayCore.aar` and a nonempty matching helper asset. A missing ABI fails the
+build with rebuild instructions rather than producing an APK that crashes at startup. After an emulator-only build,
+rebuild for the phone ABI explicitly, or rebuild both native artifacts with `all` before using the default ABI set.
+
+For dependency migrations, use the project skill
+[yaxc-native-upgrade](../.omp/skills/yaxc-native-upgrade/SKILL.md), invoked as `/skill:yaxc-native-upgrade`.
+It covers dirty recursive forks, upstream/security comparisons, module/schema alignment, rebuilt ABI sets,
+isolated release gates and the owner publication handoff; current code and instructions remain the source of truth.
+
 | Device ABI / `abiTarget`                     | Native argument |
 | -------------------------------------------- | --------------- |
 | `armeabi-v7a`                                | `arm`           |
@@ -54,7 +67,7 @@ per ABI. Gradle retains ABI splits and adds a universal output whenever `abiTarg
 The all-ABI debug build produces `app-universal-debug.apk` plus the four `app-<ABI>-debug.apk` files in
 `app/build/outputs/apk/debug/`. A single-ABI build produces only its split APK, such as
 `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`; explicitly select that ABI when building native artifacts for one device.
-Every APK uses the same `app/versionCode.txt` value, currently **1175**, without architecture offsets.
+Every APK uses the same `app/versionCode.txt` value, currently **1176**, without architecture offsets.
 `build_do_not_push.sh` is machine-specific and may install a stale APK after a build failure; do not use it as the build entry point.
 
 ### Install and verify
@@ -131,7 +144,7 @@ DEVICE=tv
 ```
 
 The prepared app APK in `.android/artifacts/` is the **1.5.1** smoke baseline, not proof of the current
-1.5.3 candidate. These copies do **not** update automatically. Rebuild/reinstall after application
+1.5.4 candidate. These copies do **not** update automatically. Rebuild/reinstall after application
 changes; never use old copies after a failed build or emulator-native artifacts for an arm64 phone build.
 
 For manual TV checks, use **Extended controls → Directional Pad**, keyboard arrows/confirmation/Back,
@@ -164,10 +177,23 @@ Stop with the helper so guest filesystem writes are synchronized before the VM e
 
 [CI](../.github/workflows/ci.yml) runs on every branch push, pull request and manual dispatch.
 It validates workflows with pinned actionlint and inline ShellCheck, and checks tracked shell scripts with `bash -n`.
-The Android job first runs host Go compatibility/cancellation regressions against the local forks, then builds
-the pinned native dependencies for `arm64-v8a`, assembles the debug APK and runs full `lintDebug` plus
-`testDebugUnitTest`. It needs no release secrets and publishes no release.
+The Android job first runs facade/library ownership, live-routing, Observatory/router/outbound, TLS/XHTTP and
+splice race regressions plus retained-wrapper compatibility checks. It then builds the pinned native dependencies
+for `arm64-v8a`, assembles the debug APK and runs full `lintDebug` plus `testDebugUnitTest`.
+TLS/ECH tests use local certificate/OCSP/DNS/HTTPS fixtures, not public service availability.
+The job needs no release secrets and publishes no release.
 Lint/test reports and the successful debug APK are retained as workflow artifacts for seven days.
+
+The router gate reads `XrayCore/Xray-core/resources/geosite.dat`. CI downloads test data from a pinned
+`XTLS/Xray-rules-dat` revision before running the native tests; it does not rely on an existing cache.
+Before running the router tests locally, prepare the same fixture from the repository root:
+
+```bash
+mkdir -p XrayCore/Xray-core/resources
+curl --fail --location --silent --show-error \
+  --output XrayCore/Xray-core/resources/geosite.dat \
+  https://raw.githubusercontent.com/XTLS/Xray-rules-dat/b2fd201b17cdbb2a6aff5e49a52910247d026778/geosite/geosite-expand.dat
+```
 
 After building the arm64 native artifacts, the local Android check is:
 
@@ -181,6 +207,11 @@ native-graphics Compose/EditorKit interactions. Pure helpers use a plain `Applic
 tests use `RegressionApplication`, which deliberately skips production startup scheduling. Every Room fixture
 owns its database/executor/preferences and resets AndroidX's cached application factory before reuse.
 Host tests never load the Android Go library, modify a device or depend on public network services.
+
+If Robolectric cannot fetch its SDK 28 fixture because `repo1.maven.org` fails TLS, a one-off invocation can use
+`JAVA_TOOL_OPTIONS=-Drobolectric.dependency.repo.url=https://repo.maven.apache.org/maven2 ./gradlew ...`
+with the same task/ABI arguments. This fetched the fixture during Live Routing work; it is not a permanent
+repository, Gradle or global environment change.
 
 Core routing editor tests inject a separate `StandardTestDispatcher` sharing Main's test scheduler.
 This queues snapshot processing until the test yields, so concurrent-draft checks do not depend on
@@ -197,6 +228,12 @@ Required-check branch rules must be configured separately on GitHub; CI alone do
 in `app/build.gradle.kts`. Its five-row matrix builds four signed ABI APKs and a complete universal APK;
 the universal row builds all native ABIs but stages only `app-universal-release.apk`. A GitHub Release is published
 only after all five builds succeed. Notes come from `metadata/en-US/changelogs/<versionCode>.txt`, using the shared code directly.
+The prepared candidate is **1.5.4 / versionCode 1176**, with notes in
+[`metadata/en-US/changelogs/1176.txt`](../metadata/en-US/changelogs/1176.txt). Local unsigned APKs are packaging
+checks, not production-signed release assets; publication still requires the configured release signing secrets.
+The release workflow does not run or wait for the CI workflow. Tag only the exact parent revision whose clean-checkout
+CI has passed with all modified fork commits published and pinned; pushing a release tag starts publication directly.
+
 Assets are named `yaxc-<tag>-<ABI|universal>.apk`, without a numeric version-code suffix. Choose universal when unsure.
 The legacy container wrapper `build-yaxc.sh` follows the same naming: use `NATIVE_ARCH=all` and
 `ABI_TARGET=armeabi-v7a,arm64-v8a,x86,x86_64` to stage its universal output, or select one matching native/Android ABI pair.
@@ -205,7 +242,7 @@ The legacy container wrapper `build-yaxc.sh` follows the same naming: use `NATIV
 
 The `regression` build uses application ID `io.github.derundevu.yaxc.regression`, its own data and worker
 processes, and the debug signing configuration. It never replaces the installed release/debug application.
-The test runner refuses any other target package. The original package ID and Room schema version remain unchanged.
+The test runner refuses any other target package. The original package ID is unchanged; regression uses the same Room schema as production.
 Only this variant allows cleartext HTTP to loopback fixture endpoints; production network security is unchanged.
 
 Use a dedicated API 35 x86_64 emulator, not the owner's device. `default` is the 4 KB image;
@@ -254,22 +291,48 @@ covers this bound without relying on transport EOF or emulator scheduling.
 No root mode, public proxy, real subscription or owner VPN is used. Rebuild matching arm64 native artifacts
 before returning to the normal phone build; do not reuse the emulator AAR/helper for another ABI.
 
-Room exports the current [v9 schema](../app/schemas/io.github.derundevu.yaxc.database.YaxcDatabase/9.json).
-Migration fixtures v1–v8 are reconstructed from migration SQL and opened through real Room schema validation;
+Room exports the current [v10 schema](../app/schemas/io.github.derundevu.yaxc.database.YaxcDatabase/10.json).
+Migration fixtures v1–v9 are reconstructed from migration SQL and opened through real Room schema validation;
 they are not claimed to be historical exported snapshots.
+
+Migration 9→10 adds nullable `links.refresh_interval_minutes`; existing rows use the global interval. The optional
+subscription form value is minutes (minimum 15); blank means `Settings.refreshLinksIntervalMinutes`. Provider
+metadata remains display-only and cannot override either choice. On-open and WorkManager due checks share this
+precedence; manual refresh bypasses due time. One network-constrained 15-minute worker remains, not one timer per
+subscription. Host regressions cover independent schedules, global changes after clearing an override, metadata
+refresh/stale-edit preservation, real form restoration/offline saves and every migration path through v10.
+
+Manual subscription refresh retains its result in `LinksManagerViewModel` until **Close**, including across activity
+recreation; a restored process never replays a potentially committed request. Added/removed/modified names are
+computed against the transaction's stored profiles and published only for successful sources. Matching preserves
+duplicate occurrences: exact name/content pairs first, then same-name modifications, then unchanged-content renames.
+JSON object-key order, whitespace and numeric spelling are ignored; array order and exact numeric values matter.
+Unmatched profiles become additions/removals. Reports do not edit Live Routing membership.
+Background refresh and source-form saves skip report calculation, but every refresh uses the same identity matching.
+Errors are never presented as a successful unchanged refresh.
+
+Persistent identity is source-scoped: exact name/semantic-config occurrences first, then unambiguous unchanged-config
+renames, then config edits whose unchanged name occurs exactly once in both complete source snapshots. Ambiguous
+duplicates and replacements receive fresh IDs; removed IDs remain explicit missing Live Routing members. Retained
+profiles keep user/global ordering, while existing DAO insert/remove operations maintain dense indices. Matching uses
+transaction-local profiles, not the pre-network snapshot; content updates never restore stale indices. No schema migration.
+
 
 Profile saves retain inserted identities and update content without restoring a stale list index. A target deleted
 while its editor is open is rejected instead of reporting a successful no-op; the unsaved draft remains visible.
 
-Subscription refresh uses conditional `NEW_CONFIG`: the service compares exact generated Xray JSON and immutable,
-mode-specific platform options against the last successful runtime snapshot. An unchanged candidate updates the
-notification/tile label through `STATUS` without validation, file writes or a reconnect event. Names, quotas,
-timestamps and unselected profiles are not runtime inputs. Stored SOCKS ports/credentials are reused, not regenerated.
-Changed core settings reload Xray once; changed TUN/root options require a full validated restart. Explicit `RESTART`
-remains forced. Validation runs outside the ownership lock and Room transaction; the candidate is re-read from
-committed state before applying it so edits/deletions during validation cannot publish stale state. Missing selection
-stops the owned runtime. A partially committed, cancelled refresh batch still schedules one conditional reconciliation;
-that command cannot start an inactive VPN or undo STOP.
+Subscription refresh uses conditional `NEW_CONFIG`: the service compares generated Xray JSON, the installed-package
+identity snapshot and immutable, mode-specific platform options against the last successful runtime snapshot.
+An unchanged candidate updates notification/tile metadata through `STATUS` without validation, file writes or a
+reconnect event. Names, quotas and timestamps alone are not core inputs; unselected profiles matter only when used
+by groups in the selected Live Routing connection. Stored SOCKS ports/credentials are reused, not regenerated.
+Validated routing/rule/balancer/outbound-graph changes use `ApplyRouting` when the shared core settings and platform
+options are unchanged. Other core changes reload Xray once; changed TUN/root options require a full validated
+restart. Explicit `RESTART` remains forced. A rejected live update never falls back to a restart.
+Validation runs outside the ownership lock and Room transaction; committed state is re-read before applying it so
+edits/deletions during validation cannot publish stale state. Missing selection on `NEW_CONFIG` stops the owned
+runtime; explicit live apply rejects it without stopping the last applied session. A partially committed, cancelled
+refresh batch still schedules one conditional reconciliation; that command cannot start an inactive VPN or undo STOP.
 
 Foreground promotion for explicit START/RESTART happens on Android's main thread before consulting native state.
 Native teardown runs on the command dispatcher; its successful completion returns to the main thread before STOP
@@ -277,6 +340,185 @@ is acknowledged. A start-generation guard rejects stale teardown, and `stopSelfR
 start ID against ActivityManager's pending requests. Foreground is removed only when the stop is accepted, so a
 START already queued in Android cannot be demoted or stopped by an older command. An idle STATUS/NETWORK_UPDATE
 can finish a deferred stop; a refused native join retains its descriptor, core and foreground notification.
+
+### Live Routing
+
+**Routing → Live Routing** edits one persisted plan of cross-subscription proxy groups, a default-group choice and
+ordered app/domain rules; see [user configuration and limitations](../README.md#live-routing). The compiler composes
+namespaced outbound graphs, not independent full profiles. The special **Connect → Live Routing** group persists
+`LiveRoutingHelper.CONNECTION_PROFILE_ID` (`-1`) as the selected connection, without adding a Room profile or source.
+Only `selectedProfile == LiveRoutingHelper.CONNECTION_PROFILE_ID` reads and compiles the saved Live Routing plan.
+Ordinary profile connections use the selected profile with global/Core Routing settings and never read, validate
+or apply Live Routing groups or rules. Only positive profile IDs are checked against Room for ordinary selection
+invalidation. The main screen observes saved plan changes, preserves this selection across recreation and retains
+lazy subscription rows and reordering.
+
+Core Routing and Live Routing share `RoutingReorderState`: stable-key preview order, `animateItem` neighbour
+placement and one draft commit on drop. Expanded bodies compact during dragging and restore without height
+transitions. The final viewport anchor is requested in a composition `SideEffect`, after bodies/order are restored;
+requesting it from the pointer callback can remeasure old compact contents and briefly discard the active row.
+Absolute viewport-top compensation then spring-settles any legitimate list-end clamping. Cancellation and
+busy/key changes restore authoritative order without committing stale indices. Live header presses share a
+rounded whole-card indication source; fields and switches remain independently interactive.
+
+`CoreRoutingReorderTest` checks preview/cancel/busy semantics and unequal-height release frames;
+`LiveRoutingEditorInteractionTest` exercises actual expanded-group drops and rule cancellation/section boundaries.
+
+
+Live Routing connections start from global runtime settings, never an arbitrary member's full configuration.
+`defaultGroupId` is optional in the plan: absent/null uses the first group; an explicit missing ID is rejected.
+At least one group is required for a Live Routing connection. The default group's Select/Random/round-robin strategy
+handles the final fallback, live **Default route** targets and Core Routing/DNS proxy destinations. Core direct/block
+rules retain precedence over the fallback. All members stay loaded for default/member/strategy changes. The first
+enabled matching live rule precedes Core Routing; app and domain fields are ANDed, with OR within each list.
+Missing members or unsupported graphs reject Live Routing start/apply, never silently substitute a profile. They do
+not block ordinary profile connections, which remain usable without editing or deleting the saved plan.
+These changes do not alter the Room schema.
+
+Save validates/persists the local plan and dispatches `APPLY_ROUTING` only for an active Live Routing session,
+never an ordinary profile session. Persistence and runtime acceptance are distinct: errors are surfaced through
+Connect and retain the previous runtime. The service requires unchanged shared core/platform settings, validates
+in the isolated worker, re-reads committed state and
+then calls the native atomic update. New flows use the accepted rules; existing streams keep their handlers, with
+no core/TUN restart or selected-profile change. Incompatible settings, observed-handler changes or the native
+512-version retention budget require an explicit reconnect, never an automatic one.
+
+App criteria require Android 10+ VPN owner lookup and authenticated SOCKS identities. Shared UIDs are indistinguishable,
+unknown owners do not app-match, and Apps Routing exclusions bypass these rules. Domain-only rules also work in
+SOCKS-only mode. Root transparent mode rejects the Live Routing connection explicitly; a saved plan does not affect
+ordinary root connections. Availability checks remain an optional per-group filter for Select/Random/round robin;
+LeastPing requires them. Existing observatory-based native balancers retain their separate compatibility limits in
+[the native contract](NATIVE.md#live-routing-candidate-2026-11-01).
+
+`checkAvailability` is a strict optional boolean, default false. LeastPing without it is invalid; the editor enables it
+when choosing that strategy. Health-enabled Select follows configured priority; Random/round robin include every
+eligible member. LeastPing selects one eligible member with the lowest last successful nonnegative delay, breaking
+ties in configured order. One transient failure retains its successful latency while existing hysteresis decides eligibility.
+The compiler loads all member graphs, emits startup-blackhole balancers and `_yaxcLiveHealth` metadata, and uses the
+same group target for rules, independent defaults, Default route and Core Routing proxy targets.
+
+`Settings.liveRoutingHealthIntervalSeconds` is persisted separately from the plan, defaults to 10 and supports 5–3600.
+The Basic settings Live Routing section validates before writing any settings and retains unsaved input across recreation.
+Ping Address/interval changes hot-apply for health-enabled Live Routing sessions; metadata is excluded from restart
+keys. The compiler emits integer `intervalSeconds`; the strict native parser rejects invalid values before runtime
+publication. Native options
+are immutable per plan; an accepted interval update reschedules from each last probe start without canceling matching probes.
+
+The native controller reuses Observatory exact-outbound HTTP GET/2xx with bounded cancellation, not direct TCP probes.
+Starts are immediate, then per configured interval when one of four workers is available, with a fixed 5s timeout.
+Initial success admits, two failures remove, three successes restore; observations expire at `3 * interval + timeout`.
+At the default interval, unqueued detection/recovery is about 10–25s/20–35s, plus up to 1s UI polling.
+Controller error/no eligible member chooses an explicit blackhole. Health transitions only publish candidates:
+no Xray/TUN restart, request retry or established-flow migration.
+
+The editor's **?** action beside Save opens the bilingual guide rather than occupying the main list. Runtime labels
+require a matching saved group and source fingerprints. Source reordering preserves logical profile IDs; deleted or
+ambiguously changed members remain missing instead of being reassigned. Manual refresh can hot-apply immediately,
+so stop first when inspection must precede use. Missing members/invalid graphs remain validation failures, not
+network-health states; a rejected candidate can leave Room newer than the runtime.
+
+With JDK 21 and matching native artifacts, run targeted host regressions (choose the ABI matching the artifacts):
+Prepare the router geodata fixture using the commands in [CI and releases](#ci-and-releases) before the Go checks.
+
+```bash
+./gradlew -PabiTarget=x86_64 :app:testDebugUnitTest \
+  --tests 'io.github.derundevu.yaxc.helper.LiveRoutingHelperTest' \
+  --tests 'io.github.derundevu.yaxc.viewmodel.LiveRoutingViewModelTest' \
+  --tests 'io.github.derundevu.yaxc.presentation.main.MainScreenRoomTest' \
+  --tests 'io.github.derundevu.yaxc.service.TProxyServiceLifecycleTest'
+(cd XrayCore && GOTOOLCHAIN=go1.27.3 go test -mod=readonly -race -count=1 -timeout=240s . ./lib)
+(cd XrayCore && GOTOOLCHAIN=go1.27.3 go test -mod=readonly -race -count=1 -timeout=240s \
+  github.com/xtls/xray-core/app/observatory github.com/xtls/xray-core/app/router \
+  github.com/xtls/xray-core/app/proxyman/outbound github.com/xtls/xray-core/proxy/socks \
+  github.com/xtls/xray-core/core github.com/xtls/xray-core/common/session \
+  github.com/xtls/xray-core/transport/internet github.com/xtls/xray-core/transport/internet/tls \
+  github.com/xtls/xray-core/transport/internet/splithttp)
+(cd XrayCore && GOTOOLCHAIN=go1.27.3 go test -mod=readonly -count=1 -timeout=90s \
+  github.com/xtls/libxray/nodep github.com/xtls/libxray/share)
+```
+
+For device coverage, rebuild the matching x86_64 AAR/JNI and regression APKs using the isolated commands above.
+Add `-e class io.github.derundevu.yaxc.VpnDeviceIntegrationTest` to the instrumentation invocation to target VPN
+ownership/live-flow cases; require the final all-passing result, not merely installation or shell success.
+`LiveRoutingAvailabilityIntegrationTest` adds production-cadence synthetic-peer VPN scenarios: startup backup,
+failure/recovery thresholds, all-down isolation, same-ID endpoint replacement, least-ping winner changes and supported
+5→8-second interval hot apply. Exact response recipients, retained framed TCP and unchanged TUN are checked across
+independent/default/rule/Core Routing proxy targets. Fixtures restore only their own state and reject an existing emulator
+VPN. Native regressions also exercise 3600→5→3600 intervals, expiry, in-flight retention, tie priority, concurrency,
+cancellation and continuous new traffic during healthy hot applies.
+
+The 2026-11-06 JDK 21/all-ABI check passed **414 JVM tests**, with no failures/errors/skips.
+Debug lint reported **0 errors, 141 warnings, 2 hints**. Current facade/library Go race tests passed.
+Five API 36 x86_64 / 4 KB scenarios exercised HTTP identity updates, actual Russian settings/strategy UI,
+draft recreation/invalid bounds, real least-ping recipients, live intervals, retained TCP and unchanged TUN.
+Release lint and physical/root/16 KB runtime verification were not rerun for these changes.
+The ViewModel fixture cancels its recurring poller inside the test body before virtual-time auto-drain; `@After`
+alone is too late for an independently owned recurring coroutine.
+
+Historical published .31 migration verification (predating the current routing changes): source-matched AAR/helpers
+and debug/regression/unsigned-release APKs covered all four ABIs.
+Go race gates include facade/library, wrapper, Observatory, router, outbound, core/protocol, TLS/XHTTP,
+configuration, sniffing and geodata. Automatic synthetic peers must not block on an undrained probe-event queue;
+manual probe events remain reliable. The full library suite retains continuous traffic through 200 hot applies.
+Final API 35 x86_64 guests at measured **4096** and **16384** byte pages each passed **28/28** cases.
+An actual-activity smoke displayed **26.10.31** and navigated Routing → Live Routing → Help → Back.
+Local emulator 37.2.13 is not the CI-pinned 36.6.11. Fifteen APKs passed ABI/helper/version and ZIP alignment checks;
+release outputs are unsigned, not production-signing proof. See the [published source pins](NATIVE.md#sources-and-versions).
+
+Earlier .29 coverage on an isolated API 36 x86_64 / 4 KB emulator passed **1/1 disposable actual-activity scenario**, covering
+all four explicit theme presets, Help navigation, persisted primary/backup order, actual backup versus preferred
+primary, checking/all-down states, an exact response from that backup, and lazy scrolling to member **1003**.
+Russian editor/Help rendering was separately checked through actual main-tab navigation with app-scoped locales.
+The driver source was removed and the cleaned instrumentation APK rebuilt and installed.
+
+`TunOwnerPolicyIntegrationTest` uses `run-as` with the separately installed test APK's regular application UID,
+not the privileged shell UID. Its test-only manifest grants INTERNET so that UID can own real TCP/UDP sockets.
+A minimal real VPN, with no default route or DNS, makes ownership visible under
+[Android's owner-lookup visibility rules](https://android.googlesource.com/platform/packages/modules/Connectivity/+/refs/heads/main/service/src/com/android/server/ConnectivityService.java#12979).
+The test verifies the actual Binder UID before invoking production admission/identity callbacks; exclusion and
+defense-disabled controls run with SOCKS authentication both off and on. An absent non-DNS tuple is rejected and
+the existing DoT bootstrap exception is retained. This is **callback policy evidence**, not a native forged-packet
+test; kernel app exclusion cannot stand in for admission denial. Package replacement/UID reuse remains unverified.
+
+Hosted clean-checkout CI passed on `518e3a9`, including native regressions and both emulator page-size jobs.
+Physical .31 ARM/ARM64 VPN/Live Routing and root verification remain unestablished.
+
+### Connection analytics
+
+The large main connection card opens an in-host full-screen destination; separate ping/Info actions and the compact
+bottom control remain. `ConnectionAnalyticsViewModel` gates grouping/formatting on visibility, while the process-owned
+`ConnectionRepository` continues capturing independently of Activities. Lists use flat, stable-key lazy rows, not
+whole groups in one item. App keys include the UID/package set; known config keys use captured ID/fingerprint.
+Captured names stay on each row; header labels cannot create duplicate keys or overwrite historical identities.
+
+The service starts the IO reader only after actual native start, supplies final snapshots on stop, and marks external
+root capture unavailable. Runtime generations reject late polls; core reload cannot overwrite the final old snapshot.
+Package updates ingest outstanding history under the old mapping before adopting a new one. Reused/shared-changing
+UIDs remain unknown for the process; admission uncertainty is metadata only and cannot change app-routing matching.
+Profile names come from immutable native route bindings, never a current-profile lookup or a fallback display-name map.
+
+`Settings.connectionHistoryOnDisk` defaults false. `connection-history.json` is an AtomicFile in `noBackupFilesDir`,
+with at most 5,000 records / 8 MiB and a 24-hour closed-row TTL. Checkpoints are coalesced to five-second cadence plus
+stop/preference boundaries. Restored active rows become interrupted/incomplete. Disabling deletes only this owned
+file/backups and retains memory. Clear removes only finished records in native/memory/disk history. There is no Room
+migration, payload/access-log journal, credential export or per-packet capture. Native buffer evictions and local drops
+are explicit; totals are for retained filtered data, not an estimate of omitted connections.
+
+Focused source-matched emulator scenario:
+
+```bash
+./tools/android-emulator.sh adb tablet shell am instrument -w -r \
+  -e allowVpn true -e expectedPageSize 4096 \
+  -e class io.github.derundevu.yaxc.VpnDeviceIntegrationTest#connectionAnalyticsTracksRealAppAndConfigAcrossLiveRoutingTcpUdpAndActualScreen \
+  io.github.derundevu.yaxc.regression.test/io.github.derundevu.yaxc.testing.RegressionTestRunner
+```
+
+This exercises real shell-UID TCP/UDP, retained old members through live selection/default changes, exact final
+payload counters and the actual Activity's two grouping/filter/back surfaces. Ordinary no-auth coverage asserts
+unknown ownership rather than guessing an app. `TunOwnerPolicyIntegrationTest` checks that stale shared-membership
+analytics does not change the real UID returned to routing. Repository/presentation regressions cover late polls,
+UID reuse, delayed route identity, cap/TTL/clear/restore and opt-in/private persistence. Obtain current full-suite and
+4 KB/16 KB evidence from `PROJECT_STATE.md`; physical devices, root and battery/performance profiling are separate gates.
 
 ### Connection failure recovery
 
@@ -343,6 +585,35 @@ error on line 182 and selected its exact offset. The automatic valid status and 
 The temporary instrumentation was not a permanent suite; no Save, profile/subscription replacement or VPN/root toggle
 was exercised. These checks do not establish process-death recovery, all IMEs/font scales or native routing correctness.
 
+### Runtime log viewer
+
+`LogsActivity` uses a ViewModel-owned reader and a stable-key lazy list, not one ever-growing text node.
+Normal mode reads only the app's UID from logcat, including VPN/helper tags previously excluded; it does not
+request access to other apps' logs. Transparent-proxy mode follows only the existing core log file, without
+root commands or runtime changes. Missing files wait for appearance; append, truncation and replacement are handled.
+Initial history is the last 500 lines (also bounded to 256 KiB for file input). Closing the screen cancels and
+reaps its owned logcat process; Activity recreation retains the reader, filters, pause and reading position.
+
+History retains at most 5,000 physical rows and 4 MiB of UTF-8 raw text, including newlines; oldest rows are evicted.
+An oversized physical row is visibly truncated around 16,384 UTF-16 characters without splitting a surrogate pair.
+Parsing and case-insensitive literal search run off Main. Level/source filters are exact, and unrecognized rows
+remain visible as unknown-level entries. Explicit native severity inside GoLog takes precedence over its Android
+priority. Pause freezes the displayed snapshot while bounded collection continues; resume shows current history.
+Scrolling into history disables follow, while “To latest” restores it. Clearing affects only local viewer history,
+never global logcat buffers or runtime files. No access-log journal, native verbosity change or persistent log store.
+
+Copy supports one row or the displayed filtered selection. Selections above 128 Ki UTF-16 characters are rejected
+with an export hint rather than truncated or sent as an oversized Binder payload. Document export writes UTF-8
+through Android's system picker and retains the selected snapshot while the picker is open. Logs are not redacted;
+review them before sharing. Clipboard previews are marked sensitive on Android 13+.
+
+`RuntimeLogReaderTest`, `LogHistoryTest` and `LogsViewModelTest` cover blocked-read cancellation/reaping, bounded
+framing, UTF-8, file lifecycle, parser precedence, pause/clear/search and export snapshots. API 36 x86_64 smoke
+exercised actual own-UID logs from four source classes, combined filters, pause/copy, system document export,
+1,000-row scroll/recreation, a 6,200-row bounded stream, clipboard overflow rejection and local-only clearing.
+The exported file contained exactly the captured filtered row; screen close left no owned logcat process.
+Actual Android temporary-file following passed without enabling root mode. Disposable smoke code is not retained.
+
 ### Large subscription lists and ping
 
 Subscription headers, profile rows and footers are separately keyed items in one `LazyColumn`. A viewport-sized
@@ -355,18 +626,36 @@ not on each ping result. Index normalization reads the current global order and 
 transaction; collectors await it instead of launching overlapping per-row update jobs.
 
 Ping uses five non-exported worker processes because Xray has process-global dialer/logger state. Each process
-runs one core; a batch uses at most five coroutine loops, not one coroutine per profile. The bounded worker pool
-also limits concurrent helper callers. Cancellation retains its slot/config/binding until native teardown;
-cancelled queued acquisition returns any undelivered slot. Pings never switch the selected profile or reload the VPN,
-and operation IDs reject stale results/completion. Rebuild the AAR only after native source changes;
-see [native contracts](NATIVE.md#ping-worker).
+runs one core. A Main-thread scheduler in `MainViewModel` admits work before launching a coroutine: at most five
+active measurements, at most one standalone single, and ten waiting distinct single requests. With no singles,
+a batch can use all five slots. A single takes the next free slot without cancelling active batch probes;
+other slots remain available to the batch. A full single queue produces localized feedback instead of another job.
+Duplicate queued/in-flight requests share one measurement. A queued batch member requested individually is
+promoted to single priority; its one result also advances batch progress. Remeasuring an already completed member
+does not advance progress twice. Repeating the same active batch is a no-op; a different batch replaces only
+waiting batch work, preserving admitted singles and active native ownership.
+
+The ViewModel retains work across Activity recreation. Clearing it cancels active calls; cancellation retains
+each slot/config/binding until native teardown, and cancelled queued acquisition returns any undelivered slot.
+Deleted active profiles keep their reservation until completion but cannot reappear through late results.
+The helper's shared worker pool also bounds direct callers. Pings never switch the selected profile or reload
+the VPN; request IDs reject duplicate/stale completions. No native source change is needed for this scheduler;
+rebuild the AAR only after native source changes. See [native contracts](NATIVE.md#ping-worker).
+
+`MainPingTrackerTest` covers floods, promotion, shared measurements, independent progress, replacement,
+deletion and stale completions. An API 36 x86_64/4096-byte-page runtime smoke exercised the actual Activity,
+Room and native workers: 1,500 ping actions produced 17 unique measurements, ten waiting singles and a peak of
+five probes/one standalone single. A malformed HTTP response settled as an error without stalling the queue.
+Activity recreation retained in-flight probes; closing the screen with five held requests closed their peers,
+removed temporary configs and allowed all five slots to be reused. Russian queue feedback, concurrent batch
+progress and settled delay screenshots were inspected. Disposable smoke sources and fixtures were removed.
 
 Native regressions, using this checkout's local forks:
 
 ```bash
-(cd XrayCore && go test -mod=readonly -count=1 -timeout=90s ./...)
-(cd XrayCore && go test -mod=readonly -race -count=1 -timeout=90s .)
-(cd XrayCore && go test -mod=readonly -count=1 -timeout=30s github.com/xtls/libxray/nodep)
+(cd XrayCore && go test -mod=readonly -count=1 -timeout=240s ./...)
+(cd XrayCore && go test -mod=readonly -race -count=1 -timeout=240s . ./lib)
+(cd XrayCore && go test -mod=readonly -count=1 -timeout=90s github.com/xtls/libxray/nodep github.com/xtls/libxray/share)
 ```
 
 For repeated randomized native teardown/cancellation checks with the race detector:
@@ -385,9 +674,8 @@ actual 16 KB-device loading is not established. The available device reports 409
 
 Historical 1.4.0 migration artifacts and source/toolchain/hash provenance remain under
 `app/build/migration-20261029/` (ignored); do not relabel those APKs as 1.5.0.
-The current **1.5.3 / Xray 26.10.29** release procedure is above. Published notes through 1.5.2 are unchanged.
-The fork commits and parent gitlinks are already recorded in `9d86576`. Review/publish the new release files
-and require hosted CI for that parent revision. Local verification is not release signing, tagging or publication.
+The published **1.5.3 / Xray 26.10.31** baseline source pins and release are described in
+[Native dependencies](NATIVE.md#sources-and-versions). Hosted CI on `518e3a9` does not cover later local changes.
 
 These commands exercise the public app facade and local HTTP/SOCKS targets, not a device VPN. The facade suite
 must remain non-parallel because core dialer/logger/environment state is process-global.
