@@ -290,7 +290,7 @@ func bindInitialHealth(server *core.Instance, config *core.Config, plan *healthP
 		if err != nil {
 			return err
 		}
-		return runtimeRouter.ReloadRulesWithCandidates(value.(*router.Config), "", plan.managedCandidates())
+		return runtimeRouter.ReloadRulesWithCandidates(value.(*router.Config), "", plan.managedCandidates(), nil)
 	}
 	return errors.New("managed availability requires routing configuration")
 }

@@ -29,6 +29,7 @@ import io.github.derundevu.yaxc.activity.MainActivity
 import io.github.derundevu.yaxc.database.YaxcDatabase
 import io.github.derundevu.yaxc.dto.XrayConfig
 import io.github.derundevu.yaxc.helper.ConfigHelper
+import io.github.derundevu.yaxc.helper.ConnectionConfigHelper
 import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.helper.ConnectionFailure
 import io.github.derundevu.yaxc.helper.ConnectionFailureState
@@ -139,6 +140,7 @@ class TProxyService : VpnService() {
     private var tunDevice: ParcelFileDescriptor? = null
     private var cellularCallback: ConnectivityManager.NetworkCallback? = null
     private val tunOwnerPolicyCache = linkedMapOf<Int, Boolean>()
+    private val uncertainConnectionUids = mutableSetOf<Int>()
     private var activeMode: RuntimeMode? = null
     private var activeConfig: RuntimeSnapshot? = null
     @Volatile
@@ -146,15 +148,35 @@ class TProxyService : VpnService() {
     @Volatile
     private var runtimeOptions: RuntimeOptions? = null
     @Volatile
-    private var tunIdentityPackages: Map<String, Int> = emptyMap()
+    private var tunIdentityPackages: Map<Int, Set<String>> = emptyMap()
+    private var connectionIdentityPackages: Map<String, Int> = emptyMap()
+    private var connectionCapturedPackages: Map<String, Int> = emptyMap()
 
-    private data class RuntimeSnapshot(
+    private class RuntimeSnapshot(
         val text: String,
         val options: RuntimeOptions,
         val restartKey: String,
         val identityPackages: Map<String, Int>,
+    ) {
+        val uidPackages: Map<Int, Set<String>> = identityPackages.entries.groupBy { it.value }
+            .mapValues { (_, apps) -> apps.mapTo(mutableSetOf()) { it.key } }
+        private val comparableText = ConnectionConfigHelper.runtimeComparison(text)
+
+        override fun equals(other: Any?): Boolean = other is RuntimeSnapshot &&
+            comparableText == other.comparableText && options == other.options &&
+            restartKey == other.restartKey && identityPackages == other.identityPackages
+
+        override fun hashCode(): Int {
+            var hash = comparableText.hashCode()
+            hash = 31 * hash + options.hashCode()
+            hash = 31 * hash + restartKey.hashCode()
+            return 31 * hash + identityPackages.hashCode()
+        }
+    }
+    private data class ConfigCandidate(
+        val name: String,
+        val snapshot: RuntimeSnapshot,
     )
-    private data class ConfigCandidate(val name: String, val snapshot: RuntimeSnapshot)
 
     /** Only the platform/native boundary is replaceable; command ownership stays in the service. */
     internal interface RuntimeBoundary {
@@ -176,15 +198,39 @@ class TProxyService : VpnService() {
         override fun startCore(config: XrayConfig, transparent: Boolean) {
             if (transparent) {
                 transparentProxyHelper.startService(checkNotNull(runtimeOptions?.transparent))
+                Yaxc::class.cast(application).connectionRepository.unsupportedRuntime()
             } else {
                 val diagnostic = XrayCore.start(config.dir, config.file)
                 check(diagnostic.isEmpty()) { diagnostic }
+                Yaxc::class.cast(application).connectionRepository.startRuntime(
+                    connectionIdentityPackages,
+                    XrayCore::connectionSnapshot,
+                    XrayCore::clearConnectionHistory,
+                )
+                connectionCapturedPackages = connectionIdentityPackages
             }
         }
         override fun stopCore(transparent: Boolean) {
-            if (transparent) transparentProxyHelper.stopService() else XrayCore.stop()
+            if (transparent) {
+                transparentProxyHelper.stopService()
+                Yaxc::class.cast(application).connectionRepository.endRuntime(null)
+            } else {
+                XrayCore.stop()
+                Yaxc::class.cast(application).connectionRepository.endRuntime(XrayCore.connectionSnapshot())
+            }
         }
-        override fun applyRouting(config: String) = XrayCore.applyRouting(config)
+        override fun applyRouting(config: String): String {
+            val changedPackages = connectionCapturedPackages != connectionIdentityPackages
+            val preceding = if (changedPackages) XrayCore.connectionSnapshot() else null
+            val diagnostic = XrayCore.applyRouting(config)
+            if (diagnostic.isEmpty()) {
+                if (changedPackages) {
+                    Yaxc::class.cast(application).connectionRepository.updatePackages(connectionIdentityPackages, preceding)
+                    connectionCapturedPackages = connectionIdentityPackages
+                }
+            }
+            return diagnostic
+        }
         override fun establish(builder: Builder) = builder.establish()
         override fun startTunnel(configPath: String, fd: Int): Boolean {
             NativeLibrary.ensureLoaded()
@@ -318,32 +364,42 @@ class TProxyService : VpnService() {
                     profileRepository.find(selected)
                 } else null
                 val candidate = if (standalone || profile != null) {
+                    if (action == APPLY_ROUTING_SERVICE_ACTION_NAME && !standalone) {
+                        broadcastStatus()
+                        return@withTransaction true
+                    }
                     val options = RuntimeOptions.capture(settings, applicationContext.packageName)
-                    val plan = LiveRoutingHelper.decode(settings.liveRoutingPlan)
-                    check(options.mode != RuntimeMode.TRANSPARENT || (!standalone && plan.groups.isEmpty() && plan.rules.isEmpty())) {
-                        "Live proxy groups are unavailable in root mode. Use VPN or SOCKS mode."
-                    }
-                    check(plan.rules.none { rule -> rule.enabled && rule.packages.isNotEmpty() } ||
-                        (options.mode == RuntimeMode.TUN && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)) {
-                        "Application rules require VPN mode on Android 10 or newer."
-                    }
-                    val profiles = plan.groups.flatMap { group -> group.profileIds }.distinct()
-                        .mapNotNull { id ->
-                            if (database.profileDao().indexOf(id) == null) null
-                            else id to profileRepository.find(id)
-                        }.toMap()
                     val packageUids = if (options.mode == RuntimeMode.TUN && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         packageManager.getInstalledApplications(0).associate { app -> app.packageName to app.uid }
                     } else emptyMap()
-                    // Independent routing owns global runtime settings, never a member's
-                    // listeners, DNS, policy or routing. Only outbound graphs come from members.
+                    // Ordinary profiles use only their own config and the shared Core Routing settings.
+                    // A saved Live Routing plan must not affect or prevent their connection.
                     val base = ConfigHelper(settings, configRepository.get(), profile?.config ?: "{}").toString()
-                    val text = if (options.mode == RuntimeMode.TRANSPARENT) base else LiveRoutingHelper.compile(
-                        base, plan, profiles, packageUids, settings.socksUsername.trim(), settings.socksPassword.trim(),
-                        standalone = standalone,
-                        pingAddress = settings.pingAddress.trim(),
-                        healthIntervalSeconds = settings.liveRoutingHealthIntervalSeconds,
-                    )
+                    val text = if (standalone) {
+                        check(options.mode != RuntimeMode.TRANSPARENT) {
+                            "Live proxy groups are unavailable in root mode. Use VPN or SOCKS mode."
+                        }
+                        val plan = LiveRoutingHelper.decode(settings.liveRoutingPlan)
+                        check(plan.rules.none { rule -> rule.enabled && rule.packages.isNotEmpty() } ||
+                            (options.mode == RuntimeMode.TUN && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)) {
+                            "Application rules require VPN mode on Android 10 or newer."
+                        }
+                        val profiles = plan.groups.flatMap { group -> group.profileIds }.distinct()
+                            .mapNotNull { id ->
+                                if (database.profileDao().indexOf(id) == null) null
+                                else id to profileRepository.find(id)
+                            }.toMap()
+                        // Only outbound graphs come from members, never their global runtime settings.
+                        LiveRoutingHelper.compile(
+                            base, plan, profiles, packageUids, settings.socksUsername.trim(), settings.socksPassword.trim(),
+                            pingAddress = settings.pingAddress.trim(),
+                            healthIntervalSeconds = settings.liveRoutingHealthIntervalSeconds,
+                        )
+                    } else {
+                        if (options.mode == RuntimeMode.TRANSPARENT) base else ConnectionConfigHelper.ordinary(
+                            base, checkNotNull(profile), packageUids, settings.socksUsername.trim(), settings.socksPassword.trim(),
+                        )
+                    }
                     ConfigCandidate(
                         if (standalone) getString(R.string.liveRouting) else checkNotNull(profile).name,
                         RuntimeSnapshot(text, options, restartKey(base), packageUids),
@@ -422,6 +478,7 @@ class TProxyService : VpnService() {
         val root = JSONObject(text)
         root.remove("outbounds")
         root.remove("_yaxcLiveHealth")
+        root.remove(ConnectionConfigHelper.PROFILE_METADATA_KEY)
         root.optJSONObject("routing")?.let { routing ->
             routing.remove("rules")
             routing.remove("balancers")
@@ -431,12 +488,13 @@ class TProxyService : VpnService() {
 
     private fun applyCandidate(action: String, candidate: ConfigCandidate, context: CoroutineContext) {
         val snapshot = candidate.snapshot
+        connectionIdentityPackages = snapshot.identityPackages
         if (isConditionalUpdate(action) && canApplyRouting(snapshot)) {
             val diagnostic = runtime.applyRouting(snapshot.text)
             check(diagnostic.isEmpty()) { diagnostic }
             // Publish only after the native routing snapshot commits. Never restart on rejection.
             activeConfig = snapshot
-            tunIdentityPackages = snapshot.identityPackages
+            tunIdentityPackages = snapshot.uidPackages
             activeProfileName = candidate.name
             writeConfig(snapshot)
             ConnectionFailureState.clear()
@@ -454,7 +512,7 @@ class TProxyService : VpnService() {
                 runtime.startCore(writeConfig(snapshot), transparent)
                 context.ensureActive()
                 activeConfig = snapshot
-                tunIdentityPackages = snapshot.identityPackages
+                tunIdentityPackages = snapshot.uidPackages
                 activeProfileName = candidate.name
                 notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(candidate.name))
                 broadcastStart(NEW_CONFIG_SERVICE_ACTION_NAME, candidate.name)
@@ -473,7 +531,7 @@ class TProxyService : VpnService() {
         val config = writeConfig(snapshot)
         activeMode = snapshot.options.mode
         runtimeOptions = snapshot.options
-        tunIdentityPackages = snapshot.identityPackages
+        tunIdentityPackages = snapshot.uidPackages
         try {
             runtime.startCore(config, activeMode == RuntimeMode.TRANSPARENT)
             context.ensureActive()
@@ -720,9 +778,16 @@ class TProxyService : VpnService() {
             )
         }.getOrDefault(Process.INVALID_UID)
         // UIDs can be reused after uninstall. Never lend a removed app's identity to its replacement.
-        val expected = tunIdentityPackages
+        val expected = tunIdentityPackages[uid] ?: return Process.INVALID_UID
         val stillInstalled = runCatching {
-            packageManager.getPackagesForUid(uid)?.any { expected[it] == uid } == true
+            val current = packageManager.getPackagesForUid(uid) ?: return@runCatching false
+            if ((current.size != expected.size || !current.all { it in expected }) &&
+                synchronized(tunOwnerPolicyCache) { uncertainConnectionUids.add(uid) }) {
+                (applicationContext as Yaxc).connectionRepository.invalidateUid(uid)
+            }
+            // Keep the existing UID-based routing semantics. Analytics uncertainty
+            // must never make a previously matched app rule fall through.
+            current.any { it in expected }
         }.getOrDefault(false)
         return if (stillInstalled) uid else Process.INVALID_UID
     }

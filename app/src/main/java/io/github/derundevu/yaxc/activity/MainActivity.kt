@@ -51,6 +51,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessage
 import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
+import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity() {
     private val appUpdateManager by lazy { AppUpdateManager(applicationContext, settings) }
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val mainViewModel: MainViewModel by viewModels()
+    private val connectionAnalyticsViewModel: ConnectionAnalyticsViewModel by viewModels()
     private var subscriptionRefreshJob: Job? = null
     private val feedback = YaxcFeedbackState()
     private var linksOperationActive = false
@@ -144,6 +146,7 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             val uiState = mainViewModel.uiState.collectAsStateWithLifecycle().value
+            val connectionAnalytics = connectionAnalyticsViewModel.uiState.collectAsStateWithLifecycle().value
             YaxcAppTheme(feedback = feedback) {
                 MainScreen(
                     tabs = uiState.tabs,
@@ -177,6 +180,12 @@ class MainActivity : AppCompatActivity() {
                     onCheckAppUpdate = ::checkAppUpdate,
                     onDownloadAppUpdate = ::downloadAppUpdate,
                     onInstallAppUpdate = ::installAppUpdate,
+                    connectionAnalytics = connectionAnalytics,
+                    onConnectionGrouping = connectionAnalyticsViewModel::setGrouping,
+                    onConnectionFilter = connectionAnalyticsViewModel::setFilter,
+                    onConnectionPersistence = connectionAnalyticsViewModel::setPersistence,
+                    onClearConnectionHistory = connectionAnalyticsViewModel::clearHistory,
+                    onConnectionAnalyticsVisibility = connectionAnalyticsViewModel::setVisible,
                     onAction = mainViewModel::onAction,
                 )
                 MainDialogs()

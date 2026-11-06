@@ -31,6 +31,7 @@ import (
 // closed safely until Stop: Xray has no general per-handler flow-drain primitive.
 // Bound retained *real* versions, not rule-only updates or zero-resource aliases.
 const maxLiveOutboundVersions = 512
+const maxConnectionIdentityAliases = 4096
 
 var routingState *liveRoutingState
 
@@ -44,13 +45,15 @@ type liveOutbound struct {
 }
 
 type liveRoutingState struct {
-	config     map[string]any
-	outbounds  map[string]*liveOutbound
-	originals  map[string]bool
-	prefix     string
-	generation uint64
-	retained   int
-	health     *liveHealth
+	config            map[string]any
+	outbounds         map[string]*liveOutbound
+	originals         map[string]bool
+	prefix            string
+	generation        uint64
+	retained          int
+	health            *liveHealth
+	connections       *connectionLedger
+	connectionAliases int
 }
 
 // A unique alias makes balancer prefix selection exact, including when logical
@@ -173,7 +176,8 @@ func newRoutingState(document map[string]any, server *core.Instance, config *cor
 func staticRoutingDocument(document map[string]any) map[string]any {
 	result := make(map[string]any, len(document))
 	for key, value := range document {
-		if key != "routing" && key != "outbounds" && key != "inbounds" && key != liveHealthMetadata {
+		if key != "routing" && key != "outbounds" && key != "inbounds" &&
+			key != liveHealthMetadata && key != connectionMetadataKey {
 			result[key] = value
 		}
 	}
@@ -480,6 +484,14 @@ func ApplyRouting(configText string) error {
 	if err != nil {
 		return err
 	}
+	profiles, err := connectionProfiles(document)
+	if err != nil {
+		return err
+	}
+	oldProfiles, err := connectionProfiles(state.config)
+	if err != nil {
+		return err
+	}
 	entries := make(map[string]*liveOutbound, len(ordered))
 	for _, entry := range ordered {
 		if strings.HasPrefix(entry.key, state.prefix) {
@@ -521,6 +533,7 @@ func ApplyRouting(configText string) error {
 		return nil
 	}
 	newVersions := 0
+	newIdentityAliases := 0
 	for i, entry := range ordered {
 		if err := inspect(entry.key); err != nil {
 			return err
@@ -530,15 +543,21 @@ func ApplyRouting(configText string) error {
 			entry.original = old.original
 			entry.version = old.version
 		}
-		if !changed[entry.key] && old.physical != "" {
+		identityChanged := oldProfiles[entry.key] != profiles[entry.key]
+		if !changed[entry.key] && old.physical != "" && !identityChanged {
 			entry.physical, entry.handler = old.physical, old.handler
 		} else {
 			entry.physical = state.prefix + strconv.FormatUint(state.generation+1, 10) + "." + strconv.Itoa(i) + "."
 			if changed[entry.key] {
 				newVersions++
 				entry.version = entry.physical
+			} else if identityChanged {
+				newIdentityAliases++
 			}
 		}
+	}
+	if state.connectionAliases+newIdentityAliases > maxConnectionIdentityAliases {
+		return errors.New("connection identity retention limit reached; reconnect explicitly")
 	}
 	if newVersions > 0 && state.retained+newVersions > maxLiveOutboundVersions {
 		return errors.New("live outbound retention limit reached; restart explicitly to release retired connections")
@@ -559,7 +578,11 @@ func ApplyRouting(configText string) error {
 		}
 	}()
 	var staged []outbound.Handler
+	var stagedConnectionTags []string
 	rollback := func(cause error) error {
+		if state.connections != nil {
+			state.connections.discardProfiles(stagedConnectionTags)
+		}
 		for i := len(staged) - 1; i >= 0; i-- {
 			handler := staged[i]
 			cause = errors.Join(cause, manager.RemoveHandler(context.Background(), handler.Tag()), handler.Close())
@@ -612,13 +635,22 @@ func ApplyRouting(configText string) error {
 	if !ok {
 		return rollback(errors.New("running router does not support live replacement"))
 	}
+	// Old routers keep their old physical tags. Publish identities first, then
+	// routes, so a hot apply cannot relabel an in-flight routing decision.
+	if state.connections != nil {
+		stagedConnectionTags = state.connections.publishProfiles(profiles, entries)
+	}
 	// Populate staged sources and publish their router under the same observation
 	// lock. No healthy rules-only update exposes an empty or stale candidate set.
 	if health != nil {
 		health.mu.Lock()
 		health.publishPlanLocked(healthPlan, time.Now())
 	}
-	err = runtimeRouter.ReloadRulesWithCandidates(candidateRouter, entries[ordered[0].key].physical, healthPlan.managedCandidates())
+	aliases := make(map[string]string, len(entries))
+	for key, entry := range entries {
+		aliases[key] = entry.physical
+	}
+	err = runtimeRouter.ReloadRulesWithCandidates(candidateRouter, entries[ordered[0].key].physical, healthPlan.managedCandidates(), aliases)
 	if health != nil {
 		if err == nil {
 			health.replaceLocked(healthPlan)
@@ -636,6 +668,7 @@ func ApplyRouting(configText string) error {
 	state.config, state.outbounds = document, entries
 	state.generation++
 	state.retained += newVersions
+	state.connectionAliases += newIdentityAliases
 	previousHealth := state.health
 	state.health = health
 	if health != nil {

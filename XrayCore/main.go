@@ -34,6 +34,16 @@ func LiveRoutingStatus() string {
 	return lib.LiveRoutingStatus()
 }
 
+// ConnectionSnapshot returns bounded, payload-free observations of actual flows.
+func ConnectionSnapshot() string {
+	return lib.ConnectionSnapshot()
+}
+
+// ClearConnectionHistory removes closed observations, never live connections.
+func ClearConnectionHistory() {
+	lib.ClearConnectionHistory()
+}
+
 func Stop() string {
 	err := lib.Stop()
 	return lib.WrapError(err)

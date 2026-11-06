@@ -171,6 +171,11 @@ class Settings(private val context: Context) {
             )
         }
 
+    /** Private destination/app history; never enabled implicitly. */
+    var connectionHistoryOnDisk: Boolean
+        get() = sharedPreferences.getBoolean("connectionHistoryOnDisk", false)
+        set(value) = sharedPreferences.edit { putBoolean("connectionHistoryOnDisk", value) }
+
     /** Tun Routes */
     var tunRoutes: Set<String>
         get() = sharedPreferences.getStringSet(

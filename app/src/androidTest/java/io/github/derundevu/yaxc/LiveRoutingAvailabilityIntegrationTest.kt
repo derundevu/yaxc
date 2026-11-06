@@ -68,7 +68,6 @@ class LiveRoutingAvailabilityIntegrationTest {
     private lateinit var settings: Settings
     private lateinit var db: YaxcDatabase
     private lateinit var source: Link
-    private lateinit var ordinaryProfile: Profile
     private lateinit var ordinary: LiveAvailabilityPeer
     private lateinit var fallback: LiveAvailabilityPeer
     private lateinit var direct: LiveAvailabilityPeer
@@ -154,8 +153,7 @@ class LiveRoutingAvailabilityIntegrationTest {
         if (previousConfig == null) db.configDao().insert(fixtureConfig) else db.configDao().update(fixtureConfig)
         source = Link(name = "isolated-live-availability-${UUID.randomUUID()}")
         source.id = db.linkDao().insertAtEnd(source)
-        ordinaryProfile = createProfile("Ordinary connection", ordinary)
-        settings.selectedProfile = ordinaryProfile.id
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
         ConnectionFailureState.clear()
         ContextCompat.registerReceiver(context, receiver, IntentFilter().apply {
             addAction(TProxyService.START_VPN_SERVICE_ACTION_NAME)
@@ -228,8 +226,7 @@ class LiveRoutingAvailabilityIntegrationTest {
         val primary = createProfile("Preferred primary", primaryPeer)
         val backup = createProfile("Ordered backup", backupPeer)
         val group = healthGroup(primary, backup)
-        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
-        savePlan(group, independent = true)
+        savePlan(group)
         start()
         val network = networkObserver!!.awaitFirst()
         awaitHealth { it.activeProfileId == backup.id && member(it, backup).state == "available" }
@@ -299,11 +296,11 @@ class LiveRoutingAvailabilityIntegrationTest {
         val primary = createProfile("Same logical primary", originalPeer)
         val backup = createProfile("Replacement backup", backupPeer)
         val group = healthGroup(primary, backup)
-        savePlan(group, independent = false)
+        savePlan(group)
         start()
         val network = networkObserver!!.awaitFirst()
         awaitHealth { it.activeProfileId == primary.id && it.eligibleProfileIds.toSet() == setOf(primary.id, backup.id) }
-        requireTrapControls("regular-controls")
+        requireTrapControls("replacement-controls")
         requireRecipient(originalPeer, "original-healthy", EXPLICIT_HOST)
         ShellHeldFlow(originalPeer.port, EXPLICIT_HOST, originalPeer).use { flow ->
             flow.exchange("before-endpoint-replacement")
@@ -350,13 +347,13 @@ class LiveRoutingAvailabilityIntegrationTest {
                 it.state == "unavailable" && it.eligibleProfileIds.isEmpty() &&
                     member(it, primary).state == "unavailable" && member(it, backup).state == "unavailable"
             }
-            requireBlocked("regular-all-down-one", EXPLICIT_HOST)
-            requireBlocked("regular-all-down-two", EXPLICIT_HOST)
+            requireBlocked("replacement-all-down-one", EXPLICIT_HOST)
+            requireBlocked("replacement-all-down-two", EXPLICIT_HOST)
             requireNoApplicationRequests()
-            requireTrapControls("regular-all-down-controls")
+            requireTrapControls("replacement-all-down-controls")
             flow.exchange("retained-old-primary-stream-after-all-down")
             networkObserver!!.assertUnchanged(network)
-            assertEquals("Regular selected connection was changed", ordinaryProfile.id, settings.selectedProfile)
+            assertEquals(LiveRoutingHelper.CONNECTION_PROFILE_ID, settings.selectedProfile)
         }
         assertPeerHealth()
     }
@@ -373,8 +370,7 @@ class LiveRoutingAvailabilityIntegrationTest {
             strategy = io.github.derundevu.yaxc.helper.ProxyGroupStrategy.LeastPing,
         )
         settings.liveRoutingHealthIntervalSeconds = 5
-        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
-        savePlan(group, independent = true)
+        savePlan(group)
         start()
         val network = networkObserver!!.awaitFirst()
         awaitHealth {
@@ -415,14 +411,14 @@ class LiveRoutingAvailabilityIntegrationTest {
         selectedProfileId = primary.id, checkAvailability = true,
     )
 
-    private fun savePlan(group: ProxyGroup, independent: Boolean) {
+    private fun savePlan(group: ProxyGroup) {
         val rules = listOf(
             AppDomainRule(id = "explicit-health", packages = listOf("com.android.shell"),
                 domains = listOf("full:$EXPLICIT_HOST"), target = group.id),
             AppDomainRule(id = "default-route-health", domains = listOf("full:default-route-health.invalid"), target = "proxy"),
         )
         settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(
-            groups = listOf(group), rules = rules, defaultGroupId = if (independent) group.id else null,
+            groups = listOf(group), rules = rules, defaultGroupId = group.id,
         ))
     }
 

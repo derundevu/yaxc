@@ -3,6 +3,7 @@ package io.github.derundevu.yaxc.activity
 import XrayCore.XrayCore
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,6 +25,9 @@ import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.RoomTestSupport
 import io.github.derundevu.yaxc.testing.waitForAsyncState
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
+import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionGrouping
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionFilter
 import kotlin.coroutines.Continuation
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -186,6 +190,30 @@ class MainActivityRegressionTest : RoomTestSupport() {
         compose.onNodeWithText(app.getString(R.string.connectionDismiss)).assertIsDisplayed().performClick()
         await { ConnectionFailureState.failure.value == null && model.uiState.value.connectionFailure == null }
         assertNull(model.uiState.value.connectionFailure)
+    }
+
+    @Test
+    fun analyticsGroupingAndFilterSurviveActivityRecreationAndBackKeepsProfileSelection() {
+        launch()
+        compose.onNodeWithTag("main:connection-analytics").performClick()
+        compose.onNodeWithTag("analytics:group:Config").performClick()
+        compose.onNodeWithTag("analytics:filter:Closed").performClick()
+        await {
+            val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
+            state.grouping == ConnectionGrouping.Config && state.filter == ConnectionFilter.Closed
+        }
+        controller.recreate()
+        await {
+            val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
+            state.grouping == ConnectionGrouping.Config && state.filter == ConnectionFilter.Closed
+        }
+        compose.onNodeWithTag("analytics:screen").assertIsDisplayed()
+        compose.onNodeWithTag("analytics:group:Config").assertIsSelected()
+        compose.onNodeWithTag("analytics:filter:Closed").assertIsSelected()
+        compose.onNodeWithTag("analytics:back").performClick()
+        compose.onNodeWithTag("analytics:screen").assertDoesNotExist()
+        assertEquals(711L, settings.selectedProfile)
+        assertEquals(71L, settings.selectedLink)
     }
 
     private fun launch() {

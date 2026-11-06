@@ -352,7 +352,8 @@ class LiveRoutingViewModel internal constructor(
                                 if (!stored) SaveOutcome(R.string.liveRoutingStaleDraft)
                                 else {
                                     val dispatched = try {
-                                        if (TProxyService.isActive()) TProxyService.applyRouting(app)
+                                        if (settings.selectedProfile == LiveRoutingHelper.CONNECTION_PROFILE_ID &&
+                                            TProxyService.isActive()) TProxyService.applyRouting(app)
                                         true
                                     } catch (_: Exception) {
                                         false

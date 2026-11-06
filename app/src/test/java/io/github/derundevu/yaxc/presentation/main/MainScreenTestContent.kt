@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.presentation.main
 
 import androidx.compose.runtime.Composable
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsState
 
 /** Supplies unrelated app-version/update chrome without invoking native code or networking. */
 @Composable
@@ -38,6 +39,12 @@ internal fun MainScreenTestContent(state: MainUiState, onAction: (MainAction) ->
         onCheckAppUpdate = {},
         onDownloadAppUpdate = {},
         onInstallAppUpdate = {},
+        connectionAnalytics = ConnectionAnalyticsState(),
+        onConnectionGrouping = {},
+        onConnectionFilter = {},
+        onConnectionPersistence = {},
+        onClearConnectionHistory = {},
+        onConnectionAnalyticsVisibility = {},
         onAction = onAction,
     )
 }

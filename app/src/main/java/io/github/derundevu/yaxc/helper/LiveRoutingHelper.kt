@@ -237,7 +237,6 @@ object LiveRoutingHelper {
         packageUids: Map<String, Int>,
         socksUsername: String,
         socksPassword: String,
-        standalone: Boolean = false,
         pingAddress: String = "",
         healthIntervalSeconds: Int = Settings.DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
     ): String {
@@ -245,7 +244,7 @@ object LiveRoutingHelper {
         require(healthIntervalSeconds in
             Settings.MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS..Settings.MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS
         ) { "Availability check interval is outside the supported range." }
-        require(!standalone || plan.defaultGroup != null) {
+        require(plan.defaultGroup != null) {
             "Live routing needs a default proxy group; add a group before connecting."
         }
         val root = parseObject(base, "Base config")
@@ -292,11 +291,11 @@ object LiveRoutingHelper {
             }
         }
         val activeRules = plan.rules.filter(AppDomainRule::enabled)
-        require((!standalone && activeRules.isEmpty()) || routing.optString("script").isEmpty()) {
+        require(routing.optString("script").isEmpty()) {
             "Live routing cannot be combined with a base routing script; use field-based base rules."
         }
         val appRules = activeRules.filter { it.packages.isNotEmpty() }
-        addUidAccounts(root, packageUids, socksUsername, socksPassword, appRules.isNotEmpty())
+        ConnectionConfigHelper.addUidAccounts(root, packageUids, socksUsername, socksPassword, appRules.isNotEmpty())
 
         // Xray balancer selectors match prefixes, not exact tags. Keep our entire namespace
         // outside existing selectors, and terminate every member tag with a separator.
@@ -317,12 +316,22 @@ object LiveRoutingHelper {
         val profileTargets = HashMap<Long, String>()
         val profileFingerprints = HashMap<Long, String>()
         val managedBalancers = JSONArray()
+        val connectionProfiles = ConnectionConfigHelper.profileMetadata(outbounds)
         plan.groups.forEachIndexed { index, group ->
             // Keep every member loaded: selecting a member/strategy changes routing only,
             // not handler ownership or the retained-version budget of the running core.
             val members = group.profileIds.map { id ->
                 profileTargets.getOrPut(id) {
-                    cloneProfile(profiles.getValue(id), id, namespace, outbounds)
+                    val start = outbounds.length()
+                    val target = cloneProfile(profiles.getValue(id), id, namespace, outbounds)
+                    val fingerprint = profileFingerprints.getOrPut(id) { profileFingerprint(profiles.getValue(id).config) }
+                    for (outboundIndex in start until outbounds.length()) {
+                        val outbound = outbounds.getJSONObject(outboundIndex)
+                        connectionProfiles.put(outbound.getString("tag"),
+                            ConnectionConfigHelper.profileIdentity(id, fingerprint, profiles.getValue(id).name,
+                                ConnectionConfigHelper.routeKind(outbound)))
+                    }
+                    target
                 }
             }
             if (group.strategy == ProxyGroupStrategy.Select && !group.checkAvailability) {
@@ -332,6 +341,7 @@ object LiveRoutingHelper {
                 val blockTag = "${namespace}health.$index.block."
                 if (group.checkAvailability) {
                     outbounds.put(JSONObject().put("tag", blockTag).put("protocol", "blackhole"))
+                    connectionProfiles.put(blockTag, JSONObject().put("profileId", 0).put("route", "block"))
                     val orderedIds = if (group.strategy == ProxyGroupStrategy.Select) {
                         val preferred = group.selectedProfileId ?: group.profileIds.first()
                         listOf(preferred) + group.profileIds.filterNot { it == preferred }
@@ -358,10 +368,10 @@ object LiveRoutingHelper {
                 targets[group.id] = "balancerTag" to tag
             }
         }
-        val defaultTarget = if (standalone) targets.getValue(checkNotNull(plan.defaultGroup).id) else null
+        val defaultTarget = targets.getValue(checkNotNull(plan.defaultGroup).id)
         val managedRules = JSONArray()
         activeRules.forEach { rule ->
-            val target = targets[rule.target] ?: if (rule.target == "proxy" && defaultTarget != null) defaultTarget
+            val target = targets[rule.target] ?: if (rule.target == "proxy") defaultTarget
                 else "outboundTag" to resolveBuiltIn(rule.target, baseOutbounds)
             val native = JSONObject().put("type", "field").put("ruleTag", "${namespace}rule.${managedRules.length()}.")
                 .put(target.first, target.second)
@@ -381,33 +391,28 @@ object LiveRoutingHelper {
             // Fields in one Xray rule are ANDed; values within either array are ORed.
             managedRules.put(native)
         }
-        if (managedRules.length() > 0 || defaultTarget != null) {
-            // Live rules precede Core Routing; its direct/block rules still precede the
-            // standalone fallback. Replace proxy destinations, not match conditions.
-            val baseProxyTag = if (defaultTarget != null) baseOutbounds.firstOrNull {
-                optionalString(it, "tag")?.equals("proxy", ignoreCase = true) == true
-            }?.getString("tag") ?: baseOutbounds.firstOrNull {
-                optionalString(it, "protocol")?.lowercase() in proxyProtocols && !optionalString(it, "tag").isNullOrEmpty()
-            }?.getString("tag") else null
-            for (index in 0 until baseRules.length()) {
-                val rule = baseRules.getJSONObject(index)
-                val tag = optionalString(rule, "outboundTag")
-                // Xray gives outboundTag precedence when both destinations are present.
-                // Clear both before installing a group balancer, or it would be ignored.
-                if (defaultTarget != null &&
-                    (tag?.equals("proxy", ignoreCase = true) == true || (baseProxyTag != null && tag == baseProxyTag))) {
-                    rule.remove("outboundTag")
-                    rule.remove("balancerTag")
-                    rule.put(defaultTarget.first, defaultTarget.second)
-                }
-                managedRules.put(rule)
+        // Live rules precede Core Routing; its direct/block rules still precede the
+        // default-group fallback. Replace proxy destinations, not match conditions.
+        val baseProxyTag = baseOutbounds.firstOrNull {
+            optionalString(it, "tag")?.equals("proxy", ignoreCase = true) == true
+        }?.getString("tag") ?: baseOutbounds.firstOrNull {
+            optionalString(it, "protocol")?.lowercase() in proxyProtocols && !optionalString(it, "tag").isNullOrEmpty()
+        }?.getString("tag")
+        for (index in 0 until baseRules.length()) {
+            val rule = baseRules.getJSONObject(index)
+            val tag = optionalString(rule, "outboundTag")
+            // Xray gives outboundTag precedence when both destinations are present.
+            // Clear both before installing a group balancer, or it would be ignored.
+            if (tag?.equals("proxy", ignoreCase = true) == true || (baseProxyTag != null && tag == baseProxyTag)) {
+                rule.remove("outboundTag")
+                rule.remove("balancerTag")
+                rule.put(defaultTarget.first, defaultTarget.second)
             }
-            if (defaultTarget != null) {
-                managedRules.put(JSONObject().put("type", "field").put("ruleTag", "${namespace}default.")
-                    .put("network", "tcp,udp").put(defaultTarget.first, defaultTarget.second))
-            }
-            routing.put("rules", managedRules)
+            managedRules.put(rule)
         }
+        managedRules.put(JSONObject().put("type", "field").put("ruleTag", "${namespace}default.")
+            .put("network", "tcp,udp").put(defaultTarget.first, defaultTarget.second))
+        routing.put("rules", managedRules)
         if (managedBalancers.length() > 0) {
             for (index in 0 until baseBalancers.length()) managedBalancers.put(baseBalancers.get(index))
             routing.put("balancers", managedBalancers)
@@ -418,6 +423,7 @@ object LiveRoutingHelper {
             root.put("_yaxcLiveHealth", JSONObject().put("url", pingAddress)
                 .put("intervalSeconds", healthIntervalSeconds).put("groups", healthGroups))
         }
+        root.put(ConnectionConfigHelper.PROFILE_METADATA_KEY, connectionProfiles)
         return root.toString()
     }
 
@@ -517,60 +523,6 @@ object LiveRoutingHelper {
                     }
                 }
             }
-        }
-    }
-
-    private fun addUidAccounts(
-        root: JSONObject, packageUids: Map<String, Int>, username: String, password: String, needsApps: Boolean,
-    ) {
-        require(!needsApps || (username.isNotBlank() && password.isNotBlank())) {
-            "Application rules require SOCKS username/password authentication; configure SOCKS credentials first."
-        }
-        if (username.isBlank() || password.isBlank()) return
-        val uids = packageUids.values.toSortedSet()
-        require(uids.none { it < 0 }) { "Installed application UID snapshot contains an unavailable UID; refresh the application list." }
-        var authenticatedSocks = false
-        val inbounds = array(root, "inbounds")
-        for (index in 0 until inbounds.length()) {
-            val inbound = inbounds.get(index) as? JSONObject
-                ?: throw IllegalArgumentException("Base inbound ${index + 1} must be an object.")
-            if (optionalString(inbound, "protocol") != "socks") continue
-            val settings = optionalObject(inbound, "settings") ?: continue
-            if (optionalString(settings, "auth") != "password") continue
-            val accounts = if (settings.has("accounts")) array(settings, "accounts") else JSONArray().apply {
-                val users = array(settings, "users")
-                for (userIndex in 0 until users.length()) put(users.get(userIndex))
-            }
-            val passwords = HashMap<String, String>()
-            for (accountIndex in 0 until accounts.length()) {
-                val account = accounts.get(accountIndex) as? JSONObject
-                    ?: throw IllegalArgumentException("SOCKS account ${accountIndex + 1} must be an object.")
-                val accountUser = string(account, "user")
-                require(passwords.put(accountUser, string(account, "pass")) == null) {
-                    "SOCKS inbound has duplicate account names; make each account unique before using live routing."
-                }
-            }
-            require(passwords[username] == password) {
-                "Base SOCKS account does not match the configured default credentials; regenerate the base config."
-            }
-            authenticatedSocks = true
-            uids.forEach { uid ->
-                val user = "yaxc.uid.$uid"
-                val existing = passwords[user]
-                require(existing == null || existing == password) { "SOCKS account '$user' conflicts with the managed application identity." }
-                if (existing == null) accounts.put(JSONObject().put("user", user).put("pass", password))
-            }
-            // Keep the original users alias if present, but accounts is the core's authoritative list.
-            if (uids.isNotEmpty()) settings.put("accounts", accounts)
-        }
-        require(!needsApps || authenticatedSocks) {
-            "Application rules require an authenticated SOCKS inbound; no-auth and transparent inbounds cannot identify applications."
-        }
-        if (authenticatedSocks && uids.isNotEmpty()) {
-            require(!root.has("_yaxcDefaultSocksUser") || root.optString("_yaxcDefaultSocksUser") == username) {
-                "Base config uses reserved application-identity metadata."
-            }
-            root.put("_yaxcDefaultSocksUser", username)
         }
     }
 

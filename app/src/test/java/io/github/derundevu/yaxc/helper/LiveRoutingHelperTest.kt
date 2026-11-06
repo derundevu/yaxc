@@ -24,7 +24,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val disabled = LiveRoutingHelper.decode(legacy)
         assertFalse(disabled.groups.single().checkAvailability)
         val profiles = (1L..2L).associateWith { profile(it) }
-        val legacyJson = compile(disabled, profiles, standalone = true, pingAddress = "not a URL")
+        val legacyJson = compile(disabled, profiles, pingAddress = "not a URL")
         assertFalse(legacyJson.has("_yaxcLiveHealth"))
         assertFalse(legacyJson.getJSONObject("routing").has("balancers"))
         assertTrue(legacyJson.getJSONObject("routing").getJSONArray("rules").objectValues().last()
@@ -82,8 +82,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
                 rule(id = "explicit", packages = listOf("com.example.member"), target = group.id),
                 rule(id = "proxy-alias", domains = listOf("full:alias.test"), target = "proxy"),
             ), group.id)
-            val built = compile(plan, profiles, base, uids = mapOf("com.example.member" to 10001),
-                standalone = true, pingAddress = "https://probe.test/204?q=one")
+            val built = compile(plan, profiles, base, uids = mapOf("com.example.member" to 10001), pingAddress = "https://probe.test/204?q=one")
             val health = built.getJSONObject("_yaxcLiveHealth")
             assertEquals("https://probe.test/204?q=one", health.getString("url"))
             assertEquals(10, health.getInt("intervalSeconds"))
@@ -222,7 +221,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         assertEquals(null, legacy.defaultGroupId)
         assertEquals(legacy, LiveRoutingHelper.decode(JSONObject(legacyRaw).put("defaultGroupId", JSONObject.NULL).toString()))
         val profiles = (1L..3L).associateWith { profile(it) }
-        val implicit = compile(legacy, profiles, standalone = true)
+        val implicit = compile(legacy, profiles)
         val implicitRules = implicit.getJSONObject("routing").getJSONArray("rules")
         assertTrue(implicitRules.getJSONObject(0).getString("outboundTag").contains("profile.2."))
         assertEquals(implicitRules.getJSONObject(0).getString("outboundTag"),
@@ -233,7 +232,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val restored = LiveRoutingHelper.decode(Settings(RuntimeEnvironment.getApplication()).liveRoutingPlan)
         assertEquals(explicit, restored)
         assertEquals(restored.groups.last(), restored.defaultGroup)
-        val built = compile(restored, profiles, standalone = true)
+        val built = compile(restored, profiles)
         val rules = built.getJSONObject("routing").getJSONArray("rules")
         assertTrue(rules.getJSONObject(0).getString("outboundTag").contains("profile.3."))
         assertEquals(rules.getJSONObject(0).getString("outboundTag"),
@@ -285,11 +284,11 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
             LiveRoutingPlan(groups = listOf(g.copy(profileIds = listOf(1, 1)))),
             LiveRoutingPlan(groups = listOf(g.copy(profileIds = listOf(0)))),
             LiveRoutingPlan(groups = listOf(g.copy(selectedProfileId = 2))),
-            LiveRoutingPlan(rules = listOf(rule(), rule())),
-            LiveRoutingPlan(rules = listOf(rule(target = "deleted-group"))),
-            LiveRoutingPlan(rules = listOf(rule(enabled = false, target = "deleted-group"))),
-            LiveRoutingPlan(rules = listOf(rule(packages = emptyList(), domains = emptyList()))),
-            LiveRoutingPlan(rules = listOf(rule(packages = listOf("com.bad package")))),
+            LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(), rule())),
+            LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(target = "deleted-group"))),
+            LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(enabled = false, target = "deleted-group"))),
+            LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(packages = emptyList(), domains = emptyList()))),
+            LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(packages = listOf("com.bad package")))),
         ).forEach { plan -> expectError("") { LiveRoutingHelper.validate(plan) } }
     }
 
@@ -301,17 +300,17 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
             assertEquals(null, invalid.defaultGroup)
             expectError("default group") { LiveRoutingHelper.validate(invalid) }
             expectError("default group") { LiveRoutingHelper.encode(invalid) }
-            expectError("default group") { compile(invalid, mapOf(1L to profile(1)), standalone = true) }
+            expectError("default group") { compile(invalid, mapOf(1L to profile(1))) }
             expectError("default group") {
                 LiveRoutingHelper.decode("""{"groups":[{"id":"group","profileIds":[1]}],"defaultGroupId":"$id"}""")
             }
         }
         expectError("string") { LiveRoutingHelper.decode("""{"defaultGroupId":true}""") }
-        expectError("default proxy group") { compile(LiveRoutingPlan(), standalone = true) }
-        expectError("missing profile 1") { compile(LiveRoutingPlan(listOf(g)), standalone = true) }
+        expectError("default proxy group") { compile(LiveRoutingPlan()) }
+        expectError("missing profile 1") { compile(LiveRoutingPlan(listOf(g)), profiles = emptyMap()) }
         expectError("routing script") {
             compile(LiveRoutingPlan(listOf(g)), mapOf(1L to profile(1)),
-                base().apply { getJSONObject("routing").put("script", "custom.lua") }, standalone = true)
+                base().apply { getJSONObject("routing").put("script", "custom.lua") })
         }
     }
 
@@ -335,8 +334,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
             val plan = LiveRoutingPlan(listOf(other, fallback), listOf(
                 rule(id = "live-proxy"), rule(id = "live-direct", target = "direct"), rule(id = "live-block", target = "block"),
             ), fallback.id)
-            val built = compile(plan, (1L..3L).associateWith { profile(it) }, base, standalone = true,
-                pingAddress = "https://probe.test/204")
+            val built = compile(plan, (1L..3L).associateWith { profile(it) }, base, pingAddress = "https://probe.test/204")
             val rules = built.getJSONObject("routing").getJSONArray("rules")
             val key = if (strategy == ProxyGroupStrategy.Select) "outboundTag" else "balancerTag"
             val opposite = if (key == "outboundTag") "balancerTag" else "outboundTag"
@@ -453,11 +451,11 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val first = rule(packages = listOf("com.example.one", "com.example.shared", "com.example.two"),
             domains = listOf("one.test", "full:two.test"), target = "block")
         val second = rule(id = "second", domains = listOf("domain:test"), target = "direct")
-        val result = compile(LiveRoutingPlan(rules = listOf(first, second)), uids = mapOf(
+        val result = compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(first, second)), uids = mapOf(
             "com.example.one" to 10001, "com.example.shared" to 10001, "com.example.two" to 10002,
         ))
         val rules = result.getJSONObject("routing").getJSONArray("rules")
-        assertEquals(3, rules.length())
+        assertEquals(4, rules.length())
         val native = rules.getJSONObject(0)
         assertEquals(listOf("yaxc.uid.10001", "yaxc.uid.10002"), native.getJSONArray("user").stringValues())
         assertEquals(listOf("domain:one.test", "full:two.test"), native.getJSONArray("domain").stringValues())
@@ -471,25 +469,25 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     fun disabledDraftsCannotCreateCatchAllRulesOrResolveUninstalledPackages() {
         val disabled = rule(enabled = false, packages = listOf("com.uninstalled"), domains = emptyList())
         val blank = rule(id = "blank", enabled = false, domains = emptyList())
-        val plan = LiveRoutingPlan(rules = listOf(disabled, blank, rule(id = "active")))
+        val plan = LiveRoutingPlan(groups = listOf(group()), rules = listOf(disabled, blank, rule(id = "active")))
         val result = compile(plan)
-        assertEquals(2, result.getJSONObject("routing").getJSONArray("rules").length())
+        assertEquals(3, result.getJSONObject("routing").getJSONArray("rules").length())
         assertEquals(plan, LiveRoutingHelper.decode(LiveRoutingHelper.encode(plan)))
     }
 
     @Test
     fun nativeDomainPrefixesArePreservedAndRawDomainsBecomeSuffixMatches() {
         val domains = listOf(" example.test ", "full:exact.test", "domain:suffix.test", "regexp:^api[0-9]+\\.test$", "geosite:category-test", "ext:custom.dat:tag")
-        val result = compile(LiveRoutingPlan(rules = listOf(rule(domains = domains))))
+        val result = compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(domains = domains))))
         assertEquals(listOf("domain:example.test") + domains.drop(1), result.getJSONObject("routing").getJSONArray("rules").getJSONObject(0).getJSONArray("domain").stringValues())
         listOf("", "https://example.test/path", "domain:", "full:bad host", "ext:file", "regexp:", "*.test", "geosite:bad tag").forEach {
-            expectError("") { LiveRoutingHelper.validate(LiveRoutingPlan(rules = listOf(rule(domains = listOf(it))))) }
+            expectError("") { LiveRoutingHelper.validate(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(domains = listOf(it))))) }
         }
     }
 
     @Test
     fun internationalizedHostnamesUseTheSameAsciiIdentityAsNetworkDestinations() {
-        val result = compile(LiveRoutingPlan(rules = listOf(rule(domains = listOf(
+        val result = compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(domains = listOf(
             "BÜCHER.example", "domain:bücher.example", "full:BÜCHER.example", "regexp:bücher",
         )))))
         assertEquals(listOf("domain:xn--bcher-kva.example", "full:xn--bcher-kva.example", "regexp:bücher"),
@@ -499,11 +497,11 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     @Test
     fun allInstalledUidAccountsExistBeforeTheFirstApplicationRuleAndAreStable() {
         val installed = linkedMapOf("com.example.z" to 10009, "com.example.a" to 10001, "com.example.shared" to 10001)
-        val result = compile(LiveRoutingPlan(), uids = installed)
+        val result = compile(LiveRoutingPlan(listOf(group())), uids = installed)
         val accounts = result.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getJSONArray("accounts")
         assertEquals(listOf("test-user", "yaxc.uid.10001", "yaxc.uid.10009"), accounts.objectValues().map { it.getString("user") })
         assertEquals(listOf("test-password", "test-password", "test-password"), accounts.objectValues().map { it.getString("pass") })
-        assertEquals(result.toString(), compile(LiveRoutingPlan(), uids = installed.entries.reversed().associate { it.toPair() }).toString())
+        assertEquals(result.toString(), compile(LiveRoutingPlan(listOf(group())), uids = installed.entries.reversed().associate { it.toPair() }).toString())
     }
 
     @Test
@@ -512,7 +510,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val accounts = base.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getJSONArray("accounts")
         accounts.put(JSONObject().put("user", "other-client").put("pass", "other-password").put("metadata", true))
         accounts.put(JSONObject().put("user", "yaxc.uid.10001").put("pass", "test-password"))
-        val result = compile(LiveRoutingPlan(), base = base, uids = mapOf("com.one" to 10001, "com.two" to 10001))
+        val result = compile(LiveRoutingPlan(listOf(group())), base = base, uids = mapOf("com.one" to 10001, "com.two" to 10001))
         val actual = result.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getJSONArray("accounts")
         assertJsonEquals(accounts, actual)
     }
@@ -520,7 +518,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     @Test
     fun missingPackageFailsInsteadOfDroppingItsMatcherAndBroadeningTheRule() {
         expectError("com.uninstalled") {
-            compile(LiveRoutingPlan(rules = listOf(rule(packages = listOf("com.uninstalled"), domains = listOf("one.test")))))
+            compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(packages = listOf("com.uninstalled"), domains = listOf("one.test")))))
         }
     }
 
@@ -529,13 +527,13 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val base = base()
         val inbound = base.getJSONArray("inbounds").getJSONObject(0)
         inbound.getJSONObject("settings").put("auth", "noauth").remove("accounts")
-        val result = compile(LiveRoutingPlan(rules = listOf(rule())), base = base, username = "", password = "")
+        val result = compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule())), base = base, username = "", password = "")
         assertJsonEquals(inbound, result.getJSONArray("inbounds").getJSONObject(0))
         expectError("credentials") {
-            compile(LiveRoutingPlan(rules = listOf(rule(packages = listOf("com.one")))), base = base, uids = mapOf("com.one" to 10001), username = "", password = "")
+            compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(packages = listOf("com.one")))), base = base, uids = mapOf("com.one" to 10001), username = "", password = "")
         }
         expectError("authenticated SOCKS") {
-            compile(LiveRoutingPlan(rules = listOf(rule(packages = listOf("com.one")))), base = base, uids = mapOf("com.one" to 10001))
+            compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(packages = listOf("com.one")))), base = base, uids = mapOf("com.one" to 10001))
         }
     }
 
@@ -574,7 +572,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     fun baseDuplicateTagsAndCatchAllBalancerSelectorsCannotCaptureManagedProfiles() {
         val duplicate = base()
         duplicate.getJSONArray("outbounds").put(JSONObject().put("tag", "proxy").put("protocol", "freedom"))
-        expectError("duplicate") { compile(LiveRoutingPlan(), base = duplicate) }
+        expectError("duplicate") { compile(LiveRoutingPlan(listOf(group())), base = duplicate) }
         val broad = base()
         broad.getJSONObject("routing").put("balancers", JSONArray().put(JSONObject().put("tag", "b").put("selector", JSONArray().put(""))))
         expectError("empty selector") { compile(LiveRoutingPlan(listOf(group())), mapOf(1L to profile(1)), broad) }
@@ -600,14 +598,14 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
     fun missingBuiltinTargetDoesNotFallbackToADifferentOutbound() {
         val base = base()
         base.put("outbounds", JSONArray().put(JSONObject().put("tag", "proxy").put("protocol", "socks")))
-        expectError("no tagged 'block'") { compile(LiveRoutingPlan(rules = listOf(rule(target = "block"))), base = base) }
+        expectError("no tagged 'block'") { compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule(target = "block"))), base = base) }
     }
 
     @Test
     fun scriptBasedBaseRoutingIsRejectedRatherThanSilentlyOverridden() {
         val base = base()
         base.getJSONObject("routing").put("script", "custom.lua")
-        expectError("routing script") { compile(LiveRoutingPlan(rules = listOf(rule())), base = base) }
+        expectError("routing script") { compile(LiveRoutingPlan(groups = listOf(group()), rules = listOf(rule())), base = base) }
     }
 
     @Test
@@ -628,7 +626,7 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val users = settings.getJSONArray("accounts")
         settings.remove("accounts")
         settings.put("users", users)
-        val result = compile(LiveRoutingPlan(), base = base, uids = mapOf("com.one" to 10001))
+        val result = compile(LiveRoutingPlan(listOf(group())), base = base, uids = mapOf("com.one" to 10001))
         val actual = result.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings")
         assertJsonEquals(users, actual.getJSONArray("users"))
         assertEquals(2, actual.getJSONArray("accounts").length())
@@ -640,8 +638,8 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val conflicting = base()
         conflicting.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings").getJSONArray("accounts")
             .put(JSONObject().put("user", "yaxc.uid.10001").put("pass", "different-password"))
-        expectError("conflicts") { compile(LiveRoutingPlan(), base = conflicting, uids = mapOf("com.one" to 10001)) }
-        expectError("default credentials") { compile(LiveRoutingPlan(), password = "different-password") }
+        expectError("conflicts") { compile(LiveRoutingPlan(listOf(group())), base = conflicting, uids = mapOf("com.one" to 10001)) }
+        expectError("default credentials") { compile(LiveRoutingPlan(listOf(group())), password = "different-password") }
     }
 
     @Test
@@ -693,16 +691,14 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
         val result = compile(LiveRoutingPlan(listOf(group())), mapOf(1L to profile(1)), base)
         assertJsonEquals(balancer, result.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0))
         assertFalse(result.getJSONArray("outbounds").getJSONObject(3).getString("tag").startsWith("yaxc"))
-        assertJsonEquals(balancer,
-            compile(LiveRoutingPlan(), base = base).getJSONObject("routing").getJSONArray("balancers").getJSONObject(0))
     }
 
     private fun compile(
-        plan: LiveRoutingPlan, profiles: Map<Long, Profile> = emptyMap(), base: JSONObject = base(),
+        plan: LiveRoutingPlan, profiles: Map<Long, Profile> = mapOf(1L to profile(1)), base: JSONObject = base(),
         uids: Map<String, Int> = emptyMap(), username: String = "test-user", password: String = "test-password",
-        standalone: Boolean = false, pingAddress: String = "", healthIntervalSeconds: Int = 10,
+        pingAddress: String = "", healthIntervalSeconds: Int = 10,
     ): JSONObject = JSONObject(LiveRoutingHelper.compile(
-        base.toString(), plan, profiles, uids, username, password, standalone, pingAddress, healthIntervalSeconds,
+        base.toString(), plan, profiles, uids, username, password, pingAddress, healthIntervalSeconds,
     ))
 
     private fun group(

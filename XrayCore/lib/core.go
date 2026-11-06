@@ -57,6 +57,11 @@ func Start(dir string, config string) error {
 	if err != nil {
 		return errors.Join(err, server.Close())
 	}
+	connections, err := newConnectionLedger(server, document, state)
+	if err != nil {
+		return errors.Join(err, server.Close())
+	}
+	state.connections = connections
 	health, healthPlan, err := prepareLiveHealth(server, document, state.outbounds, nil)
 	if err != nil {
 		return errors.Join(err, server.Close())
@@ -71,11 +76,15 @@ func Start(dir string, config string) error {
 		if health != nil {
 			health.close()
 		}
-		return errors.Join(err, server.Close())
+		closeErr := server.Close()
+		connections.stop()
+		return errors.Join(err, closeErr)
 	}
 	coreServer = server
 	routingState = state
 	state.health = health
+	connections.started()
+	currentConnections.Store(connections)
 	if health != nil {
 		health.replace(healthPlan)
 		health.start()
@@ -91,6 +100,9 @@ func Stop() error {
 			routingState.health.close()
 		}
 		err := coreServer.Close()
+		if routingState != nil && routingState.connections != nil {
+			routingState.connections.stop()
+		}
 		coreServer = nil
 		routingState = nil
 		if err != nil {

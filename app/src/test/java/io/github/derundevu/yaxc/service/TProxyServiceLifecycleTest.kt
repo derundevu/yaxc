@@ -215,10 +215,92 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     }
 
     @Test
-    fun liveRuleUpdatesAndRejectionPreserveCoreTunnelAndLastAppliedConfig() {
+    fun ordinaryProfileStartsWithMissingLiveMemberAndKeepsItsOwnRoutesOnReload() {
+        val missing = ProxyGroup(id = "missing", name = "Removed subscription member", profileIds = listOf(999))
+        val plan = LiveRoutingHelper.encode(LiveRoutingPlan(
+            groups = listOf(missing),
+            rules = listOf(AppDomainRule(id = "block", domains = listOf("full:fixture.invalid"), target = "block")),
+        ))
+        settings.liveRoutingPlan = plan
+        settings.pingAddress = "not-an-http-url"
         startAndAwait()
         val device = boundary.devices.single()
-        settings.liveRoutingPlan = """{"groups":[],"rules":[{"id":"test-rule","name":"Controlled","enabled":true,"packages":[],"domains":["full:fixture.invalid"],"target":"block"}]}"""
+        assertNull(ConnectionFailureState.failure.value)
+        assertEquals("first", JSONObject(boundary.appliedConfig!!).getString("regressionMarker"))
+
+        updateProfileConfig("ordinary-after-refresh")
+        assertReloadAcknowledgement(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+        assertEquals("ordinary-after-refresh", JSONObject(boundary.appliedConfig!!).getString("regressionMarker"))
+        assertEquals(plan, settings.liveRoutingPlan)
+        assertSame(device, boundary.devices.single())
+        device.assertTraffic("missing Live Routing member does not block ordinary reload")
+        assertNull(ConnectionFailureState.failure.value)
+    }
+
+    @Test
+    fun savedLiveRulesAndBrokenPlanCannotChangeOrdinarySessionThroughLiveApply() {
+        startAndAwait()
+        val device = boundary.devices.single()
+        val applied = settings.xrayConfig().readBytes()
+        val originalMtu = settings.tunMtu
+        val group = ProxyGroup(id = "dormant", profileIds = listOf(profile.id), checkAvailability = true)
+        val plans = listOf(
+            LiveRoutingHelper.encode(LiveRoutingPlan(
+                groups = listOf(group),
+                rules = listOf(AppDomainRule(id = "block", domains = listOf("full:fixture.invalid"), target = "block")),
+            )),
+            """{"groups":[{"id":"missing","profileIds":[999]}]}""",
+            "not valid JSON",
+        )
+        settings.tunMtu = 1500
+        plans.forEach { plan ->
+            settings.liveRoutingPlan = plan
+            val before = broadcasts().size
+            command(TProxyService.APPLY_ROUTING_SERVICE_ACTION_NAME)
+            pumpUntil { broadcasts().drop(before).any { it.action == TProxyService.STATUS_VPN_SERVICE_ACTION_NAME } }
+            assertNull(ConnectionFailureState.failure.value)
+            assertArrayEquals(applied, settings.xrayConfig().readBytes())
+            assertEquals(plan, settings.liveRoutingPlan)
+        }
+        settings.tunMtu = originalMtu
+        assertReloadAcknowledgement(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME)
+        assertEquals(1, boundary.coreStarts)
+        assertEquals(0, boundary.coreStops)
+        assertEquals(0, boundary.tunnelStops)
+        assertSame(device, boundary.devices.single())
+        device.assertTraffic("dormant Live Routing never replaces ordinary routes")
+    }
+
+    @Test
+    fun missingLiveMemberRejectsIndependentStartButAllowsOrdinaryProfileWithoutEditingThePlan() {
+        val plan = LiveRoutingHelper.encode(LiveRoutingPlan(
+            groups = listOf(ProxyGroup(id = "missing", profileIds = listOf(profile.id, 999))),
+        ))
+        settings.liveRoutingPlan = plan
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null && shadowOf(service).isStoppedBySelf }
+        assertTrue(ConnectionFailureState.failure.value!!.diagnostic.contains("missing profile 999"))
+        assertEquals(0, boundary.validations)
+        assertEquals(0, boundary.coreStarts)
+        assertEquals(0, boundary.tunnelStarts)
+        assertFalse(TProxyService.isActive())
+
+        settings.selectedProfile = profile.id
+        startAndAwait()
+        assertNull(ConnectionFailureState.failure.value)
+        assertEquals(plan, settings.liveRoutingPlan)
+        boundary.devices.single().assertTraffic("ordinary connection recovers without changing missing membership")
+    }
+
+    @Test
+    fun liveRuleUpdatesAndRejectionPreserveCoreTunnelAndLastAppliedConfig() {
+        val plan = selectIndependentRouting()
+        startAndAwait()
+        val device = boundary.devices.single()
+        settings.liveRoutingPlan = LiveRoutingHelper.encode(plan.copy(rules = listOf(
+            AppDomainRule(id = "test-rule", domains = listOf("full:fixture.invalid"), target = "block"),
+        )))
         val before = broadcasts().size
         command(TProxyService.APPLY_ROUTING_SERVICE_ACTION_NAME)
         pumpUntil { broadcasts().drop(before).any { it.action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME } }
@@ -231,7 +313,9 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         device.assertTraffic("live rules preserve session")
 
         boundary.routingDiagnostic = "Controlled native route rejection"
-        settings.liveRoutingPlan = """{"groups":[],"rules":[{"id":"test-rule","name":"Controlled","enabled":true,"packages":[],"domains":["full:fixture.invalid"],"target":"direct"}]}"""
+        settings.liveRoutingPlan = LiveRoutingHelper.encode(plan.copy(rules = listOf(
+            AppDomainRule(id = "test-rule", domains = listOf("full:fixture.invalid"), target = "direct"),
+        )))
         val rejectedBefore = broadcasts().size
         command(TProxyService.APPLY_ROUTING_SERVICE_ACTION_NAME)
         pumpUntil { broadcasts().drop(rejectedBefore).any { it.action == TProxyService.STATUS_VPN_SERVICE_ACTION_NAME } }
@@ -260,6 +344,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
             assertNull(ConnectionFailureState.failure.value)
         }
         saveGroup(original)
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
         settings.pingAddress = "http://127.0.0.1:18881/first"
         startAndAwait()
         val device = boundary.devices.single()
@@ -322,6 +407,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     fun healthSettingsChangedDuringValidationCommitOnlyLatestCoherentMetadata() {
         val group = ProxyGroup(id = "health", name = "Health", profileIds = listOf(profile.id), checkAvailability = true)
         settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(groups = listOf(group)))
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
         settings.pingAddress = "http://127.0.0.1:18881/start"
         settings.liveRoutingHealthIntervalSeconds = 5
         startAndAwait()
@@ -353,6 +439,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
 
     @Test
     fun explicitLiveApplyNeverReconnectsForUnappliedPlatformSettings() {
+        selectIndependentRouting()
         startAndAwait()
         val device = boundary.devices.single()
         val applied = settings.xrayConfig().readBytes()

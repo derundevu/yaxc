@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.presentation.main
 
 import XrayCore.XrayCore
+import androidx.activity.compose.BackHandler
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -66,6 +67,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.MoreVert
@@ -89,6 +91,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.derivedStateOf
@@ -126,6 +129,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -161,6 +166,10 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidD
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
 import io.github.derundevu.yaxc.presentation.root.AppUpdateCheckButton
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsScreen
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsState
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionFilter
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionGrouping
 import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -216,6 +225,12 @@ fun MainScreen(
     onCheckAppUpdate: () -> Unit,
     onDownloadAppUpdate: () -> Unit,
     onInstallAppUpdate: () -> Unit,
+    connectionAnalytics: ConnectionAnalyticsState,
+    onConnectionGrouping: (ConnectionGrouping) -> Unit,
+    onConnectionFilter: (ConnectionFilter) -> Unit,
+    onConnectionPersistence: (Boolean) -> Unit,
+    onClearConnectionHistory: () -> Unit,
+    onConnectionAnalyticsVisibility: (Boolean) -> Unit,
     onAction: (MainAction) -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
@@ -227,6 +242,14 @@ fun MainScreen(
     val connectBottomPadding = 162.dp + reservedBottomInset
     val tabBottomPadding = 112.dp + reservedBottomInset
     val connectListState = rememberLazyListState()
+    val analyticsListState = rememberLazyListState()
+    var analyticsVisible by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = analyticsVisible) { analyticsVisible = false }
+    val reportAnalyticsVisibility = rememberUpdatedState(onConnectionAnalyticsVisibility)
+    DisposableEffect(analyticsVisible) {
+        reportAnalyticsVisibility.value(analyticsVisible)
+        onDispose { reportAnalyticsVisibility.value(false) }
+    }
     val backdropBaseColor = MaterialTheme.colorScheme.background
     val backdrop = rememberLayerBackdrop {
         drawRect(backdropBaseColor)
@@ -251,7 +274,9 @@ fun MainScreen(
         label = "main_control_bar_collapse",
     )
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
+        modifier = if (analyticsVisible) Modifier.clearAndSetSemantics {} else Modifier,
         contentWindowInsets = WindowInsets.safeDrawing.only(
             WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
         ),
@@ -308,6 +333,7 @@ fun MainScreen(
                                     batchPingTotal = batchPingTotal,
                                     listState = connectListState,
                                     collapseProgress = collapseProgress,
+                                    onOpenConnectionAnalytics = { analyticsVisible = true },
                                     onAction = onAction,
                                     topPadding = 86.dp,
                                     bottomPadding = connectBottomPadding,
@@ -391,6 +417,24 @@ fun MainScreen(
                         .zIndex(2f)
                         .padding(horizontal = spacing.lg)
                         .padding(bottom = spacing.lg + reservedBottomInset),
+                )
+            }
+        }
+    }
+        AnimatedVisibility(
+            visible = analyticsVisible,
+            enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220)),
+            exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180)),
+        ) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                ConnectionAnalyticsScreen(
+                    state = connectionAnalytics,
+                    listState = analyticsListState,
+                    onBack = { analyticsVisible = false },
+                    onGrouping = onConnectionGrouping,
+                    onFilter = onConnectionFilter,
+                    onPersistence = onConnectionPersistence,
+                    onClearHistory = onClearConnectionHistory,
                 )
             }
         }
@@ -652,6 +696,7 @@ private fun ConnectContent(
     batchPingTotal: Int,
     listState: LazyListState,
     collapseProgress: Float,
+    onOpenConnectionAnalytics: () -> Unit,
     onAction: (MainAction) -> Unit,
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
@@ -791,6 +836,7 @@ private fun ConnectContent(
                     selectedProfileName = selectedProfileName,
                     pingState = pingState,
                     collapseProgress = collapseProgress,
+                    onOpenConnectionAnalytics = onOpenConnectionAnalytics,
                     onPingCurrent = {
                         onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
                     },
@@ -1195,11 +1241,13 @@ private fun ConnectionTopCard(
     pingState: MainPingState,
     collapseProgress: Float,
     onPingCurrent: () -> Unit,
+    onOpenConnectionAnalytics: () -> Unit,
     onOpenConnectionInfo: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val analyticsDescription = stringResource(R.string.connectionAnalyticsOpen)
     val subscriptionSummary = subscriptionCardSummary(
         metadata = selectedSourceMetadata,
         lastRefreshedAt = selectedSourceLastRefreshedAt,
@@ -1216,7 +1264,9 @@ private fun ConnectionTopCard(
             alpha = 1f - collapseProgress * 0.38f
             scaleX = pressScale
             scaleY = pressScale
-        }.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onPingCurrent),
+        }.testTag("main:connection-analytics")
+            .semantics { contentDescription = analyticsDescription }
+            .yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onOpenConnectionAnalytics),
         shape = MaterialTheme.shapes.extraLarge,
         contentPadding = PaddingValues(16.dp),
         accentColor = if (isRunning) {
@@ -1278,6 +1328,12 @@ private fun ConnectionTopCard(
                 }
             }
 
+            ActionBubble(
+                icon = Icons.Outlined.Speed,
+                onClick = onPingCurrent,
+                contentDescription = textResource(R.string.mainQuickActionPing),
+                modifier = Modifier.testTag("main:connection-ping"),
+            )
             ActionBubble(
                 icon = Icons.Outlined.Info,
                 onClick = onOpenConnectionInfo,

@@ -256,7 +256,8 @@ class SettingsActivity : AppCompatActivity() {
             if (restartService) {
                 TProxyService.restart(this@SettingsActivity)
             } else if ((oldPingAddress != settings.pingAddress.trim() ||
-                    oldHealthIntervalSeconds != healthIntervalSeconds) && TProxyService.isActive()
+                    oldHealthIntervalSeconds != healthIntervalSeconds) &&
+                settings.selectedProfile == LiveRoutingHelper.CONNECTION_PROFILE_ID && TProxyService.isActive()
             ) {
                 val healthEnabled = withContext(Dispatchers.IO) {
                     runCatching { LiveRoutingHelper.decode(settings.liveRoutingPlan).groups.any { it.checkAvailability } }

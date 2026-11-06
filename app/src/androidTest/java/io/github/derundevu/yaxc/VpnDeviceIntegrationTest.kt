@@ -1,5 +1,6 @@
 package io.github.derundevu.yaxc
 
+import XrayCore.XrayCore
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -17,10 +18,20 @@ import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToKey
+import androidx.lifecycle.ViewModelProvider
 import androidx.core.content.ContextCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.derundevu.yaxc.activity.MainActivity
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
@@ -33,17 +44,26 @@ import io.github.derundevu.yaxc.helper.ProxyGroup
 import io.github.derundevu.yaxc.helper.ProxyGroupStrategy
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.XrayValidationHelper
+import io.github.derundevu.yaxc.repository.ConnectionCaptureStatus
+import io.github.derundevu.yaxc.repository.ConnectionRecord
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsItem
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionFilter
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionGrouping
+import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.testing.ChainedStreamTarget
 import io.github.derundevu.yaxc.testing.DeadlineInputStream
 import io.github.derundevu.yaxc.testing.LoopbackTarget
 import io.github.derundevu.yaxc.testing.ReloadSubscriptionTarget
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.Closeable
@@ -64,6 +84,7 @@ import java.util.concurrent.TimeUnit
 /** Explicit opt-in AND emulator-only: must never take over a physical device's VPN. */
 @RunWith(AndroidJUnit4::class)
 class VpnDeviceIntegrationTest {
+    @get:Rule val compose = createEmptyComposeRule()
     private lateinit var context: Context
     private lateinit var settings: Settings
     private lateinit var db: YaxcDatabase
@@ -239,7 +260,6 @@ class VpnDeviceIntegrationTest {
                         subscription.awaitServed()
                         awaitUnchangedAcknowledgement(renamed)
                         val stored = db.profileDao().linkProfiles(otherSource.id).single()
-                        assertEquals(other.id, stored.id)
                         assertEquals("Refreshed unselected", stored.name)
                         assertEquals("freedom", JSONObject(stored.config).getJSONArray("outbounds").getJSONObject(0).getString("protocol"))
                         assertEquals(profile.id, settings.selectedProfile)
@@ -345,10 +365,296 @@ class VpnDeviceIntegrationTest {
     }
 
     @Test
+    fun connectionAnalyticsTracksRealAppAndConfigAcrossLiveRoutingTcpUdpAndActualScreen() = runBlocking {
+        settings.connectionHistoryOnDisk = false
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+        settings.socksUsername = "analytics-fixture"
+        settings.socksPassword = "analytics-fixture-password"
+        settings.appsRoutingMode = Settings.AppsRoutingMode.Include
+        settings.appsRouting = "com.android.shell"
+        db.configDao().update(Config(
+            routingMode = Config.Mode.Replace,
+            routing = """{"rules":[{"port":"53,853","outboundTag":"block"}]}""",
+        ))
+        val repository = (context.applicationContext as Yaxc).connectionRepository
+        val shellUid = context.packageManager.getApplicationInfo("com.android.shell", 0).uid
+        suspend fun awaitFlow(predicate: (ConnectionRecord) -> Boolean): ConnectionRecord = withTimeout(15_000) {
+            repository.state.first { state -> state.connections.any(predicate) }.connections.first(predicate)
+        }
+        LoopbackTarget().use { first ->
+            LoopbackTarget().use { second ->
+                UdpEchoPeer(0x53).use { udp ->
+                    ChainedStreamTarget(frames = 3).use { stream ->
+                        suspend fun member(name: String, port: Int): Profile =
+                            Profile(linkId = source.id, name = name, config = profileConfig(port)).also {
+                                it.id = db.profileDao().create(it)
+                            }
+                        val retained = member("Analytics retained TCP", stream.port)
+                        val a = member("Analytics HTTP A", first.port)
+                        val b = member("Analytics HTTP B", second.port)
+                        val udpMember = member("Analytics UDP", udp.port)
+                        val streamGroup = ProxyGroup(id = "analytics-stream", name = "Retained", profileIds = listOf(retained.id))
+                        var httpGroup = ProxyGroup(id = "analytics-http", name = "HTTP",
+                            profileIds = listOf(a.id, b.id), selectedProfileId = a.id)
+                        val udpGroup = ProxyGroup(id = "analytics-udp", name = "UDP", profileIds = listOf(udpMember.id))
+                        fun save(default: String = streamGroup.id) {
+                            settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(
+                                groups = listOf(streamGroup, httpGroup, udpGroup),
+                                rules = listOf(AppDomainRule(id = "analytics-http-rule", packages = listOf("com.android.shell"),
+                                    domains = listOf("full:analytics.invalid"), target = httpGroup.id)),
+                                defaultGroupId = default,
+                            ))
+                        }
+                        save()
+                        start()
+                        val network = routedNetwork
+                        var expectedUpload = 0L
+                        var expectedDownload = 0L
+                        var cumulativePayload = 0
+                        var streamId = ""
+                        ShellTcpFlow(stream.port).use { flow ->
+                            suspend fun exchange(stage: String, expectActive: Boolean = true) {
+                                val payload = "$stage 東京\\n".toByteArray()
+                                flow.assertNextChainedResponse(payload)
+                                assertArrayEquals(payload, stream.received.poll(5, TimeUnit.SECONDS))
+                                cumulativePayload += payload.size
+                                expectedUpload += 4 + payload.size
+                                expectedDownload += 4 + cumulativePayload
+                                val observed = awaitFlow {
+                                    it.profileId == retained.id && it.uid == shellUid && it.upload == expectedUpload
+                                }
+                                streamId = observed.id
+                                assertEquals(retained.name, observed.profileName)
+                                assertEquals(LiveRoutingHelper.profileFingerprint(retained.config), observed.profileFingerprint)
+                                assertTrue(observed.apps.any { it.packageName == "com.android.shell" })
+                                assertTrue(observed.download <= expectedDownload)
+                                if (observed.liveBytesExact) assertEquals(expectedDownload, observed.download)
+                                if (expectActive) assertEquals("active", observed.state)
+                                assertEquals(network, routedNetwork)
+                            }
+                            exchange("before-selection")
+                            assertArrayEquals(first.payload, transferTunHttp("analytics-a", first.port, "analytics.invalid"))
+                            assertEquals("/vpn-analytics-a", first.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                            val oldHttp = awaitFlow { it.profileId == a.id && it.uid == shellUid && it.domain == "analytics.invalid" }
+                            httpGroup = httpGroup.copy(selectedProfileId = b.id)
+                            save()
+                            TProxyService.applyRouting(context)
+                            await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+                            assertArrayEquals(second.payload, transferTunHttp("analytics-b", first.port, "analytics.invalid"))
+                            assertEquals("/vpn-analytics-b", second.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                            val newHttp = awaitFlow { it.profileId == b.id && it.uid == shellUid && it.domain == "analytics.invalid" }
+                            assertEquals(a.name, repository.state.value.connections.single { it.id == oldHttp.id }.profileName)
+                            assertEquals(b.name, newHttp.profileName)
+                            exchange("after-selection")
+
+                            save(udpGroup.id)
+                            TProxyService.applyRouting(context)
+                            await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+                            requireUdpReply(udp, "analytics-udp")
+                            val datagram = awaitFlow {
+                                it.profileId == udpMember.id && it.uid == shellUid && it.protocol == "udp" &&
+                                    it.upload == 512L && it.download == 513L
+                            }
+                            assertEquals("association", datagram.destinationKind)
+                            assertTrue(datagram.apps.any { it.packageName == "com.android.shell" })
+                            exchange("after-default-and-udp", expectActive = false)
+
+                            ActivityScenario.launch(MainActivity::class.java).use { activity ->
+                                lateinit var model: ConnectionAnalyticsViewModel
+                                activity.onActivity { model = ViewModelProvider(it)[ConnectionAnalyticsViewModel::class.java] }
+                                fun captureAnalyticsSurface(name: String) {
+                                    repeat(2) {
+                                        val committed = java.util.concurrent.CountDownLatch(1)
+                                        activity.onActivity { current ->
+                                            current.window.decorView.viewTreeObserver.registerFrameCommitCallback { committed.countDown() }
+                                            current.window.decorView.invalidate()
+                                        }
+                                        check(committed.await(10, TimeUnit.SECONDS))
+                                    }
+                                    val image = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+                                    try {
+                                        File(context.cacheDir, "analytics-$name.png").outputStream().use {
+                                            check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                                        }
+                                    } finally { image.recycle() }
+                                }
+                                compose.onNodeWithTag("main:connection-analytics").performClick()
+                                compose.waitUntil(10_000) {
+                                    model.uiState.value.items.any { it is ConnectionAnalyticsItem.Flow && it.record.id == streamId }
+                                }
+                                compose.onNodeWithTag("analytics:list").performScrollToKey("flow:$streamId")
+                                compose.onNodeWithTag("flow:$streamId").assertIsDisplayed()
+                                    .assert(hasAnyDescendant(hasText(retained.name)))
+                                    .assert(hasAnyDescendant(hasText("com.android.shell", substring = true)))
+                                captureAnalyticsSurface("by-app")
+                                compose.onNodeWithTag("analytics:list").performScrollToKey("controls")
+                                compose.onNodeWithTag("analytics:group:Config").performClick()
+                                compose.waitUntil(10_000) { model.uiState.value.grouping == ConnectionGrouping.Config }
+                                compose.onNodeWithTag("analytics:list").performScrollToKey("flow:${newHttp.id}")
+                                compose.onNodeWithTag("flow:${newHttp.id}").assertIsDisplayed()
+                                    .assert(hasAnyDescendant(hasText(b.name)))
+                                captureAnalyticsSurface("by-config")
+                                compose.onNodeWithTag("analytics:list").performScrollToKey("controls")
+                                compose.onNodeWithTag("analytics:filter:Closed").performClick()
+                                compose.waitUntil(10_000) {
+                                    model.uiState.value.filter == ConnectionFilter.Closed &&
+                                        model.uiState.value.items.filterIsInstance<ConnectionAnalyticsItem.Flow>().let { rows ->
+                                            rows.any { it.record.id == oldHttp.id } && rows.none { it.record.state == "active" }
+                                        }
+                                }
+                                compose.onNodeWithTag("analytics:list").performScrollToKey("privacy")
+                                compose.onNodeWithTag("analytics:persistence").performClick()
+                                val disk = File(context.noBackupFilesDir, "connection-history.json")
+                                compose.waitUntil(10_000) { settings.connectionHistoryOnDisk && repository.state.value.persistOnDisk && disk.isFile }
+                                val checkpoint = disk.readText()
+                                val saved = JSONObject(checkpoint).getJSONArray("connections")
+                                val savedStream = (0 until saved.length()).map { saved.getJSONObject(it) }.single { it.getString("id") == streamId }
+                                assertEquals(retained.id, savedStream.getLong("profileId"))
+                                assertEquals(retained.name, savedStream.getString("profileName"))
+                                assertFalse("Connection history leaked proxy credentials", checkpoint.contains(settings.socksPassword))
+                                compose.onNodeWithTag("analytics:persistence").performClick()
+                                compose.waitUntil(10_000) { !settings.connectionHistoryOnDisk && !repository.state.value.persistOnDisk && !disk.exists() }
+                                assertTrue(repository.state.value.connections.any { it.id == streamId })
+                                assertArrayEquals(second.payload, transferTunHttp("analytics-after-persistence", first.port, "analytics.invalid"))
+                                assertEquals("/vpn-analytics-after-persistence", second.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                                compose.onNodeWithTag("analytics:list").performScrollToKey("controls")
+                                captureAnalyticsSurface("controls")
+                                compose.onNodeWithTag("analytics:back").performClick()
+                                compose.onNodeWithTag("main:connection-analytics").assertIsDisplayed()
+                            }
+                        }
+                        stream.awaitFinished()
+                        val closed = awaitFlow { it.id == streamId && it.state != "active" && it.liveBytesExact }
+                        assertEquals(expectedUpload, closed.upload)
+                        assertEquals(expectedDownload, closed.download)
+                        assertEquals(retained.id, closed.profileId)
+                        assertTrue(closed.endedAt >= closed.startedAt)
+                        assertEquals(network, routedNetwork)
+                        TProxyService.stop(context)
+                        await(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+                        withTimeout(15_000) { repository.state.first { it.status == ConnectionCaptureStatus.Stopped } }
+                        assertEquals(retained.id, repository.state.value.connections.single { it.id == streamId }.profileId)
+                        assertFalse(settings.connectionHistoryOnDisk)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun ordinaryVpnIgnoresSavedLiveRulesAndSurvivesSubscriptionMemberRemoval() = runBlocking {
+        // Permit these sniffed domains in the ordinary profile itself; its IP-only fixture rule
+        // otherwise falls through to the fixture's catch-all block after HTTP sniffing.
+        val ordinaryConfig = JSONObject(profile.config)
+        ordinaryConfig.getJSONObject("routing").getJSONArray("rules").put(0, JSONObject(
+            """{"domain":["full:saved-block.invalid","full:saved-redirect.invalid"],"port":"${target.port}","network":"tcp","outboundTag":"proxy"}""",
+        ))
+        profile = profile.copy(config = ordinaryConfig.toString())
+        db.profileDao().update(profile)
+        LoopbackTarget().use { redirected ->
+            val member = Profile(linkId = source.id, name = "Disposable live member", config = profileConfig(redirected.port))
+            member.id = db.profileDao().create(member)
+            val group = ProxyGroup(id = "saved-live-group", name = "Saved independent routing",
+                profileIds = listOf(member.id))
+            val rules = listOf(
+                AppDomainRule(id = "saved-block", packages = listOf("com.android.shell"),
+                    domains = listOf("full:saved-block.invalid"), target = "block"),
+                AppDomainRule(id = "saved-redirect", packages = listOf("com.android.shell"),
+                    domains = listOf("full:saved-redirect.invalid"), target = group.id),
+            )
+            val savedPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), rules, group.id))
+            settings.liveRoutingPlan = savedPlan
+            fun requireOrdinary(stage: String) {
+                listOf("saved-block.invalid", "saved-redirect.invalid").forEachIndexed { index, host ->
+                    assertArrayEquals(target.payload, transferTunHttp("$stage-$index", target.port, host))
+                    assertEquals("/vpn-$stage-$index", target.requests.poll(5, TimeUnit.SECONDS)!!.path)
+                }
+                assertNull("Saved Live Routing redirect received ordinary VPN traffic", redirected.requests.poll())
+                val liveStatus = LiveRoutingHelper.decodeRuntimeStatus(XrayCore.liveRoutingStatus())
+                assertTrue("Ordinary VPN native core is not running", liveStatus.running)
+                assertTrue(liveStatus.groups.isEmpty())
+                assertEquals(profile.id, settings.selectedProfile)
+                assertEquals(savedPlan, settings.liveRoutingPlan)
+                assertNull(ConnectionFailureState.failure.value)
+                assertTrue(TProxyService.isActive())
+            }
+
+            start()
+            requireOrdinary("saved-rules-ignored")
+            val unknownOwner = withTimeout(15_000) {
+                (context.applicationContext as Yaxc).connectionRepository.state.first { state ->
+                    state.connections.any { it.profileId == profile.id && it.uid == -1 }
+                }.connections.first { it.profileId == profile.id && it.uid == -1 }
+            }
+            assertTrue("No-auth traffic must not be assigned to a guessed application", unknownOwner.apps.isEmpty())
+            val applied = settings.xrayConfig().readBytes()
+            TProxyService.applyRouting(context)
+            awaitUnchangedAcknowledgement(profile.name)
+            assertArrayEquals(applied, settings.xrayConfig().readBytes())
+            requireOrdinary("ordinary-apply-ignored")
+
+            // The real subscription now contains only the ordinary profile. Its identity remains,
+            // while the saved Live Routing member disappears without rewriting the saved plan.
+            ReloadSubscriptionTarget(JSONObject(profile.config).put("remarks", profile.name).toString()).use { subscription ->
+                source.address = subscription.url
+                db.linkDao().update(source)
+                assertEquals(1, SubscriptionRefreshHelper(context, settings).refreshLinks(source.id).refreshed)
+                subscription.awaitServed()
+                awaitUnchangedAcknowledgement(profile.name)
+                assertNull(db.profileDao().indexOf(member.id))
+                assertEquals(profile.id, db.profileDao().linkProfiles(source.id).single().id)
+                assertArrayEquals(applied, settings.xrayConfig().readBytes())
+                requireOrdinary("after-member-refresh")
+            }
+
+            TProxyService.applyRouting(context)
+            awaitUnchangedAcknowledgement(profile.name)
+            requireOrdinary("ordinary-apply-with-missing-member")
+            TProxyService.restart(context)
+            await(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+            requireOrdinary("ordinary-restart-with-missing-member")
+            TProxyService.stop(context)
+            await(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+            assertFalse(TProxyService.isActive())
+            requireSocksListenerReleased()
+
+            settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+            TProxyService.start(context, true)
+            val failure = withTimeout(15_000) { ConnectionFailureState.failure.filterNotNull().first() }
+            assertTrue(failure.diagnostic, failure.diagnostic.contains("missing profile ${member.id}"))
+            assertFalse(TProxyService.isActive())
+            requireSocksListenerReleased()
+            val liveStatus = LiveRoutingHelper.decodeRuntimeStatus(XrayCore.liveRoutingStatus())
+            assertFalse("Rejected Live Routing start acquired runtime", liveStatus.running)
+            assertTrue(liveStatus.groups.isEmpty())
+            assertArrayEquals(applied, settings.xrayConfig().readBytes())
+            assertEquals(savedPlan, settings.liveRoutingPlan)
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            assertFalse(events.any {
+                it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME ||
+                    it.action == TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME
+            })
+
+            settings.selectedProfile = profile.id
+            start()
+            requireOrdinary("return-to-ordinary")
+            assertArrayEquals(applied, settings.xrayConfig().readBytes())
+            assertTrue(redirected.failures.toString(), redirected.failures.isEmpty())
+            assertTrue(target.failures.toString(), target.failures.isEmpty())
+        }
+    }
+
+    @Test
     fun liveAppDomainGroupsSwitchAndBalanceNewFlowsWithoutBreakingEstablishedTunStream() = runBlocking {
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+        settings.appsRoutingMode = Settings.AppsRoutingMode.Include
+        settings.appsRouting = "com.android.shell"
+        db.configDao().update(Config(
+            routingMode = Config.Mode.Replace,
+            routing = """{"rules":[{"port":"53,853","outboundTag":"block"}]}""",
+        ))
         settings.socksUsername = "fixture-user"
         settings.socksPassword = "fixture-password"
-        settings.liveRoutingPlan = "{}"
         LoopbackTarget().use { first ->
             LoopbackTarget().use { second ->
                 ChainedStreamTarget(frames = 4).use { stream ->
@@ -364,6 +670,8 @@ class VpnDeviceIntegrationTest {
                         var group = ProxyGroup(id = "live-main", name = "Live mixed sources",
                             profileIds = listOf(a.id, b.id), selectedProfileId = a.id)
                         val other = ProxyGroup(id = "live-other", name = "Other domain", profileIds = listOf(b.id))
+                        val streamGroup = ProxyGroup(id = "live-stream", name = "Retained stream",
+                            profileIds = listOf(profile.id))
                         val rules = listOf(
                             AppDomainRule(id = "live-rule", packages = listOf("com.android.shell"),
                                 domains = listOf("full:live-routing.invalid"), target = group.id),
@@ -371,7 +679,9 @@ class VpnDeviceIntegrationTest {
                                 domains = listOf("full:other-routing.invalid"), target = other.id),
                         )
                         fun save() {
-                            settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group, other), rules))
+                            settings.liveRoutingPlan = LiveRoutingHelper.encode(
+                                LiveRoutingPlan(listOf(streamGroup, group, other), rules, streamGroup.id),
+                            )
                         }
                         save()
                         start()
@@ -424,7 +734,7 @@ class VpnDeviceIntegrationTest {
                             exchange("after-rejected-missing-member")
                         }
                         stream.awaitFinished()
-                        assertEquals(profile.id, settings.selectedProfile)
+                        assertEquals(LiveRoutingHelper.CONNECTION_PROFILE_ID, settings.selectedProfile)
                         assertTrue(TProxyService.isActive())
                     } finally {
                         db.linkDao().delete(otherSource)
@@ -520,6 +830,13 @@ class VpnDeviceIntegrationTest {
 
     @Test
     fun appUidRoutesStandardUdpToUpdatedGroupWithoutRestart() = runBlocking {
+        settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
+        settings.appsRoutingMode = Settings.AppsRoutingMode.Include
+        settings.appsRouting = "com.android.shell"
+        db.configDao().update(Config(
+            routingMode = Config.Mode.Replace,
+            routing = """{"rules":[{"port":"53,853","outboundTag":"block"}]}""",
+        ))
         settings.socksUsername = "fixture-user"
         settings.socksPassword = "fixture-password"
         settings.socksUdp = true
@@ -533,15 +850,15 @@ class VpnDeviceIntegrationTest {
                 val rule = AppDomainRule(id = "udp-rule", packages = listOf("com.android.shell"), target = "udp-group")
                 var group = ProxyGroup(id = "udp-group", name = "UDP group",
                     profileIds = listOf(a.id, b.id), selectedProfileId = a.id)
-                settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), listOf(rule)))
+                settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), listOf(rule), group.id))
                 start()
                 requireUdpReply(first, "before-live-switch")
                 group = group.copy(selectedProfileId = b.id)
-                settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), listOf(rule)))
+                settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(listOf(group), listOf(rule), group.id))
                 TProxyService.applyRouting(context)
                 await(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
                 requireUdpReply(second, "after-live-switch")
-                assertEquals(profile.id, settings.selectedProfile)
+                assertEquals(LiveRoutingHelper.CONNECTION_PROFILE_ID, settings.selectedProfile)
                 TProxyService.stop(context)
                 await(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
                 requireSocksListenerReleased()

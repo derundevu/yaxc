@@ -148,6 +148,12 @@ class TunOwnerPolicyIntegrationTest {
             val denied = policyService(defense = true, excluded = true, authenticated = authenticated)
             assertFalse(allow(denied, protocol, local, remote))
             assertEquals(if (authenticated) peerUid else Process.INVALID_UID, identity(allowed, protocol, local, remote))
+            if (authenticated) {
+                TProxyService::class.java.getDeclaredField("tunIdentityPackages").apply { isAccessible = true }
+                    .set(allowed, mapOf(peerUid to setOf(peerPackage, "missing.synthetic.shared.member")))
+                assertEquals("Uncertain analytics must not change UID-based routing", peerUid,
+                    identity(allowed, protocol, local, remote))
+            }
             val disabled = policyService(defense = false, excluded = true, authenticated = authenticated)
             assertTrue(allow(disabled, protocol, local, remote))
         }
@@ -162,7 +168,7 @@ class TunOwnerPolicyIntegrationTest {
         TProxyService::class.java.getDeclaredField("runtimeOptions").apply { isAccessible = true }
             .set(service, RuntimeOptions.capture(settings, context.packageName))
         TProxyService::class.java.getDeclaredField("tunIdentityPackages").apply { isAccessible = true }
-            .set(service, mapOf(peerPackage to peerUid))
+            .set(service, mapOf(peerUid to setOf(peerPackage)))
         return service
     }
 

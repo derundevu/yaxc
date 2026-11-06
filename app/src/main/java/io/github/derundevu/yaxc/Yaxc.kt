@@ -9,6 +9,7 @@ import androidx.core.os.LocaleListCompat
 import io.github.derundevu.yaxc.database.YaxcDatabase
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
 import io.github.derundevu.yaxc.repository.ConfigRepository
+import io.github.derundevu.yaxc.repository.ConnectionRepository
 import io.github.derundevu.yaxc.repository.LinkRepository
 import io.github.derundevu.yaxc.repository.ProfileRepository
 
@@ -18,6 +19,7 @@ open class Yaxc : Application() {
     val configRepository by lazy { ConfigRepository(yaxcDatabase.configDao(), Settings(this)) }
     val linkRepository by lazy { LinkRepository(yaxcDatabase.linkDao()) }
     val profileRepository by lazy { ProfileRepository(yaxcDatabase.profileDao()) }
+    val connectionRepository by lazy { ConnectionRepository(this, Settings(this)) }
 
     override fun onCreate() {
         super.onCreate()
