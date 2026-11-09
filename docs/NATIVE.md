@@ -10,7 +10,7 @@ parent-repository gitlinks pin exact commits, not the latest fork branch HEAD.
 
 | Submodule | GitHub fork | Consumer / output |
 | --- | --- | --- |
-| `XrayCore/Xray-core` | `derundevu/Xray-core` | Go core in `app/libs/XrayCore.aar` |
+| `XrayCore/Xray-core` | `derundevu/proxide` | Go core in `app/libs/XrayCore.aar` |
 | `XrayCore/libXray` | `derundevu/libXray` | Wrapper in the same AAR |
 | `XrayHelper` | `derundevu/XrayHelper` | `app/src/main/assets/xrayhelpers/<Android ABI>`, root runtime |
 | `app/src/main/jni/hev-socks5-tunnel` | `derundevu/hev-socks5-tunnel` | tun2socks/JNI, built by NDK through Gradle |
@@ -18,6 +18,44 @@ parent-repository gitlinks pin exact commits, not the latest fork branch HEAD.
 The tunnel's nested submodules have their own URLs and pinned commits; they were not all moved to these forks.
 [`XrayCore/go.mod`](../XrayCore/go.mod) replaces `github.com/xtls/xray-core` and `github.com/xtls/libxray`
 with local directories. Do not rename module paths/imports just because the Git remote is a fork.
+
+### Current candidate: proxide 26.11.9.1
+
+The core checkout selects [proxide v26.11.9.1](https://github.com/derundevu/proxide/releases/tag/v26.11.9.1),
+published commit `3e448b440b1c22d3ed14f03d43ffe71c3a8661a8`, based on upstream Xray **26.11.9**.
+The existing `XrayCore/Xray-core` directory and `github.com/xtls/xray-core` import/module path remain unchanged.
+`XrayCore/go.mod` records `v1.260327.1-0.20261109082005-3e448b440b1c` with the local replacement;
+the four-component fork tag is not a Go-module semantic version. `core.Version()` now reports **26.11.9.1**
+without linker overrides. Pin the checked-out published commit in the parent gitlink when committing this migration.
+
+The retained libXray pin remains `ae5f78b63aee108c4fc21d08be8221fb2f5f8e41`; its standalone builder still targets
+upstream .31, but the application module's local replacements and selected graph use proxide for every wrapper import.
+No wrapper working-tree patch, compatibility shim or new unpublished fork commit is required. Go **1.27.3**,
+the gomobile pin, XrayHelper and tunnel pins remain unchanged. The application graph updates uTLS, REALITY, gRPC,
+`x/net`, compression/CPU dependencies and adds `go-brrr`; obsolete Brotli dependency entries are removed.
+
+Compatibility changes relevant to consumers:
+
+- Core JSON output uses `log.logLevel`; both that spelling and legacy `log.loglevel` remain accepted on input.
+  JSON-import coverage compares effective built configurations rather than the spelling of a re-serialized key.
+- Freedom `finalRules` use `delay` and optional `logLevel` for blocking rules. Legacy `blockDelay` still works
+  with an upstream deprecation warning; delay/logging on non-block rules is rejected. The app does not generate
+  those fields, so supplied configurations retain the core's validation instead of receiving an app-side rewrite.
+  Upstream's default safe-policy filtering also applies to MASQUE.
+- VLESS mux now serializes underlying writes and raises nonnegative concurrency values up to 128 to 128;
+  maximum worker reuse increases to 1024. Proxide retains interruption/close propagation and observation completion.
+- The default Chrome TLS fingerprint advances to Chrome 155. Connection-observation, managed-routing and
+  cancellation APIs used by the application remain present; no facade API cutover is needed.
+
+The core AAR, helper and debug APK have been built for arm64; a host smoke run reported 26.11.9.1 and exercised
+validation, start and stop. The host facade tests passed without proxy environment variables, while the lib
+stress suite failed on macOS with `can't assign requested address` during concurrent SOCKS flows. These checks do
+not establish Android runtime compatibility. Run the [native migration gates](DEVELOPMENT.md#proxide-261191-migration-gates),
+rebuild for every release ABI, and run the Android and 4 KB/16 KB emulator gates before publication. Historical
+results below are not evidence for this source pin.
+
+### Historical baselines
+
 
 The published **26.10.29 migration baseline** uses upstream `0afec66085a85191e9dd2a4a6646c7c9a94688d1`, with
 failed-construction cleanup and synchronized per-connection splice state. Neither fork fix is present upstream.
@@ -384,12 +422,12 @@ tests pass. A real Android probe also passed GET/HEAD/TCP over native VLESS/XHTT
 cancelled ten active/queued requests, recovered every slot and preserved a separate sentinel core's traffic.
 The source-built host target observed five simultaneous held requests and all five connections closing on cancellation.
 
-## Connection analytics (local source changes)
+## Connection analytics
 
-These uncommitted changes modify the core working tree and parent facade/Android consumers, not the retained
-libXray, tunnel or helper forks. Versions remain Xray 26.10.31 / Go 1.27.3. Rebuild the core AAR from these sources
-before Android compilation; an old AAR lacks `ConnectionSnapshot` and `ClearConnectionHistory`. The owner must
-publish the modified core fork and update the parent gitlink before clean-checkout CI or release publication.
+The connection-observation core changes were published in the previous parent pin
+`1ad22b5caf1f59cbbae54cf6c8f6765b3759aaca` and are retained by proxide **26.11.9.1**.
+The parent facade and Android consumers require a matching source-built AAR: an older AAR lacks
+`ConnectionSnapshot` and `ClearConnectionHistory`. The retained libXray, tunnel and helper pins are unchanged.
 
 `lib.Start` installs a per-instance `DefaultDispatcher.SetConnectionObserver` before starting listeners.
 Validation and bare ping instances do not install it. Observation starts before sniffing/routing and captures the

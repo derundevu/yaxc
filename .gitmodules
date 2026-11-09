@@ -6,7 +6,7 @@
 	url = https://github.com/derundevu/libXray.git
 [submodule "XrayCore/Xray-core"]
 	path = XrayCore/Xray-core
-	url = https://github.com/derundevu/Xray-core.git
+	url = https://github.com/derundevu/proxide.git
 [submodule "XrayHelper"]
 	path = XrayHelper
 	url = https://github.com/derundevu/XrayHelper.git

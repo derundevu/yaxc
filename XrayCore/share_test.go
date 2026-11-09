@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	xray "XrayCore"
+
+	"github.com/xtls/xray-core/infra/conf"
+	"google.golang.org/protobuf/proto"
 )
 
 type shareResponse struct {
@@ -282,8 +285,29 @@ func TestShareFacadeSubscriptionEncodingsAndOrder(t *testing.T) {
 }
 
 func TestShareFacadeJSONInput(t *testing.T) {
-	config := []byte(`{"log":{"loglevel":"none"},"outbounds":[{"tag":"synthetic-direct","protocol":"freedom","settings":{"domainStrategy":"AsIs"}}]}`)
-	requireJSONFields(t, importShare(t, string(config)), config)
+	for _, logKey := range []string{"loglevel", "logLevel"} {
+		t.Run(logKey, func(t *testing.T) {
+			config := []byte(fmt.Sprintf(`{"log":{%q:"none"},"outbounds":[{"tag":"synthetic-direct","protocol":"freedom","settings":{"domainStrategy":"AsIs"}}]}`, logKey))
+			var input, imported conf.Config
+			if err := json.Unmarshal(config, &input); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(importShare(t, string(config)), &imported); err != nil {
+				t.Fatal(err)
+			}
+			want, err := input.Build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := imported.Build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !proto.Equal(got, want) {
+				t.Fatal("JSON import changed the effective core configuration")
+			}
+		})
+	}
 }
 
 func TestShareFacadeRejectsMalformedInput(t *testing.T) {

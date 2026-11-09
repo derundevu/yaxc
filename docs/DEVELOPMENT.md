@@ -12,9 +12,9 @@ module graph. XrayHelper selects the same Go patch. Use the Gradle wrapper.
 If `ANDROID_SDK_ROOT` is already set, make it match `ANDROID_HOME` (or unset it for the command); AGP rejects conflicting SDK paths.
 
 Native builds use submodule sources directly; see [Native dependencies](NATIVE.md#sources-and-versions).
-The parent pins published 26.10.31 core/wrapper and Live Routing tunnel forks; see the exact commits in
-[Native dependencies](NATIVE.md#sources-and-versions). Hosted CI passed on `518e3a9`; later uncommitted work is
-not covered by that run. Local scripts and CI apply no patches; preserve any local submodule edits.
+The current source candidate selects published proxide **26.11.9.1**, the retained libXray wrapper and the
+unchanged Live Routing tunnel fork; see the exact commits in [Native dependencies](NATIVE.md#sources-and-versions).
+Hosted CI passed on historical `518e3a9`, not this candidate. Local scripts and CI apply no patches; preserve any local submodule edits.
 
 On a fresh checkout with no local submodule edits:
 
@@ -67,7 +67,7 @@ per ABI. Gradle retains ABI splits and adds a universal output whenever `abiTarg
 The all-ABI debug build produces `app-universal-debug.apk` plus the four `app-<ABI>-debug.apk` files in
 `app/build/outputs/apk/debug/`. A single-ABI build produces only its split APK, such as
 `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`; explicitly select that ABI when building native artifacts for one device.
-Every APK uses the same `app/versionCode.txt` value, currently **1176**, without architecture offsets.
+Every APK uses the same `app/versionCode.txt` value, currently **1177**, without architecture offsets.
 `build_do_not_push.sh` is machine-specific and may install a stale APK after a build failure; do not use it as the build entry point.
 
 ### Install and verify
@@ -144,7 +144,7 @@ DEVICE=tv
 ```
 
 The prepared app APK in `.android/artifacts/` is the **1.5.1** smoke baseline, not proof of the current
-1.5.4 candidate. These copies do **not** update automatically. Rebuild/reinstall after application
+1.5.5 candidate. These copies do **not** update automatically. Rebuild/reinstall after application
 changes; never use old copies after a failed build or emulator-native artifacts for an arm64 phone build.
 
 For manual TV checks, use **Extended controls → Directional Pad**, keyboard arrows/confirmation/Back,
@@ -195,6 +195,37 @@ curl --fail --location --silent --show-error \
   https://raw.githubusercontent.com/XTLS/Xray-rules-dat/b2fd201b17cdbb2a6aff5e49a52910247d026778/geosite/geosite-expand.dat
 ```
 
+### Proxide 26.11.9.1 migration gates
+
+After preparing the pinned geosite fixture above, run the native compatibility gates from the repository root:
+
+```bash
+(
+  cd XrayCore &&
+  GOTOOLCHAIN=go1.27.3 go test -mod=readonly -race -count=1 -timeout=240s . ./lib \
+    github.com/xtls/xray-core/app/observatory \
+    github.com/xtls/xray-core/app/router \
+    github.com/xtls/xray-core/app/proxyman/outbound \
+    github.com/xtls/xray-core/infra/conf \
+    github.com/xtls/xray-core/transport/internet \
+    github.com/xtls/xray-core/transport/internet/tls \
+    github.com/xtls/xray-core/transport/internet/splithttp &&
+  GOTOOLCHAIN=go1.27.3 go test -mod=readonly -count=1 -timeout=90s \
+    github.com/xtls/libxray/nodep github.com/xtls/libxray/share
+) &&
+(
+  cd XrayCore/Xray-core &&
+  GOTOOLCHAIN=go1.27.3 go test -mod=readonly -race -count=1 -timeout=90s \
+    ./common/buf ./common/mux ./common/session ./proxy ./proxy/socks ./proxy/http ./proxy/loopback
+)
+```
+
+These cover the retained facade/import/ping/routing contracts and changed log schema, mux writers, observations
+and splice behavior. They do not establish Android runtime compatibility. Rebuild native artifacts for every
+packaged ABI, then run the Android host gates below and the isolated 4 KB/16 KB instrumentation matrix.
+Do not treat old AARs or the historical CI result as evidence for proxide 26.11.9.1.
+
+
 After building the arm64 native artifacts, the local Android check is:
 
 ```bash
@@ -228,8 +259,8 @@ Required-check branch rules must be configured separately on GitHub; CI alone do
 in `app/build.gradle.kts`. Its five-row matrix builds four signed ABI APKs and a complete universal APK;
 the universal row builds all native ABIs but stages only `app-universal-release.apk`. A GitHub Release is published
 only after all five builds succeed. Notes come from `metadata/en-US/changelogs/<versionCode>.txt`, using the shared code directly.
-The prepared candidate is **1.5.4 / versionCode 1176**, with notes in
-[`metadata/en-US/changelogs/1176.txt`](../metadata/en-US/changelogs/1176.txt). Local unsigned APKs are packaging
+The prepared candidate is **1.5.5 / versionCode 1177**, with notes in
+[`metadata/en-US/changelogs/1177.txt`](../metadata/en-US/changelogs/1177.txt). Local unsigned APKs are packaging
 checks, not production-signed release assets; publication still requires the configured release signing secrets.
 The release workflow does not run or wait for the CI workflow. Tag only the exact parent revision whose clean-checkout
 CI has passed with all modified fork commits published and pinned; pushing a release tag starts publication directly.

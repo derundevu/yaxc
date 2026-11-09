@@ -1,0 +1,22 @@
+## What's new in 1.5.5
+
+### Connection analytics
+
+- Tap the large connection card on Connect to inspect connections by app or by configuration, with active/finished filters, destinations, protocol, runtime route and upload/download payload counters.
+- Attribute Live Routing traffic to the actual member used by each connection. Established streams retain their original member and captured labels after live routing changes.
+- Keep bounded history in memory: up to 5,000 connections / 8 MiB, with finished rows expiring after 24 hours. Capture continues when the analytics screen closes; buffer pressure and incomplete counters are shown explicitly.
+- Added optional private on-device history, off by default and excluded from Android backups. Turning it off deletes saved history; clearing finished history preserves active connections and never stops traffic.
+- App attribution requires Android 10+ VPN owner lookup and authenticated local SOCKS identities. Unknown owners remain unknown; shared UIDs list all associated packages. Reused UIDs or changed shared-UID membership are not reassigned to another app's history.
+- Internal DNS and availability-check traffic is excluded from user connection analytics. Root-mode analytics is explicitly unavailable. Counters cover logical proxy payloads, not transport overhead or provider quota; UDP rows represent associations rather than separate per-destination totals.
+
+### Routing
+
+- Ordinary profile connections now operate independently of the saved Live Routing plan, using the selected profile, global settings and Core Routing only.
+- Saving Live Routing rules or changing its availability-check interval updates only an active Live Routing session. Invalid plans or missing members no longer prevent ordinary profile connections.
+
+### Embedded core
+
+- Switched the embedded core to the derundevu/proxide fork, version 26.11.9.1, based on Xray 26.11.9, while retaining the fork's Live Routing and connection-observation support.
+- Settings now identifies the core as "derundevu/proxide (Xray fork)" instead of "Xray"; the core version remains displayed separately.
+
+The package ID and Room schema are unchanged. The separately managed root-mode Xray executable is not upgraded by this release. Connection destinations and app identities are sensitive: enable saved history only when needed.
