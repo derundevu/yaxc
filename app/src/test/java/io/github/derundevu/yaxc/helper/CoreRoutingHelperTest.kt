@@ -262,18 +262,6 @@ class CoreRoutingHelperTest {
         assertFalse(CoreRoutingHelper.shouldUpgradeSeededDefaults(old + CoreRoutingRule(portsText = "53")))
     }
 
-    @Test
-    fun onlyEffectiveRoutingOrCustomSettingsAreMeaningful() {
-        assertFalse(CoreRoutingHelper.isMeaningfulRoutingJson("{}"))
-        assertFalse(CoreRoutingHelper.isMeaningfulRoutingJson("not json"))
-        assertFalse(CoreRoutingHelper.isMeaningfulRoutingJson("""{"domainStrategy":"IPIfNonMatch"}"""))
-        assertFalse(CoreRoutingHelper.isMeaningfulRoutingJson("""{"domainStrategy":"IPIfNonMatch","rules":[]}"""))
-        assertFalse(CoreRoutingHelper.isMeaningfulRoutingJson("""{"rules":[]}"""))
-        assertTrue(CoreRoutingHelper.isMeaningfulRoutingJson("""{"domainStrategy":"AsIs"}"""))
-        assertTrue(CoreRoutingHelper.isMeaningfulRoutingJson("""{"domainMatcher":"hybrid"}"""))
-        assertTrue(CoreRoutingHelper.isMeaningfulRoutingJson("""{"rules":[{"outboundTag":"direct"}]}"""))
-    }
-
     @Test(expected = IllegalArgumentException::class)
     fun importingScalarIsRejected() {
         CoreRoutingHelper.parseImportedRules("false")

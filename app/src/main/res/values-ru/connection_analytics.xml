@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ca_back">Назад</string>
+    <string name="ca_history">История</string>
+    <string name="ca_search">Домен, IP или порт</string>
+    <string name="ca_app">Приложение</string>
+    <string name="ca_config">Конфиг</string>
+    <string name="ca_protocol">Протокол</string>
+    <string name="ca_route">Маршрут</string>
+    <string name="ca_terminal">Исход</string>
+    <string name="ca_period">Начало</string>
+    <string name="ca_sort">Порядок</string>
+    <string name="ca_reset">Сбросить фильтры</string>
+    <string name="ca_period_five">За 5 мин</string>
+    <string name="ca_period_hour">За час</string>
+    <string name="ca_period_day">За сутки</string>
+    <string name="ca_newest">Сначала новые</string>
+    <string name="ca_traffic">По трафику</string>
+    <string name="ca_duration">По длительности</string>
+    <string name="ca_unavailable_identity">Выбранный вариант (записей больше нет)</string>
+    <string name="ca_summary">Активных: %1$d · завершённых: %2$d · ↑ %3$s · ↓ %4$s</string>
+    <string name="ca_retained">Итоги по оставшимся записям с этими фильтрами, не за всё время</string>
+    <string name="ca_running">Записываются соединения приложений</string>
+    <string name="ca_stopped">Запись остановлена · сохранённая история</string>
+    <string name="ca_disabled">Запись отключена · сохранённая история</string>
+    <string name="ca_disabled_empty">Нет подходящих записей. Запись аналитики отключена — включи её в разделе «История», чтобы собирать новые соединения.</string>
+    <string name="ca_capture">Записывать аналитику подключений</string>
+    <string name="ca_capture_hint">Отключение записи не останавливает прокси и не удаляет прошлую историю. После включения записываются только новые соединения, но не существующие потоки.</string>
+    <string name="ca_incomplete">Запись или хранение могли быть неполными · см. историю</string>
+    <string name="ca_retention">Буфер ядра вмещает до 2048 записей. История Android ограничена 5000 записями и 8 МиБ; завершённые записи удаляются через 24 часа. Активные записи имеют приоритет. Лимиты не останавливают передачу трафика.</string>
+    <string name="ca_native_evicted">Вытеснений из буфера ядра: %1$d</string>
+    <string name="ca_native_uncertainty">Вытеснение из ядра возможно до или после получения записи Android. Это число событий, а не уникальных пропущенных соединений; часть вытеснений может означать потерю истории.</string>
+    <string name="ca_history_evicted">Ротаций истории Android: %1$d · старые завершённые записи удалены по лимитам хранения</string>
+    <string name="ca_rejected">Отказов записи · ядро: %1$d · Android: %2$d. Из-за отказов соединения могут отсутствовать в истории; передача трафика не затронута.</string>
+    <string name="ca_legacy_events">Неразделённых событий из прежней истории: %1$d · источник и число уникальных пропущенных соединений неизвестны</string>
+    <string name="ca_clear_hint">Удаляет завершённые записи из ядра, памяти и хранилища, сбрасывает счётчики событий истории. Активные записи и учёт их трафика сохраняются.</string>
+    <string name="ca_detail">Детали соединения</string>
+    <string name="ca_record_id">Запись: %1$s</string>
+    <string name="ca_copy">Копировать детали</string>
+    <string name="ca_done">Готово</string>
+</resources>

@@ -5,13 +5,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/session"
 )
 
 func connectionLedgerFixture() *connectionLedger {
-	return &connectionLedger{connectionHistory: &connectionHistory{epoch: "isolated-history", records: make(map[uint64]*observedConnection)},
+	return &connectionLedger{connectionHistory: &connectionHistory{epoch: "isolated-history", enabled: true, records: make(map[uint64]*observedConnection)},
 		runtimeID: "first-core", accepting: true,
 		routes: map[string]connectionProfile{"proxy": {ProfileID: 41, Fingerprint: strings.Repeat("a", 64), Route: "proxy", logicalTag: "proxy"}}}
 }
@@ -38,8 +39,8 @@ func TestConnectionHistorySaturationNeverEvictsAnActiveFlowOrChangesItsCounters(
 		t.Fatal("closed-row eviction did not admit a new real flow")
 	}
 	snapshot := ledger.snapshot()
-	if len(snapshot.Connections) != maxConnectionRecords || snapshot.Dropped != 2 {
-		t.Fatalf("wrong bounded history: count=%d dropped=%d", len(snapshot.Connections), snapshot.Dropped)
+	if len(snapshot.Connections) != maxConnectionRecords || snapshot.NativeEvicted != 1 || snapshot.NativeRejected != 1 {
+		t.Fatalf("wrong bounded history or event classification: %+v", snapshot)
 	}
 	for _, flow := range snapshot.Connections {
 		if flow.Destination == "flow-0.invalid:443" {
@@ -108,5 +109,93 @@ func TestConcurrentConnectionCountersAndRepeatedFinishPreserveOneClosedObservati
 	snapshot := ledger.snapshot()
 	if len(snapshot.Connections) != 1 || snapshot.Connections[0].Upload != 24000 || snapshot.Connections[0].Download != 56000 || ledger.count != 1 {
 		t.Fatalf("concurrent accounting or repeated terminal callback corrupted history: %+v", snapshot)
+	}
+}
+
+func TestFinishedRetentionUsesCompletionFIFOInsteadOfAdmissionOrder(t *testing.T) {
+	ledger := connectionLedgerFixture()
+	active := make([]session.ConnectionObservation, maxConnectionRecords)
+	for index := range active {
+		active[index] = ledger.Open(connectionMetadataFixture(index))
+	}
+	active[1].Finish("closed")
+	active[0].Finish("closed")
+	ledger.Open(connectionMetadataFixture(maxConnectionRecords))
+	ledger.mu.Lock()
+	_, retainedFirst := ledger.records[1]
+	_, retainedSecond := ledger.records[2]
+	ledger.mu.Unlock()
+	if !retainedFirst || retainedSecond || ledger.snapshot().NativeEvicted != 1 {
+		t.Fatal("retention used start order instead of completion FIFO")
+	}
+	ledger.Open(connectionMetadataFixture(maxConnectionRecords + 1))
+	ledger.mu.Lock()
+	_, retainedFirst = ledger.records[1]
+	ledger.mu.Unlock()
+	if retainedFirst || ledger.snapshot().NativeEvicted != 2 {
+		t.Fatal("the next completed row was not the next FIFO victim")
+	}
+}
+
+func TestClearResetsMetricsAndFencesSnapshotsWithoutTouchingActiveAccounting(t *testing.T) {
+	ledger := connectionLedgerFixture()
+	previous := currentConnections.Swap(ledger)
+	t.Cleanup(func() { currentConnections.Store(previous) })
+	active := ledger.Open(connectionMetadataFixture(1))
+	closed := ledger.Open(connectionMetadataFixture(2))
+	closed.Finish("closed")
+	ledger.mu.Lock()
+	ledger.evicted, ledger.rejected = 7, 3
+	ledger.mu.Unlock()
+	before := ledger.snapshot()
+	ClearConnectionHistory()
+	active.AddUpload(31)
+	active.AddDownload(73)
+	closed.AddDownload(999)
+	closed.Finish("closed")
+	after := ledger.snapshot()
+	if after.Generation != before.Generation+1 || after.NativeEvicted != 0 || after.NativeRejected != 0 || len(after.Connections) != 1 {
+		t.Fatalf("clear did not reset history and advance its fence: %+v", after)
+	}
+	if flow := after.Connections[0]; flow.State != "active" || flow.Upload != 31 || flow.Download != 73 {
+		t.Fatalf("clear changed a forwarding observation: %+v", flow)
+	}
+	active.Finish("closed")
+	if snapshot := ledger.snapshot(); len(snapshot.Connections) != 1 || snapshot.Connections[0].Download != 73 {
+		t.Fatalf("preserved active observation lost its terminal accounting: %+v", snapshot)
+	}
+}
+
+func TestNativeTTLExpiryIsEvictionNotCaptureRejection(t *testing.T) {
+	ledger := connectionLedgerFixture()
+	closed := ledger.Open(connectionMetadataFixture(1)).(*observedConnection)
+	active := ledger.Open(connectionMetadataFixture(2))
+	closed.Finish("closed")
+	ledger.mu.Lock()
+	closed.document.EndedAt = time.Now().Add(-connectionRetention - time.Second).UnixMilli()
+	ledger.mu.Unlock()
+	active.AddUpload(13)
+	snapshot := ledger.snapshot()
+	if snapshot.NativeEvicted != 1 || snapshot.NativeRejected != 0 || len(snapshot.Connections) != 1 || snapshot.Connections[0].Upload != 13 {
+		t.Fatalf("TTL expiry changed active accounting or misclassified an event: %+v", snapshot)
+	}
+}
+
+func TestExplicitDisabledSnapshotStillExpiresRetainedHistory(t *testing.T) {
+	ledger := connectionLedgerFixture()
+	expired := ledger.Open(connectionMetadataFixture(1)).(*observedConnection)
+	recent := ledger.Open(connectionMetadataFixture(2)).(*observedConnection)
+	expired.AddUpload(11)
+	expired.Finish("closed")
+	recent.AddDownload(17)
+	recent.Finish("closed")
+	ledger.mu.Lock()
+	expired.document.EndedAt = time.Now().Add(-connectionRetention - time.Second).UnixMilli()
+	ledger.enabled = false
+	ledger.captureGeneration = 3
+	ledger.mu.Unlock()
+	snapshot := ledger.snapshot()
+	if snapshot.Enabled || snapshot.CaptureGeneration != 3 || snapshot.Generation != 0 || snapshot.NativeEvicted != 1 || snapshot.NativeRejected != 0 || len(snapshot.Connections) != 1 || snapshot.Connections[0].Download != 17 {
+		t.Fatalf("disabled read suspended retention or changed capture fences: %+v", snapshot)
 	}
 }

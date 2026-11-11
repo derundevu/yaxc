@@ -11,7 +11,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /** Exactly one accepted TCP connection, with a bounded, cumulative binary response per frame. */
-internal class ChainedStreamTarget(private val frames: Int) : Closeable {
+internal class ChainedStreamTarget(private val frames: Int, private val idleTimeoutMillis: Int = 15_000) : Closeable {
     private val listener = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 15_000 }
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var client: Socket? = null
@@ -21,7 +21,7 @@ internal class ChainedStreamTarget(private val frames: Int) : Closeable {
         listener.accept().use { socket ->
             client = socket
             check(!listener.isClosed)
-            socket.soTimeout = 15_000
+            socket.soTimeout = idleTimeoutMillis
             val input = DataInputStream(socket.getInputStream())
             val output = DataOutputStream(socket.getOutputStream())
             var chain = byteArrayOf()

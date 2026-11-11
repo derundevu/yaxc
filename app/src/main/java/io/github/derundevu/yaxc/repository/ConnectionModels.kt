@@ -25,14 +25,26 @@ data class ConnectionRecord(
     val outboundTag: String = "",
     val route: String = "unknown",
     val apps: List<ConnectionApp> = emptyList(),
+    /** Local persistence fence: a capture cutoff is never eligible for late byte correction. */
+    val captureStopped: Boolean = false,
 )
 
-enum class ConnectionCaptureStatus { Stopped, Running, Unsupported, Error }
+enum class ConnectionCaptureStatus { Stopped, Running, Disabled, Unsupported, Error }
+
+/** Event counts, not a count of distinct missing flows; native evictions may precede capture. */
+data class ConnectionHistoryCounters(
+    val nativeEvicted: Long = 0,
+    val nativeRejected: Long = 0,
+    val historyEvicted: Long = 0,
+    val historyRejected: Long = 0,
+    val unclassified: Long = 0,
+)
 
 data class ConnectionHistoryState(
     val connections: List<ConnectionRecord> = emptyList(),
     val status: ConnectionCaptureStatus = ConnectionCaptureStatus.Stopped,
-    val dropped: Long = 0,
+    val counters: ConnectionHistoryCounters = ConnectionHistoryCounters(),
     val persistOnDisk: Boolean = false,
     val error: String? = null,
+    val captureEnabled: Boolean = true,
 )

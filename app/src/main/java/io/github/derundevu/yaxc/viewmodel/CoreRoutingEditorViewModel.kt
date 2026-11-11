@@ -16,12 +16,18 @@ import io.github.derundevu.yaxc.helper.CoreRoutingHelper
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.CoreRoutingRuleSlot
 import io.github.derundevu.yaxc.helper.ParsedCoreRouting
+import io.github.derundevu.yaxc.helper.CoreRoutingImportHelper
+import io.github.derundevu.yaxc.helper.CoreRoutingImportProfile
+import io.github.derundevu.yaxc.helper.CoreRoutingImportPreview
+import io.github.derundevu.yaxc.helper.CoreRoutingImportResult
+import kotlinx.coroutines.CancellationException
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorTools
 import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -48,6 +54,17 @@ class CoreRoutingEditorViewModel internal constructor(
         private set
     var savedRevision by mutableIntStateOf(0)
         private set
+    var routingMode by mutableStateOf(Config.Mode.Merge)
+        private set
+    var importProfiles by mutableStateOf<List<CoreRoutingImportProfile>>(emptyList())
+        private set
+    var importPreview by mutableStateOf<CoreRoutingImportPreview?>(null)
+        private set
+    var importVisible by mutableStateOf(false)
+        private set
+    var importError by mutableStateOf<String?>(null)
+        private set
+    val runtimeInboundTag: String get() = if (settings.transparentProxy) "all-in" else "socks"
     private lateinit var config: Config
     private var ruleOrder: List<CoreRoutingRuleSlot> = emptyList()
     private var preservedTopLevel = JSONObject()
@@ -67,6 +84,7 @@ class CoreRoutingEditorViewModel internal constructor(
                 loaded to parsed
             }
             config = loaded
+            routingMode = loaded.routingMode
             applyParsed(parsed)
             document.replaceText(loaded.routing)
             isLoading = false
@@ -148,13 +166,7 @@ class CoreRoutingEditorViewModel internal constructor(
                         CoreRoutingHelper.parseRoutingJson(raw, snapshot.rules, defaultRuleName)
                     } else snapshot
                     val json = if (mode == CoreRoutingEditorMode.Json) raw else buildJson(parsed)
-                    val routingMode = if (CoreRoutingHelper.isMeaningfulRoutingJson(json)) {
-                        Config.Mode.Merge
-                    } else Config.Mode.Disable
-                    val updated = config.copy(
-                        routing = if (routingMode == Config.Mode.Disable) "{}" else json,
-                        routingMode = routingMode,
-                    )
+                    val updated = config.copy(routing = json, routingMode = routingMode)
                     PreparedRouting(parsed, json, CoreRoutingHelper.encodeUiRules(parsed.rules, parsed.ruleOrder), updated)
                 }.getOrNull()
             } ?: return false
@@ -175,6 +187,108 @@ class CoreRoutingEditorViewModel internal constructor(
             isBusy = false
         }
     }
+    fun updateRoutingMode(value: Config.Mode) {
+        if (!isLoading && !isBusy) routingMode = value
+    }
+
+    suspend fun openProfileImport() {
+        if (isLoading || isBusy) return
+        isBusy = true
+        importError = null
+        try {
+            importProfiles = withContext(Dispatchers.IO) {
+                val visible = app.profileRepository.all.first().map {
+                    CoreRoutingImportProfile(it.id, it.name, it.config)
+                }
+                val inactive = app.linkRepository.all.first().filterNot { it.isActive }.flatMap { link ->
+                    app.profileRepository.linkProfiles(link.id).map {
+                        CoreRoutingImportProfile(it.id, it.name, it.config)
+                    }
+                }
+                (visible + inactive).distinctBy { it.id }
+            }
+            importPreview = null
+            importVisible = true
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            importError = error.message ?: app.getString(R.string.routingImportFailed)
+            importVisible = true
+        } finally {
+            isBusy = false
+        }
+    }
+
+    fun closeProfileImport() {
+        if (!isBusy) {
+            importVisible = false
+            importPreview = null
+            importError = null
+        }
+    }
+
+    suspend fun previewProfile(id: Long) {
+        if (isLoading || isBusy) return
+        isBusy = true
+        importError = null
+        try {
+            // Refresh the selected row; subscription refreshes may have changed it since opening the chooser.
+            val profile = withContext(Dispatchers.IO) { app.profileRepository.find(id) }
+            importPreview = withContext(computationDispatcher) {
+                CoreRoutingImportHelper.preview(CoreRoutingImportProfile(profile.id, profile.name, profile.config))
+            }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            importPreview = null
+            importError = error.message ?: app.getString(R.string.routingImportFailed)
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun importProfileRules(
+        selected: Set<Int>,
+        outboundMappings: Map<String, String>,
+        inboundMappings: Map<String, String>,
+        replace: Boolean,
+        importDomainStrategy: Boolean,
+    ): CoreRoutingImportResult? {
+        if (isLoading || isBusy) return null
+        val preview = importPreview ?: return null
+        val raw = if (editorMode == CoreRoutingEditorMode.Json) document.text else buildJson(visualSnapshot())
+        isBusy = true
+        importError = null
+        try {
+            val result = withContext(computationDispatcher) {
+                require(JsonEditorTools.validate(raw, document.root) == null) { app.getString(R.string.invalidConfig) }
+                CoreRoutingImportHelper.importIntoDraft(
+                    preview, raw, selected, outboundMappings, inboundMappings, runtimeInboundTag,
+                    replace, importDomainStrategy,
+                )
+            }
+            val parsed = withContext(computationDispatcher) {
+                CoreRoutingHelper.parseRoutingJson(result.routing, if (replace) emptyList() else rules, defaultRuleName,
+                    preserveImportedStructure = true)
+            }
+            require(editorMode != CoreRoutingEditorMode.Json || document.text == raw) {
+                app.getString(R.string.coreImportDraftChanged)
+            }
+            applyParsed(parsed)
+            // Keep complete source rule fields verbatim in the JSON draft; Save remains the only persistence step.
+            document.replaceText(result.routing)
+            editorMode = CoreRoutingEditorMode.Json
+            visualDirty = false
+            importVisible = false
+            importPreview = null
+            return result
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            importError = error.message ?: app.getString(R.string.routingImportFailed)
+            return null
+        } finally {
+            isBusy = false
+        }
+    }
+
 
     suspend fun importRules(raw: String): Int? {
         if (isLoading || isBusy) return null

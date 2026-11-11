@@ -29,6 +29,22 @@ const connectionRetention = 24 * time.Hour
 // Readers never contend with the core lifecycle lock or retain a core instance.
 var currentConnections atomic.Pointer[connectionLedger]
 
+// Changes are serialized with Start, Stop and ApplyRouting by lifecycleMu.
+// A nil preference is the process default: capture enabled, generation zero.
+var connectionCapturePreference atomic.Pointer[connectionCaptureSettings]
+
+type connectionCaptureSettings struct {
+	enabled    bool
+	generation uint64
+}
+
+func connectionCaptureSetting() connectionCaptureSettings {
+	if setting := connectionCapturePreference.Load(); setting != nil {
+		return *setting
+	}
+	return connectionCaptureSettings{enabled: true}
+}
+
 type connectionProfile struct {
 	ProfileID   int64  `json:"profileId"`
 	ProfileName string `json:"profileName"`
@@ -60,23 +76,32 @@ type connectionDocument struct {
 }
 
 type connectionSnapshot struct {
-	Running     bool                 `json:"running"`
-	Epoch       string               `json:"epoch"`
-	Dropped     uint64               `json:"dropped"`
-	Connections []connectionDocument `json:"connections"`
+	Running           bool                 `json:"running"`
+	Enabled           bool                 `json:"enabled"`
+	CaptureGeneration uint64               `json:"captureGeneration"`
+	Epoch             string               `json:"epoch"`
+	Generation        uint64               `json:"generation"`
+	NativeEvicted     uint64               `json:"nativeEvicted"`
+	NativeRejected    uint64               `json:"nativeRejected"`
+	Connections       []connectionDocument `json:"connections"`
 }
 
 type connectionHistory struct {
-	mu            sync.Mutex
-	epoch         string
-	running       bool
-	activeRuntime string
-	nextID        uint64
-	dropped       uint64
-	records       map[uint64]*observedConnection
-	closed        [maxConnectionRecords]*observedConnection
-	head          int
-	count         int
+	mu                sync.Mutex
+	epoch             string
+	running           bool
+	activeRuntime     string
+	nextID            uint64
+	generation        uint64
+	enabled           bool
+	captureGeneration uint64
+	ledgers           map[*connectionLedger]struct{}
+	evicted           uint64
+	rejected          uint64
+	records           map[uint64]*observedConnection
+	closed            [maxConnectionRecords]*observedConnection
+	head              int
+	count             int
 }
 
 // Each core owns its tag bindings, while records share one bounded process history.
@@ -86,11 +111,14 @@ type connectionLedger struct {
 	runtimeID string
 	accepting bool
 	routes    map[string]connectionProfile
+	observer  *dispatcher.DefaultDispatcher
+	pending   int
 }
 
 type observedConnection struct {
 	history      *connectionHistory
 	bindings     *connectionLedger
+	owner        *connectionLedger
 	runtimeID    string
 	sequence     uint64
 	document     connectionDocument // history.mu owns metadata, never session pointers.
@@ -170,12 +198,23 @@ func newConnectionLedger(server *core.Instance, document map[string]any, state *
 	if previous := currentConnections.Load(); previous != nil {
 		history = previous.connectionHistory
 	} else {
-		history = &connectionHistory{epoch: runtimeID, records: make(map[uint64]*observedConnection)}
+		setting := connectionCaptureSetting()
+		history = &connectionHistory{epoch: runtimeID, enabled: setting.enabled,
+			captureGeneration: setting.generation, records: make(map[uint64]*observedConnection)}
 	}
 	ledger := &connectionLedger{connectionHistory: history, runtimeID: runtimeID, accepting: true,
-		routes: make(map[string]connectionProfile)}
+		routes: make(map[string]connectionProfile), observer: observer}
 	ledger.publishProfiles(profiles, state.outbounds)
-	observer.SetConnectionObserver(ledger)
+	ledger.mu.Lock()
+	if ledger.ledgers == nil {
+		ledger.ledgers = make(map[*connectionLedger]struct{})
+	}
+	ledger.ledgers[ledger] = struct{}{}
+	enabled := ledger.enabled
+	ledger.mu.Unlock()
+	if enabled {
+		observer.SetConnectionObserver(ledger)
+	}
 	return ledger, nil
 }
 
@@ -213,13 +252,13 @@ func (l *connectionLedger) Open(metadata session.ConnectionMetadata) session.Con
 	// Internal sessions are excluded in the dispatcher, before reaching the ledger.
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !l.accepting {
+	if !l.accepting || !l.enabled {
 		return nil
 	}
 	l.evictExpiredLocked(time.Now().Add(-connectionRetention).UnixMilli())
 	if len(l.records) >= maxConnectionRecords {
 		if l.count == 0 {
-			l.dropped++
+			l.rejected++
 			return nil
 		}
 		l.evictOldestLocked()
@@ -234,7 +273,8 @@ func (l *connectionLedger) Open(metadata session.ConnectionMetadata) session.Con
 	if metadata.Network == net.Network_UDP {
 		kind = "association"
 	}
-	observation := &observedConnection{history: l.connectionHistory, bindings: l, runtimeID: l.runtimeID, sequence: l.nextID,
+	l.pending++
+	observation := &observedConnection{history: l.connectionHistory, bindings: l, owner: l, runtimeID: l.runtimeID, sequence: l.nextID,
 		document: connectionDocument{ID: l.epoch + "." + strconv.FormatUint(l.nextID, 10), Protocol: metadata.Network.SystemString(),
 			Destination: boundConnectionText(metadata.Destination.NetAddr(), 320), DestinationKind: kind,
 			StartedAt: time.Now().UnixMilli(), State: "active", UID: uid, Route: "unknown", LiveBytesExact: true}}
@@ -249,7 +289,7 @@ func (l *connectionLedger) evictOldestLocked() {
 	l.head = (l.head + 1) % maxConnectionRecords
 	l.count--
 	delete(l.records, entry.sequence)
-	l.dropped++
+	l.evicted++
 }
 
 func (l *connectionLedger) evictExpiredLocked(before int64) {
@@ -334,6 +374,15 @@ func (c *observedConnection) Finish(state string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	c.bindings = nil
+	c.destinations = [maxConnectionDestinations]net.Destination{}
+	if owner := c.owner; owner != nil {
+		owner.pending--
+		if !owner.accepting && owner.pending == 0 {
+			delete(l.ledgers, owner)
+			owner.observer = nil
+		}
+		c.owner = nil
+	}
 	c.deferred.Store(false)
 	if _, retained := l.records[c.sequence]; !retained {
 		return
@@ -363,25 +412,38 @@ func (l *connectionLedger) stop() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.accepting = false
+	if l.pending == 0 {
+		delete(l.ledgers, l)
+		l.observer = nil
+	}
 	if l.activeRuntime == l.runtimeID {
 		l.running = false
 	}
+	var interrupted []*observedConnection
 	for _, observation := range l.records {
 		if observation.runtimeID == l.runtimeID && observation.document.EndedAt == 0 {
-			// Close does not join every upstream forwarder. Retain its handle for
-			// late bytes/Finish and explicitly mark this interim total incomplete.
-			observation.deferred.Store(true)
-			observation.document.State, observation.document.EndedAt = "interrupted", time.Now().UnixMilli()
-			l.closed[(l.head+l.count)%maxConnectionRecords] = observation
-			l.count++
+			interrupted = append(interrupted, observation)
 		}
+	}
+	// A stop completes these rows simultaneously. Use admission order to break the
+	// tie, rather than allowing randomized map traversal to choose FIFO victims.
+	sort.Slice(interrupted, func(i, j int) bool { return interrupted[i].sequence < interrupted[j].sequence })
+	endedAt := time.Now().UnixMilli()
+	for _, observation := range interrupted {
+		// Close does not join every upstream forwarder. Retain its handle for
+		// late bytes/Finish and explicitly mark this interim total incomplete.
+		observation.deferred.Store(true)
+		observation.document.State, observation.document.EndedAt = "interrupted", endedAt
+		l.closed[(l.head+l.count)%maxConnectionRecords] = observation
+		l.count++
 	}
 }
 
 func (l *connectionLedger) snapshot() connectionSnapshot {
 	l.mu.Lock()
 	l.evictExpiredLocked(time.Now().Add(-connectionRetention).UnixMilli())
-	result := connectionSnapshot{Running: l.running, Epoch: l.epoch, Dropped: l.dropped,
+	result := connectionSnapshot{Running: l.running, Enabled: l.enabled, CaptureGeneration: l.captureGeneration,
+		Epoch: l.epoch, Generation: l.generation, NativeEvicted: l.evicted, NativeRejected: l.rejected,
 		Connections: make([]connectionDocument, 0, len(l.records))}
 	for _, observation := range l.records {
 		document := observation.document
@@ -403,7 +465,8 @@ func (l *connectionLedger) snapshot() connectionSnapshot {
 // ConnectionSnapshot reports logical application bytes, not IP/encryption overhead.
 // UDP rows are associations; splice may defer exact download totals until close.
 func ConnectionSnapshot() string {
-	result := connectionSnapshot{Connections: []connectionDocument{}}
+	setting := connectionCaptureSetting()
+	result := connectionSnapshot{Enabled: setting.enabled, CaptureGeneration: setting.generation, Connections: []connectionDocument{}}
 	if ledger := currentConnections.Load(); ledger != nil {
 		result = ledger.snapshot()
 	}
@@ -423,8 +486,57 @@ func ClearConnectionHistory() {
 			ledger.count--
 			delete(ledger.records, entry.sequence)
 		}
-		ledger.dropped = 0
+		ledger.generation++
+		ledger.evicted, ledger.rejected = 0, 0
 	}
+}
+
+// SetConnectionAnalyticsEnabled changes only observation, never forwarding or
+// routing. Disabling joins callbacks from the current and any still-draining
+// stopped cores before publishing the final, fenced snapshot.
+func SetConnectionAnalyticsEnabled(enabled bool) error {
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
+	setting := connectionCaptureSetting()
+	if setting.enabled == enabled {
+		return nil
+	}
+	ledger := currentConnections.Load()
+	if coreServer != nil && (routingState == nil || routingState.connections == nil) {
+		return errors.New("running core has no connection observer")
+	}
+	if coreServer != nil {
+		ledger = routingState.connections
+		if ledger.observer == nil {
+			return errors.New("core dispatcher does not support connection observation")
+		}
+	}
+	if !enabled && ledger != nil {
+		ledger.mu.Lock()
+		observers := make([]*dispatcher.DefaultDispatcher, 0, len(ledger.ledgers))
+		for owner := range ledger.ledgers {
+			if owner.observer != nil {
+				observers = append(observers, owner.observer)
+			}
+		}
+		ledger.mu.Unlock()
+		// Never hold the history lock: the setter completes observation callbacks.
+		for _, observer := range observers {
+			observer.SetConnectionObserver(nil)
+		}
+	}
+	setting.enabled = enabled
+	setting.generation++
+	if ledger != nil {
+		ledger.mu.Lock()
+		ledger.enabled, ledger.captureGeneration = enabled, setting.generation
+		ledger.mu.Unlock()
+	}
+	connectionCapturePreference.Store(&setting)
+	if enabled && coreServer != nil {
+		ledger.observer.SetConnectionObserver(ledger)
+	}
+	return nil
 }
 
 func boundConnectionText(value string, limit int) string {

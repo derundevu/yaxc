@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ca_back">Back</string>
+    <string name="ca_history">History</string>
+    <string name="ca_search">Domain, IP or port</string>
+    <string name="ca_app">App</string>
+    <string name="ca_config">Config</string>
+    <string name="ca_protocol">Protocol</string>
+    <string name="ca_route">Route</string>
+    <string name="ca_terminal">Outcome</string>
+    <string name="ca_period">Started</string>
+    <string name="ca_sort">Sort</string>
+    <string name="ca_reset">Reset filters</string>
+    <string name="ca_period_five">Last 5 min</string>
+    <string name="ca_period_hour">Last hour</string>
+    <string name="ca_period_day">Last 24 hours</string>
+    <string name="ca_newest">Newest</string>
+    <string name="ca_traffic">Traffic</string>
+    <string name="ca_duration">Duration</string>
+    <string name="ca_unavailable_identity">Selected identity (no retained records)</string>
+    <string name="ca_summary">%1$d active · %2$d finished · ↑ %3$s · ↓ %4$s</string>
+    <string name="ca_retained">Retained records matching these filters, not lifetime totals</string>
+    <string name="ca_running">Capturing app connections</string>
+    <string name="ca_stopped">Capture stopped · retained history</string>
+    <string name="ca_disabled">Capture disabled · retained history</string>
+    <string name="ca_disabled_empty">No retained connections match these filters. Recording is disabled; enable it in History to capture new connections.</string>
+    <string name="ca_capture">Record connection analytics</string>
+    <string name="ca_capture_hint">Turning this off does not stop the proxy or delete past history. Turning it back on records only new connections, not existing streams.</string>
+    <string name="ca_incomplete">Capture or storage may be incomplete · see History</string>
+    <string name="ca_retention">Native capture holds up to 2,048 records. Android history retains up to 5,000 records and 8 MiB; finished records expire after 24 hours. Active records take priority. Limits do not stop forwarding.</string>
+    <string name="ca_native_evicted">Native buffer evictions: %1$d</string>
+    <string name="ca_native_uncertainty">A native eviction can happen before or after Android collects a record. These are events, not a count of distinct missing connections; some evictions may mean missing history.</string>
+    <string name="ca_history_evicted">Android history rotations: %1$d · older finished records removed by retention limits</string>
+    <string name="ca_rejected">Capture refusals · native: %1$d · Android: %2$d. Refusals can omit connections from history; forwarding is unaffected.</string>
+    <string name="ca_legacy_events">Unclassified events from older history: %1$d · their source and distinct missing connection count are unknown</string>
+    <string name="ca_clear_hint">Clears finished native, memory and saved history, and resets history event counters. Active records and their traffic accounting are preserved.</string>
+    <string name="ca_detail">Connection details</string>
+    <string name="ca_record_id">Record: %1$s</string>
+    <string name="ca_copy">Copy details</string>
+    <string name="ca_done">Done</string>
+</resources>

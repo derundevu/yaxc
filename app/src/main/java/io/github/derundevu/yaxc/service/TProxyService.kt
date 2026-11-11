@@ -200,13 +200,17 @@ class TProxyService : VpnService() {
                 transparentProxyHelper.startService(checkNotNull(runtimeOptions?.transparent))
                 Yaxc::class.cast(application).connectionRepository.unsupportedRuntime()
             } else {
-                val diagnostic = XrayCore.start(config.dir, config.file)
-                check(diagnostic.isEmpty()) { diagnostic }
-                Yaxc::class.cast(application).connectionRepository.startRuntime(
-                    connectionIdentityPackages,
-                    XrayCore::connectionSnapshot,
-                    XrayCore::clearConnectionHistory,
-                )
+                val repository = Yaxc::class.cast(application).connectionRepository
+                repository.startNativeRuntime(XrayCore::setConnectionAnalyticsEnabled) {
+                    val diagnostic = XrayCore.start(config.dir, config.file)
+                    check(diagnostic.isEmpty()) { diagnostic }
+                    repository.startRuntime(
+                        connectionIdentityPackages,
+                        XrayCore::connectionSnapshot,
+                        XrayCore::clearConnectionHistory,
+                        XrayCore::setConnectionAnalyticsEnabled,
+                    )
+                }
                 connectionCapturedPackages = connectionIdentityPackages
             }
         }
@@ -216,12 +220,15 @@ class TProxyService : VpnService() {
                 Yaxc::class.cast(application).connectionRepository.endRuntime(null)
             } else {
                 XrayCore.stop()
-                Yaxc::class.cast(application).connectionRepository.endRuntime(XrayCore.connectionSnapshot())
+                val repository = Yaxc::class.cast(application).connectionRepository
+                repository.endRuntime(if (repository.state.value.captureEnabled) XrayCore.connectionSnapshot() else null)
             }
         }
         override fun applyRouting(config: String): String {
             val changedPackages = connectionCapturedPackages != connectionIdentityPackages
-            val preceding = if (changedPackages) XrayCore.connectionSnapshot() else null
+            val preceding = if (changedPackages && Yaxc::class.cast(application).connectionRepository.state.value.captureEnabled) {
+                XrayCore.connectionSnapshot()
+            } else null
             val diagnostic = XrayCore.applyRouting(config)
             if (diagnostic.isEmpty()) {
                 if (changedPackages) {
@@ -374,7 +381,10 @@ class TProxyService : VpnService() {
                     } else emptyMap()
                     // Ordinary profiles use only their own config and the shared Core Routing settings.
                     // A saved Live Routing plan must not affect or prevent their connection.
-                    val base = ConfigHelper(settings, configRepository.get(), profile?.config ?: "{}").toString()
+                    val base = ConfigHelper(
+                        settings, configRepository.get(), profile?.config ?: "{}",
+                        target = if (standalone) ConfigHelper.Target.LiveRoutingBase else ConfigHelper.Target.Profile,
+                    ).toString()
                     val text = if (standalone) {
                         check(options.mode != RuntimeMode.TRANSPARENT) {
                             "Live proxy groups are unavailable in root mode. Use VPN or SOCKS mode."

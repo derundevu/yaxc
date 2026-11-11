@@ -104,6 +104,28 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     }
 
     @Test
+    fun persistedCaptureOffAndHotPreferenceChangesNeverReplaceForwardingRuntime() {
+        settings.connectionAnalyticsEnabled = false
+        startAndAwait()
+        val device = boundary.devices.single()
+        val config = settings.xrayConfig().readBytes()
+        settings.connectionAnalyticsEnabled = true
+        shadowOf(Looper.getMainLooper()).idle()
+        scheduler.runCurrent()
+        settings.connectionAnalyticsEnabled = false
+        shadowOf(Looper.getMainLooper()).idle()
+        scheduler.runCurrent()
+        assertEquals(1, boundary.coreStarts)
+        assertEquals(0, boundary.coreStops)
+        assertEquals(1, boundary.tunnelStarts)
+        assertEquals(0, boundary.tunnelStops)
+        assertSame(device, boundary.devices.single())
+        assertArrayEquals(config, settings.xrayConfig().readBytes())
+        device.assertTraffic("capture preference never restarts forwarding")
+        assertFalse(settings.connectionAnalyticsEnabled)
+    }
+
+    @Test
     fun blockedStartThenStopCannotPublishLateValidationOrResurrectRuntime() {
         val gate = CompletableDeferred<String>()
         boundary.validationGate = gate

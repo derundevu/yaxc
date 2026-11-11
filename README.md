@@ -176,18 +176,48 @@ For split tunneling, open **Routing → Apps Routing**, choose **Off**, **Exclud
 Selected apps stay at the top. **Select all visible apps** checks every app matching the current search and system-app
 filter; tap it again to clear those matches. Selections hidden by the filters are left unchanged.
 
+### Core Routing
+
 For domain/IP rules, open **Routing → Core Routing**. Rules are evaluated from top to bottom; higher rules take precedence.
+
+Use **Import from profile** to choose a saved configuration, preview its rules, select a subset and optionally
+copy `domainStrategy`. Append to the draft or replace its rules, then **Save**. The source profile is unchanged;
+reimporting exact rules does not duplicate them. DNS, hosts and outbound settings are not imported.
+
+Proxy/Direct/Block destinations map to shared runtime roles. Ambiguous destinations and inbound references need
+explicit mapping. Rules with unsupported chains, source bindings, balancers or missing dependencies remain
+unselectable with an explanation; their behavior is never silently replaced.
+
+Choose how Core Routing applies:
+
+| Mode | Effect |
+| --- | --- |
+| **Profile only** | Ignore global Core Routing; use the ordinary profile's routing. |
+| **Core Routing only** | Replace the profile's entire routing object, including unique rules, balancers and strategy. |
+| **Combine** | Profile rules first, then shared rules; keep the first exact duplicate after target resolution. |
+
+Combine compares complete rule structures independently of JSON object-key order, not merely domains; different
+conditions, targets, metadata or array order remain distinct. Shared scalar settings override profile values.
+Managed runtime rules still apply. Saving preserves the selected mode instead of switching back to Combine.
+In Live Routing, shared Proxy targets use the default group and enabled Live rules retain priority. **Profile only**
+disables shared Core Routing there; it does not import the individual members' routing.
+
 
 ### Connections and history
 
 Tap the **large connection card** on **Connect** to open analytics. Ping and connection Info remain separate
-buttons; the compact bottom control keeps its existing behavior. Switch between **By app** and **By config**,
-then filter active, finished or all retained connections.
+buttons; the compact bottom control keeps its existing behavior. **App → config** lists applications, while
+**Config → apps** lists configurations. Active, finished and all filters determine group membership and totals.
+Select a group to see only its connections, with a filter for the opposite identity.
 
-Each row shows its captured configuration, route/outbound, destination/domain, protocol, start/end, state and
-upload/download. These are actual runtime observations, not an interpretation of the currently selected profile.
-An established Live Routing stream keeps its original member when new connections switch to another member.
-Labels belong to the applied runtime configuration and do not retroactively rename historical rows.
+Connections use compact rows; tap one for complete selectable details and a copy action. Search destination
+domains/IPs/ports and combine state, TCP/UDP, Proxy/Direct/Block/unknown route, terminal outcome and start-period
+filters. Sort newest first, by traffic or by duration. Back preserves filter and scroll context; new traffic does
+not force scrolling. Summaries and totals describe retained filtered observations, never lifetime traffic.
+
+These are actual runtime observations, not an interpretation of the currently selected profile. An established
+Live Routing stream keeps its original member when new connections switch to another member. Captured names and
+identities do not retroactively change with the current selection.
 
 App attribution requires Android 10+ VPN owner lookup and authenticated local SOCKS identities. Unresolved owners,
 no-auth and SOCKS-only clients stay explicitly unknown. Shared UIDs list all associated packages; the originating
@@ -200,15 +230,33 @@ Counters describe logical proxy payload bytes, not IP headers, outer transport/e
 Zero-copy download totals can remain incomplete until copying ends. An opaque write failure can leave final totals
 unknown; incomplete values are labeled. Root mode uses an external Xray without this observer and is explicitly unavailable.
 
-Capture continues when this screen closes. In-memory history is limited to **5,000 connections / 8 MiB**; finished
-rows expire after **24 hours**. The native buffer holds at most **2,048 observations** and can omit even active flows
-under pressure. Buffer drop/eviction counts are not a count of unique missing rows: native evictions may already
-have been collected. Totals cover only retained rows matching the filter.
+Capture normally continues when this screen closes, but presentation work stops. In-memory history is limited to
+**5,000 connections / 8 MiB**; finished rows expire after **24 hours**. Active records take priority; older
+finished records rotate out FIFO by completion order. The native buffer holds at most **2,048 observations**.
+An all-active buffer can refuse new observations, without affecting traffic.
+
+Open the history action for separate native evictions, native/Android admission refusals and Android history
+rotations. Normal history rotation is not an error. A native eviction can happen before or after Android collects
+a record, so these event counters do not give an exact number of distinct missing connections. Older persisted
+aggregate counters are explicitly unclassified.
 
 **Save history on this device** is off by default. Enabling it stores bounded checkpoints in private storage excluded
 from Android backups; destinations and app identities are sensitive. No payloads, credentials or raw configurations
 are recorded. Restored active rows become interrupted. Disabling persistence deletes saved history but keeps memory;
-**Clear finished history** keeps active connections and their counters and never stops traffic or deletes profiles/logs.
+**Clear finished history** deletes finished native/memory/disk records and resets history event counters, while
+keeping active connections and their byte accounting. Late snapshots cannot restore pre-clear records/counters.
+It never stops traffic or deletes profiles/logs.
+
+**History → Record connection analytics** is an independent, default-on switch. Turning it off immediately stops
+native observation and Android polling without restarting the proxy or interrupting TCP/UDP traffic, in either
+ordinary or Live Routing mode. Existing active observations become interrupted/incomplete at the capture cutoff;
+their real connections keep running. Turning recording back on captures only new connections, never the missing
+part of existing streams. The setting persists across application and proxy restarts.
+
+Past history and the separate **Save history on this device** preference are preserved. Recording Off does not
+delete history or immediately free its retained RAM; use **Clear finished history** explicitly when wanted.
+The existing 24-hour expiry still applies. New connections started while Off have no observation handles/hooks;
+pre-existing connections may retain a small inert hook shell until they close, not active analytics accounting.
 
 ### Live Routing
 

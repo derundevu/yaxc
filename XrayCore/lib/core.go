@@ -64,10 +64,12 @@ func Start(dir string, config string) error {
 	state.connections = connections
 	health, healthPlan, err := prepareLiveHealth(server, document, state.outbounds, nil)
 	if err != nil {
+		connections.stop()
 		return errors.Join(err, server.Close())
 	}
 	if health != nil {
 		if err := bindInitialHealth(server, configJSON, healthPlan); err != nil {
+			connections.stop()
 			health.close()
 			return errors.Join(err, server.Close())
 		}

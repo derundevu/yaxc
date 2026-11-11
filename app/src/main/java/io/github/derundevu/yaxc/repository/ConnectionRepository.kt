@@ -53,6 +53,7 @@ class ConnectionRepository(
         data class Packages(val packages: Map<String, Int>, val precedingSnapshot: String?) : Command
         data class UncertainUid(val uid: Int) : Command
         data class Persistence(val enabled: Boolean, val updateSetting: Boolean) : Command
+        data class Capture(val enabled: Boolean, val updateSetting: Boolean) : Command
         data class Poll(
             val token: Long,
             val revision: Long,
@@ -74,6 +75,12 @@ class ConnectionRepository(
     ) {
         val nativeLock = Any()
         @Volatile var revision = 0L // Mutated under nativeLock; actor reads must never wait on a reader.
+        var lastSnapshot: String? = null
+        var lastHistoryRevision = -1L
+        var lastRunning = false
+        var awaitingClearBoundary = false
+        var captureEnabled: Boolean? = null
+        var captureGeneration: Long? = null
         var pump: Job? = null
     }
 
@@ -88,6 +95,9 @@ class ConnectionRepository(
     )
     private val commands = Channel<Command>(Channel.UNLIMITED)
     private val enqueueLock = Any()
+    // Serializes native startup admission with completed hot toggles, including before Start is consumed.
+    private val captureControlLock = Any()
+    private var nativeCapture: ((Boolean) -> String)? = null
     private var nextToken = 0L
     private val history = ConnectionHistoryStore()
     private val file by lazy(LazyThreadSafetyMode.NONE) {
@@ -103,8 +113,13 @@ class ConnectionRepository(
     private val uncertainUids = mutableSetOf<Int>()
     private var lastPackageSets: Map<Int, Set<String>> = emptyMap()
     private var status = ConnectionCaptureStatus.Stopped
+    private var idleStatus = ConnectionCaptureStatus.Stopped
     private var persistence = false
+    private var captureEnabled = settings.connectionAnalyticsEnabled
+    private var captureSettingError: String? = null
+    private var captureToggleError: String? = null
     private var captureError: String? = null
+    private var historyClearError: String? = null
     private var storageError: String? = null
     private var attributionError: String? = null
     private var dirty = false
@@ -115,6 +130,9 @@ class ConnectionRepository(
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == null || key == "connectionHistoryOnDisk") {
             enqueue(Command.Persistence(settings.connectionHistoryOnDisk, updateSetting = false))
+        }
+        if (key == null || key == "connectionAnalyticsEnabled") {
+            enqueue(Command.Capture(settings.connectionAnalyticsEnabled, updateSetting = false))
         }
     }
 
@@ -137,13 +155,33 @@ class ConnectionRepository(
         }
     }
 
+    /**
+     * The real service boundary registers control before native Start can admit connections.
+     * Reading the preference, applying it, and starting the core share the hot-toggle gate.
+     */
+    internal fun startNativeRuntime(setCaptureEnabled: (Boolean) -> String, startCore: () -> Unit) {
+        synchronized(captureControlLock) {
+            nativeCapture = setCaptureEnabled
+            val diagnostic = setCaptureEnabled(preferredCaptureEnabled())
+            check(diagnostic.isEmpty()) { diagnostic }
+            startCore()
+        }
+    }
+
+    private fun preferredCaptureEnabled(): Boolean =
+        if (captureSettingError != null) captureEnabled else settings.connectionAnalyticsEnabled
+
     fun startRuntime(
         packages: Map<String, Int>,
         reader: () -> String,
         clearHistory: () -> Unit,
+        setCaptureEnabled: (Boolean) -> String,
     ) {
-        synchronized(enqueueLock) {
-            commands.trySend(Command.Start(++nextToken, packages.toMap(), reader, clearHistory))
+        synchronized(captureControlLock) {
+            nativeCapture = setCaptureEnabled
+            synchronized(enqueueLock) {
+                commands.trySend(Command.Start(++nextToken, packages.toMap(), reader, clearHistory))
+            }
         }
     }
 
@@ -162,12 +200,16 @@ class ConnectionRepository(
 
     fun setPersistence(enabled: Boolean) = enqueue(Command.Persistence(enabled, updateSetting = true))
 
+    fun setCaptureEnabled(enabled: Boolean) = enqueue(Command.Capture(enabled, updateSetting = true))
+
     private fun enqueue(command: Command) {
         synchronized(enqueueLock) { commands.trySend(command) }
     }
 
     private fun initialize() {
         persistence = settings.connectionHistoryOnDisk
+        captureEnabled = settings.connectionAnalyticsEnabled
+        if (!captureEnabled) status = ConnectionCaptureStatus.Disabled
         if (persistence) {
             try {
                 if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) {
@@ -196,14 +238,14 @@ class ConnectionRepository(
 
     private fun handle(command: Command) {
         when (command) {
-            is Command.Start -> start(command)
+            is Command.Start -> synchronized(captureControlLock) { start(command) }
             is Command.End -> stop(command.snapshot, ConnectionCaptureStatus.Stopped)
             Command.Unsupported -> stop(null, ConnectionCaptureStatus.Unsupported)
             is Command.TailFinished -> if (tailRuntime?.token == command.token) tailRuntime = null
             is Command.Packages -> {
                 runtime?.let { active ->
                     synchronized(active.nativeLock) { active.revision++ }
-                    command.precedingSnapshot?.let { ingest(it, active) }
+                    if (captureEnabled) command.precedingSnapshot?.let { ingest(it, active) }
                     active.apps = captureApps(command.packages)
                 }
                 publish()
@@ -215,6 +257,7 @@ class ConnectionRepository(
             }
             Command.Clear -> clear()
             is Command.Persistence -> persistence(command)
+            is Command.Capture -> synchronized(captureControlLock) { capture(command) }
             is Command.Poll -> try {
                 poll(command)
             } finally {
@@ -277,10 +320,14 @@ class ConnectionRepository(
         val apps = captureApps(command.packages)
         val active = Runtime(command.token, command.reader, command.clear, apps)
         runtime = active
-        status = ConnectionCaptureStatus.Running
+        synchronizeCapture(active, preferredCaptureEnabled())
         dirty = true
         flush(force = false)
         publish()
+        if (active.captureEnabled == true) startPump(active)
+    }
+
+    private fun startPump(active: Runtime) {
         active.pump = scope.launch {
             while (isActive) {
                 val result = read(active, tail = false)
@@ -316,32 +363,46 @@ class ConnectionRepository(
         val active = (if (command.tail) tailRuntime else runtime) ?: return
         if (active.token != command.token) return
         if (active.revision != command.revision) return
+        if (!captureEnabled || active.captureEnabled != true) return
         if (command.failed) {
             captureError = "Connection snapshot could not be read."
             if (!command.tail) status = ConnectionCaptureStatus.Error
         } else {
-            ingest(checkNotNull(command.raw), active)
+            ingest(checkNotNull(command.raw), active, fromReader = true)
         }
         if (command.tail) {
             status = ConnectionCaptureStatus.Stopped
             if (!history.hasIncompleteTerminal) stopTail()
         }
-        dirty = true
         flush(force = command.tail && tailRuntime == null)
         publish()
     }
 
-    private fun ingest(raw: String, active: Runtime) {
+    private fun ingest(raw: String, active: Runtime, fromReader: Boolean = false) {
+        if (active.awaitingClearBoundary && !fromReader) return
+        val before = history.revision
         try {
-            val snapshot = ConnectionJson.snapshot(raw)
-            history.ingest(snapshot, active.apps, clock())
-            if (!snapshot.running) history.interruptActive(clock())
-            status = if (snapshot.running) ConnectionCaptureStatus.Running else ConnectionCaptureStatus.Stopped
+            if (active.lastSnapshot != raw || active.lastHistoryRevision != before) {
+                val snapshot = ConnectionJson.snapshot(raw)
+                if (snapshot.enabled != captureEnabled) return
+                if (active.captureGeneration?.let { snapshot.captureGeneration < it } == true) return
+                if (!history.ingest(snapshot, active.apps, clock())) return
+                if (!snapshot.running) history.interruptActive(clock())
+                active.lastSnapshot = raw
+                active.lastHistoryRevision = history.revision
+                active.lastRunning = snapshot.running
+                active.awaitingClearBoundary = false
+                active.captureGeneration = snapshot.captureGeneration
+            }
+            status = if (captureToggleError != null) ConnectionCaptureStatus.Error
+                else if (!captureEnabled) ConnectionCaptureStatus.Disabled
+                else if (active.lastRunning) ConnectionCaptureStatus.Running else ConnectionCaptureStatus.Stopped
             captureError = null
         } catch (_: Exception) {
             captureError = "Connection snapshot is invalid or belongs to another runtime."
             status = ConnectionCaptureStatus.Error
         }
+        dirty = history.revision != before || dirty
     }
 
     private fun stop(finalSnapshot: String?, stoppedStatus: ConnectionCaptureStatus) {
@@ -349,43 +410,56 @@ class ConnectionRepository(
         stopTail()
         active?.pump?.cancel()
         runtime = null // Late polls from this reader cannot overwrite this or a subsequent start.
-        if (finalSnapshot != null && active != null) ingest(finalSnapshot, active)
+        idleStatus = stoppedStatus
+        if (captureEnabled && finalSnapshot != null && active != null) ingest(finalSnapshot, active)
         history.interruptActive(clock())
         history.prune(clock())
-        status = stoppedStatus
+        status = if (captureEnabled) stoppedStatus else ConnectionCaptureStatus.Disabled
         dirty = true
         flush(force = true)
         publish()
-        if (active != null && stoppedStatus == ConnectionCaptureStatus.Stopped && history.hasIncompleteTerminal) {
-            tailRuntime = active
-            active.pump = scope.launch {
-                withTimeoutOrNull(5_000) {
-                    repeat(5) {
-                        delay(1_000)
-                        val result = read(active, tail = true)
-                        currentCoroutineContext().ensureActive()
-                        commands.send(result)
-                        result.consumed.await()
-                    }
+        if (captureEnabled && active?.captureEnabled == true && stoppedStatus == ConnectionCaptureStatus.Stopped && history.hasIncompleteTerminal) {
+            startTail(active)
+        }
+    }
+
+    private fun startTail(active: Runtime) {
+        tailRuntime = active
+        active.pump = scope.launch {
+            withTimeoutOrNull(5_000) {
+                repeat(5) {
+                    delay(1_000)
+                    val result = read(active, tail = true)
+                    currentCoroutineContext().ensureActive()
+                    commands.send(result)
+                    result.consumed.await()
                 }
-                commands.send(Command.TailFinished(active.token))
             }
+            commands.send(Command.TailFinished(active.token))
         }
     }
 
     private fun clear() {
         val active = runtime ?: tailRuntime
         stopTail()
+        history.clearClosed()
         if (active != null) {
             // Serialize clear with reads. A read that completed before clear retains its older
             // revision and is rejected even if its actor command arrives after clear.
             synchronized(active.nativeLock) {
                 active.revision++
                 try {
+                    val requiresBoundary = active.lastSnapshot == null
                     active.clear()
                     history.nativeHistoryCleared()
+                    historyClearError = null
+                    active.lastSnapshot = null
+                    active.awaitingClearBoundary = requiresBoundary
+                    // Clear can win the actor queue before the first poll. Establish its
+                    // native epoch/generation now so even a late final snapshot is fenced.
+                    if (requiresBoundary && captureEnabled) ingest(active.reader(), active, fromReader = true)
                 } catch (_: Exception) {
-                    captureError = "Native closed connection history could not be cleared."
+                    historyClearError = "Native closed connection history could not be cleared."
                 }
             }
         }
@@ -393,13 +467,110 @@ class ConnectionRepository(
             try {
                 nativeClear?.invoke()
                 history.nativeHistoryCleared()
+                historyClearError = null
             } catch (_: Exception) {
-                captureError = "Native closed connection history could not be cleared."
+                historyClearError = "Native closed connection history could not be cleared."
             }
         }
-        history.clearClosed()
         dirty = true
         flush(force = true)
+        publish()
+    }
+
+    /** Native cutover precedes persistence; a failed native operation never claims success. */
+    private fun synchronizeCapture(active: Runtime?, enabled: Boolean): Boolean {
+        val previous = captureEnabled
+        val callback = nativeCapture
+        try {
+            check(callback?.invoke(enabled).orEmpty().isEmpty())
+        } catch (_: Exception) {
+            captureToggleError = "Connection analytics capture could not be changed."
+            status = ConnectionCaptureStatus.Error
+            return false
+        }
+        captureEnabled = enabled
+        captureError = null
+        captureToggleError = null
+        if (previous != enabled) history.captureChanged(enabled)
+        if (active != null) {
+            val wasCapturing = active.captureEnabled == true
+            val transitioned = active.captureEnabled != null && active.captureEnabled != enabled
+            if (transitioned) active.captureGeneration = (active.captureGeneration ?: 0) + 1
+            active.captureEnabled = enabled
+            active.lastSnapshot = null
+            if (!enabled && previous) {
+                if (wasCapturing) {
+                    // One quiescent native cutoff, never a periodic disabled reader.
+                    try {
+                        ingest(active.reader(), active, fromReader = true)
+                        if (active.lastSnapshot == null) {
+                            captureError = "Connection cutoff snapshot is stale or invalid."
+                            status = ConnectionCaptureStatus.Error
+                        }
+                    } catch (_: Exception) {
+                        captureError = "Connection cutoff snapshot could not be read."
+                        status = ConnectionCaptureStatus.Error
+                    }
+                }
+                history.freezeCapture(clock())
+                dirty = true
+            }
+        }
+        if (enabled || captureError == null) {
+            captureError = null
+            status = if (!enabled) ConnectionCaptureStatus.Disabled
+                else if (active != null && runtime === active) ConnectionCaptureStatus.Running
+                else idleStatus
+        }
+        return true
+    }
+
+    private fun capture(command: Command.Capture) {
+        if (!command.updateSetting && settings.connectionAnalyticsEnabled != command.enabled) return
+        val active = runtime ?: tailRuntime
+        val wasTail = tailRuntime === active && active != null
+        val needsToggle = captureEnabled != command.enabled || active?.captureEnabled?.let { it != command.enabled } == true ||
+            (active != null && active.captureEnabled == null)
+        if (needsToggle) {
+            active?.pump?.cancel()
+            stopTail()
+            val succeeded = if (active == null) {
+                synchronizeCapture(null, command.enabled)
+            } else synchronized(active.nativeLock) {
+                active.revision++
+                synchronizeCapture(active, command.enabled)
+            }
+            if (!succeeded) {
+                if (!command.updateSetting) {
+                    try {
+                        settings.connectionAnalyticsEnabled = captureEnabled
+                    } catch (_: Exception) {
+                        captureSettingError = "Connection analytics preference could not be saved."
+                    }
+                }
+                if (active?.captureEnabled == true) {
+                    if (runtime === active) startPump(active)
+                    else if (wasTail) startTail(active)
+                }
+                publish()
+                return
+            }
+            if (!captureEnabled) {
+                history.freezeCapture(clock())
+                dirty = true
+                flush(force = true)
+            } else if (active != null && runtime === active) {
+                startPump(active)
+            }
+        }
+        if (command.updateSetting || settings.connectionAnalyticsEnabled != captureEnabled) {
+            try {
+                settings.connectionAnalyticsEnabled = captureEnabled
+                captureSettingError = null
+            } catch (_: Exception) {
+                captureSettingError = "Connection analytics preference could not be saved."
+            }
+        }
         publish()
     }
 
@@ -470,9 +641,10 @@ class ConnectionRepository(
         mutableState.value = ConnectionHistoryState(
             connections = history.records,
             status = status,
-            dropped = history.dropped,
+            counters = history.counters,
             persistOnDisk = persistence,
-            error = captureError ?: storageError ?: attributionError,
+            error = captureToggleError ?: captureError ?: captureSettingError ?: historyClearError ?: storageError ?: attributionError,
+            captureEnabled = captureEnabled,
         )
         val nextExpiry = history.nextExpiryAt
         if (nextExpiry != scheduledExpiry) {

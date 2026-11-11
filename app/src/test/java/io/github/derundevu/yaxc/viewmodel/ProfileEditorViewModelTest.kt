@@ -124,12 +124,12 @@ class ProfileEditorViewModelTest : RoomTestSupport() {
         editor.name = "Rejected"
         editor.document.text = """{"changed":true}"""
 
-        assertTrue(editor.save(check = true) is ProfileSaveResult.Invalid)
+        assertEquals(ProfileSaveResult.Invalid("native diagnostic"), editor.save(check = true))
         assertEquals(before, app.profileRepository.find(id))
         assertFalse(editor.isSaving)
         val throwing = editor(id = id) { _, _ -> throw IllegalArgumentException("validator unavailable") }
         throwing.document.text = """{"outbounds":[{"protocol":"synthetic-invalid"}]}"""
-        assertTrue(throwing.save(check = true) is ProfileSaveResult.Invalid)
+        assertEquals(ProfileSaveResult.Invalid("validator unavailable"), throwing.save(check = true))
         assertEquals(before, app.profileRepository.find(id))
         assertFalse(throwing.isSaving)
     }

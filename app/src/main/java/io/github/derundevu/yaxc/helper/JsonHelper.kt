@@ -15,6 +15,40 @@ class JsonHelper {
         fun getArray(value: JSONObject, key: String) =
             value.optJSONArray(key) ?: JSONArray()
 
+        /** Only routing.rules is a first-match list: other JSON arrays retain normal merge behavior. */
+        fun mergeRouting(profile: JSONObject, global: JSONObject): JSONObject {
+            val result = mergeObjects(profile, global)
+            if (profile.optJSONArray("rules") != null || global.optJSONArray("rules") != null) {
+                result.put("rules", distinctRules(
+                    profile.optJSONArray("rules") ?: JSONArray(),
+                    global.optJSONArray("rules") ?: JSONArray(),
+                ))
+            }
+            return result
+        }
+
+        fun distinctRules(vararg arrays: JSONArray): JSONArray {
+            val seen = HashSet<String>()
+            return JSONArray().apply {
+                arrays.forEach { array ->
+                    for (index in 0 until array.length()) {
+                        val value = array.get(index)
+                        if (seen.add(structuralKey(value))) put(value)
+                    }
+                }
+            }
+        }
+
+        private fun structuralKey(value: Any?): String = when (value) {
+            null, JSONObject.NULL -> "null"
+            is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(",", "{", "}") {
+                JSONObject.quote(it) + ":" + structuralKey(value.get(it))
+            }
+            is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") { structuralKey(value.get(it)) }
+            is String -> JSONObject.quote(value)
+            else -> value.toString()
+        }
+
         fun mergeObjects(obj1: JSONObject, obj2: JSONObject): JSONObject {
             val result = JSONObject(obj1.toString())
 

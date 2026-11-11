@@ -4,6 +4,8 @@ import XrayCore.XrayCore
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -28,6 +30,9 @@ import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionGrouping
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionFilter
+import io.github.derundevu.yaxc.Settings
+import io.github.derundevu.yaxc.repository.ConnectionCaptureStatus
+import java.io.File
 import kotlin.coroutines.Continuation
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -200,18 +205,65 @@ class MainActivityRegressionTest : RoomTestSupport() {
         compose.onNodeWithTag("analytics:filter:Closed").performClick()
         await {
             val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
-            state.grouping == ConnectionGrouping.Config && state.filter == ConnectionFilter.Closed
+            state.query.grouping == ConnectionGrouping.Config && state.query.rootFilter == ConnectionFilter.Closed
         }
         controller.recreate()
         await {
             val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
-            state.grouping == ConnectionGrouping.Config && state.filter == ConnectionFilter.Closed
+            state.query.grouping == ConnectionGrouping.Config && state.query.rootFilter == ConnectionFilter.Closed
         }
         compose.onNodeWithTag("analytics:screen").assertIsDisplayed()
         compose.onNodeWithTag("analytics:group:Config").assertIsSelected()
         compose.onNodeWithTag("analytics:filter:Closed").assertIsSelected()
         compose.onNodeWithTag("analytics:back").performClick()
         compose.onNodeWithTag("analytics:screen").assertDoesNotExist()
+        assertEquals(711L, settings.selectedProfile)
+        assertEquals(71L, settings.selectedLink)
+    }
+
+    @Test
+    fun analyticsCaptureAndDiskSwitchesPersistIndependentlyAcrossActivityRecreation() {
+        launch()
+        compose.onNodeWithTag("main:connection-analytics").performClick()
+        compose.onNodeWithTag("analytics:history").performClick()
+        compose.onNodeWithTag("analytics:capture").assertIsOn().performClick()
+        await {
+            val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
+            !settings.connectionAnalyticsEnabled && !state.captureEnabled && state.status == ConnectionCaptureStatus.Disabled
+        }
+        compose.onNodeWithTag("analytics:capture").assertIsOff()
+        assertFalse(settings.connectionHistoryOnDisk)
+        val disk = File(app.noBackupFilesDir, "connection-history.json")
+        compose.onNodeWithTag("analytics:persistence").performScrollTo().assertIsOff().performClick()
+        await { settings.connectionHistoryOnDisk && app.connectionRepository.state.value.persistOnDisk && disk.isFile }
+        assertFalse(settings.connectionAnalyticsEnabled)
+        assertFalse(app.connectionRepository.state.value.captureEnabled)
+        compose.onNodeWithText(app.getString(R.string.ca_done)).performClick()
+
+        controller.recreate()
+        await {
+            val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
+            !state.captureEnabled && state.persistOnDisk
+        }
+        compose.onNodeWithTag("analytics:history").performClick()
+        compose.onNodeWithTag("analytics:capture").assertIsOff().performClick()
+        await { settings.connectionAnalyticsEnabled && app.connectionRepository.state.value.captureEnabled }
+        compose.onNodeWithTag("analytics:capture").assertIsOn()
+        compose.onNodeWithTag("analytics:persistence").performScrollTo().assertIsOn().performClick()
+        await { !settings.connectionHistoryOnDisk && !app.connectionRepository.state.value.persistOnDisk && !disk.exists() }
+        assertTrue(settings.connectionAnalyticsEnabled)
+        assertTrue(app.connectionRepository.state.value.captureEnabled)
+
+        // External repository changes also replace the dialog state; saved UI state is not a preference.
+        app.connectionRepository.setCaptureEnabled(false)
+        await {
+            val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
+            !state.captureEnabled && state.status == ConnectionCaptureStatus.Disabled
+        }
+        compose.onNodeWithTag("analytics:capture").performScrollTo().assertIsOff()
+        val persisted = Settings(app)
+        assertFalse(persisted.connectionAnalyticsEnabled)
+        assertFalse(persisted.connectionHistoryOnDisk)
         assertEquals(711L, settings.selectedProfile)
         assertEquals(71L, settings.selectedLink)
     }

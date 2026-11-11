@@ -34,10 +34,14 @@ type observedFlow struct {
 }
 
 type observedFlows struct {
-	Running     bool           `json:"running"`
-	Epoch       string         `json:"epoch"`
-	Dropped     int64          `json:"dropped"`
-	Connections []observedFlow `json:"connections"`
+	Running           bool           `json:"running"`
+	Enabled           bool           `json:"enabled"`
+	CaptureGeneration uint64         `json:"captureGeneration"`
+	Epoch             string         `json:"epoch"`
+	Generation        uint64         `json:"generation"`
+	NativeEvicted     uint64         `json:"nativeEvicted"`
+	NativeRejected    uint64         `json:"nativeRejected"`
+	Connections       []observedFlow `json:"connections"`
 }
 
 func awaitObservedFlows(t *testing.T, accept func(observedFlows) bool) observedFlows {
@@ -409,4 +413,19 @@ func TestConnectionObservationDoesNotLimitValidLargeOutboundConfigurations(t *te
 		return len(snapshot.Connections) == 1 && snapshot.Connections[0].ProfileID == count &&
 			snapshot.Connections[0].OutboundTag == "large.4096" && snapshot.Connections[0].Upload == size
 	})
+}
+
+func TestConnectionSnapshotExportsSeparateNativeEventCountersAndClearGeneration(t *testing.T) {
+	var snapshot map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(xray.ConnectionSnapshot()), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"running", "enabled", "captureGeneration", "epoch", "generation", "nativeEvicted", "nativeRejected", "connections"} {
+		if _, exists := snapshot[name]; !exists {
+			t.Fatalf("missing connection snapshot field %q", name)
+		}
+	}
+	if _, exists := snapshot["dropped"]; exists {
+		t.Fatal("connection snapshot still exports an ambiguous aggregate")
+	}
 }

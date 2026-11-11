@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="coreImportTitle">Импорт из профиля</string>
+    <string name="coreImportLead">Выберите сохранённый профиль и его правила. Направления сопоставляются с Прокси, Напрямую или Блокировать; настройки исходящих соединений, DNS и hosts не копируются. Для применения нужен обычный пункт «Сохранить».</string>
+    <string name="coreImportNoProfiles">Нет сохранённых профилей</string>
+    <string name="coreImportNoRules">В профиле нет правил маршрутизации</string>
+    <string name="coreImportSelectAll">Выбрать поддерживаемые</string>
+    <string name="coreImportSelectNone">Снять выбор</string>
+    <string name="coreImportRuleNumber">Правило %1$d</string>
+    <string name="coreImportMapOutbound">Направление: %1$s</string>
+    <string name="coreImportProxy">Прокси — текущий маршрут по умолчанию</string>
+    <string name="coreImportDirect">Напрямую</string>
+    <string name="coreImportBlock">Блокировать</string>
+    <string name="coreImportMapInbound">Сопоставить вход «%1$s» с текущим слушателем «%2$s»</string>
+    <string name="coreImportStrategy">Импортировать domainStrategy: %1$s</string>
+    <string name="coreImportAppend">Добавить к правилам черновика</string>
+    <string name="coreImportReplace">Заменить правила черновика</string>
+    <string name="coreImportReplaceLead">Все правила черновика, включая скрытые и выключенные, будут удалены. Другие настройки маршрутизации не изменятся, если не выбран domainStrategy.</string>
+    <string name="coreImportMappingRequired">Выберите все неопределённые направления и подтвердите сопоставления входов перед импортом</string>
+    <string name="coreImportIntoDraft">Импортировать в черновик</string>
+    <string name="coreImportCancel">Отмена</string>
+    <string name="coreImportDraftResult">Добавлено правил: %1$d, пропущено точных дубликатов: %2$d. Примените через «Сохранить».</string>
+    <string name="coreModeProfile">Только профиль</string>
+    <string name="coreModeReplace">Только Core Routing</string>
+    <string name="coreModeCombine">Объединить</string>
+    <string name="coreModeProfileLead">Используется маршрутизация обычного профиля. В Live Routing отключается общий Core Routing, без импорта правил участников. Черновик сохранится.</string>
+    <string name="coreModeReplaceLead">Заменяет весь объект routing профиля: его правила, балансировщики и стратегию. Управляемые правила продолжают действовать.</string>
+    <string name="coreModeCombineLead">Сначала правила профиля, затем Core Routing, без точных дубликатов. Настройки Core Routing перекрывают одноимённые настройки профиля.</string>
+    <string name="coreRoutingModesHelp">«Только профиль» использует маршрутизацию обычного профиля; в Live Routing отключает общий Core Routing, но не импортирует правила участников. «Только Core Routing» заменяет весь объект routing, включая уникальные правила, балансировщики и domainStrategy. «Объединить» сохраняет правила профиля первыми и добавляет правила Core Routing, пропуская только точные дубликаты. Управляемые правила действуют во всех режимах; Live Routing сохраняет приоритет. «Прокси» означает основной выход выбранного профиля или группу Live Routing по умолчанию. Импорт переносит выбранные правила в черновик, без DNS и hosts. «Сохранить» применяет выбранный режим и черновик.</string>
+    <string name="coreImportDraftChanged">Во время импорта черновик изменился. Повторите импорт.</string>
+</resources>

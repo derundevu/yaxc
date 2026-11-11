@@ -65,7 +65,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = file("versionCode.txt").readText().trim().toInt()
-        versionName = "1.5.5"
+        versionName = "1.5.6"
         testInstrumentationRunner = "io.github.derundevu.yaxc.testing.RegressionTestRunner"
     }
 

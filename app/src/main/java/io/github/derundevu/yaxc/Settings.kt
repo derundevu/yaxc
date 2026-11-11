@@ -171,6 +171,15 @@ class Settings(private val context: Context) {
             )
         }
 
+    /** Capture metadata independently of whether retained history is saved to disk. */
+    var connectionAnalyticsEnabled: Boolean
+        get() = sharedPreferences.getBoolean("connectionAnalyticsEnabled", true)
+        set(value) {
+            check(sharedPreferences.edit().putBoolean("connectionAnalyticsEnabled", value).commit()) {
+                "Connection analytics preference could not be saved."
+            }
+        }
+
     /** Private destination/app history; never enabled implicitly. */
     var connectionHistoryOnDisk: Boolean
         get() = sharedPreferences.getBoolean("connectionHistoryOnDisk", false)

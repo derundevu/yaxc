@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.helper.CoreRoutingEditorMode
 import io.github.derundevu.yaxc.helper.CoreRoutingRule
 import io.github.derundevu.yaxc.helper.CoreRoutingTransport
@@ -117,6 +118,9 @@ fun CoreRoutingScreen(
     onAddRule: () -> Unit,
     onMoveRule: (Int, Int) -> Unit,
     onDeleteRule: (String) -> Unit,
+    routingMode: Config.Mode,
+    onRoutingModeChange: (Config.Mode) -> Unit,
+    onImportFromProfile: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     val density = LocalDensity.current
@@ -178,6 +182,7 @@ fun CoreRoutingScreen(
                     Box {
                         IconButton(
                             onClick = { actionsExpanded = true },
+                            modifier = Modifier.testTag("core-routing:actions"),
                             enabled = !isLoading && !isBusy,
                         ) {
                             Icon(
@@ -194,6 +199,13 @@ fun CoreRoutingScreen(
                                 onClick = {
                                     actionsExpanded = false
                                     onSave()
+                                },
+                            )
+                            YaxcLiquidDropdownMenuItem(
+                                text = textResource(R.string.coreImportTitle),
+                                onClick = {
+                                    actionsExpanded = false
+                                    onImportFromProfile()
                                 },
                             )
                             YaxcLiquidDropdownMenuItem(
@@ -222,6 +234,33 @@ fun CoreRoutingScreen(
                 .background(YaxcTheme.backgroundBrush)
                 .padding(innerPadding),
         ) {
+            TabRow(selectedTabIndex = routingMode.ordinal) {
+                Config.Mode.entries.forEach { mode ->
+                    Tab(
+                        selected = routingMode == mode,
+                        enabled = !isLoading && !isBusy,
+                        modifier = Modifier.testTag("core-routing:mode:${mode.name}"),
+                        onClick = { onRoutingModeChange(mode) },
+                        text = {
+                            Text(textResource(when (mode) {
+                                Config.Mode.Disable -> R.string.coreModeProfile
+                                Config.Mode.Replace -> R.string.coreModeReplace
+                                Config.Mode.Merge -> R.string.coreModeCombine
+                            }))
+                        },
+                    )
+                }
+            }
+            Text(
+                text = textResource(when (routingMode) {
+                    Config.Mode.Disable -> R.string.coreModeProfileLead
+                    Config.Mode.Replace -> R.string.coreModeReplaceLead
+                    Config.Mode.Merge -> R.string.coreModeCombineLead
+                }),
+                modifier = Modifier.padding(horizontal = spacing.md, vertical = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = YaxcTheme.extendedColors.textMuted,
+            )
             CoreRoutingModeTabs(
                 editorMode = editorMode,
                 enabled = !isLoading && !isBusy,
@@ -365,7 +404,7 @@ fun CoreRoutingScreen(
                 },
                 text = {
                     Text(
-                        text = textResource(R.string.coreRoutingLead),
+                        text = textResource(R.string.coreRoutingModesHelp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },

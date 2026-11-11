@@ -39,6 +39,12 @@ func ConnectionSnapshot() string {
 	return lib.ConnectionSnapshot()
 }
 
+// SetConnectionAnalyticsEnabled changes capture without restarting proxy traffic.
+// Empty means success; disabled capture retains already collected history.
+func SetConnectionAnalyticsEnabled(enabled bool) string {
+	return lib.WrapError(lib.SetConnectionAnalyticsEnabled(enabled))
+}
+
 // ClearConnectionHistory removes closed observations, never live connections.
 func ClearConnectionHistory() {
 	lib.ClearConnectionHistory()

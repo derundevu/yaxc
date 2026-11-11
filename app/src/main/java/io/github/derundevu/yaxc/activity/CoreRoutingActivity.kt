@@ -20,6 +20,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.routing.CoreRoutingScreen
+import io.github.derundevu.yaxc.presentation.routing.CoreRoutingImportDialog
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.CoreRoutingEditorViewModel
 import kotlinx.coroutines.launch
@@ -67,7 +68,31 @@ class CoreRoutingActivity : AppCompatActivity() {
                     onAddRule = draft::addRule,
                     onMoveRule = draft::moveRule,
                     onDeleteRule = draft::deleteRule,
+                    routingMode = draft.routingMode,
+                    onRoutingModeChange = draft::updateRoutingMode,
+                    onImportFromProfile = { lifecycleScope.launch { draft.openProfileImport() } },
                 )
+                if (draft.importVisible) {
+                    CoreRoutingImportDialog(
+                        profiles = draft.importProfiles,
+                        preview = draft.importPreview,
+                        runtimeInboundTag = draft.runtimeInboundTag,
+                        busy = draft.isBusy,
+                        error = draft.importError,
+                        onDismiss = draft::closeProfileImport,
+                        onProfile = { id -> lifecycleScope.launch { draft.previewProfile(id) } },
+                        onConfirm = { selected, outbounds, inbounds, replace, strategy ->
+                            lifecycleScope.launch {
+                                draft.importProfileRules(selected, outbounds, inbounds, replace, strategy)?.let { result ->
+                                    feedback.show(
+                                        getString(R.string.coreImportDraftResult, result.added, result.skipped),
+                                        FeedbackKind.Success,
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
             }
         }
     }

@@ -77,6 +77,10 @@ data class CoreRoutingRule(
     val outboundTag: String = "proxy",
     /** Disabled drafts are absent from native JSON, so the UI sidecar retains their opaque-rule boundary. */
     val opaqueRulesBefore: Int? = null,
+    /** Imported native representation, retained so an untouched visual rule is lossless. */
+    val originalJson: String? = null,
+    /** Profile imports are not legacy app defaults and must not undergo geodata migrations. */
+    val preserveOriginalMatchers: Boolean = false,
 )
 
 sealed interface CoreRoutingRuleSlot {
@@ -178,6 +182,7 @@ fe80::/10
 
     fun migrateLegacyRules(rules: List<CoreRoutingRule>): List<CoreRoutingRule> {
         return rules.map { rule ->
+            if (rule.preserveOriginalMatchers) return@map rule
             rule.copy(
                 domainsText = migrateDomains(rule.domainsText),
                 ipsText = migrateIps(rule.ipsText),
@@ -221,6 +226,10 @@ fe80::/10
                     .put("network", rule.network.name)
                     .put("outboundTag", rule.outboundTag)
                     .apply { opaquePositions[rule.id]?.let { put("opaqueRulesBefore", it) } }
+                    .apply {
+                        rule.originalJson?.let { put("originalJson", it) }
+                        if (rule.preserveOriginalMatchers) put("preserveOriginalMatchers", true)
+                    }
             )
         }
         return array.toString()
@@ -230,6 +239,7 @@ fe80::/10
         rawJson: String,
         storedUiRules: List<CoreRoutingRule> = emptyList(),
         defaultRuleName: (Int) -> String = { "Rule $it" },
+        preserveImportedStructure: Boolean = false,
     ): ParsedCoreRouting {
         val json = JSONObject(rawJson.ifBlank { "{}" })
         val rulesArray = json.optJSONArray("rules") ?: JSONArray()
@@ -242,10 +252,12 @@ fe80::/10
             }
         }
 
+        val preserveStructure = preserveImportedStructure || storedUiRules.any { it.preserveOriginalMatchers }
         val parsed = parseImportedRulesArray(
             rulesArray,
             json.optString("domainStrategy").ifBlank { DEFAULT_DOMAIN_STRATEGY },
             defaultRuleName,
+            preserveImportedStructure = preserveStructure,
         )
         return applyStoredUiState(
             parsed = parsed.copy(preservedTopLevel = preservedTopLevel),
@@ -350,15 +362,6 @@ fe80::/10
         rules.forEach { if (it.id !in orderedIds) onRule(it) }
     }
 
-    fun isMeaningfulRoutingJson(json: String): Boolean {
-        val routing = runCatching { JSONObject(json) }.getOrNull() ?: return false
-        if (routing.length() == 0) return false
-        if (routing.optJSONArray("rules")?.length() ?: 0 > 0) return true
-        val domainStrategy = routing.optString("domainStrategy").ifBlank { DEFAULT_DOMAIN_STRATEGY }
-        return domainStrategy != DEFAULT_DOMAIN_STRATEGY ||
-            routing.keys().asSequence().any { it != "domainStrategy" && it != "rules" }
-    }
-
     private fun parseUiRuleItem(item: JSONObject): CoreRoutingRule {
         val legacyMatchType = item.optString("matchType")
             .let { rawType -> CoreRoutingMatchType.entries.firstOrNull { it.name == rawType } }
@@ -384,8 +387,8 @@ fe80::/10
             id = item.optString("id").ifBlank { UUID.randomUUID().toString() },
             name = item.optString("name"),
             enabled = item.optBoolean("enabled", true),
-            domainsText = migrateDomains(domainsText),
-            ipsText = migrateIps(ipsText),
+            domainsText = if (item.optBoolean("preserveOriginalMatchers")) domainsText else migrateDomains(domainsText),
+            ipsText = if (item.optBoolean("preserveOriginalMatchers")) ipsText else migrateIps(ipsText),
             portsText = portsText,
             sourcePortsText = sourcePortsText,
             protocolsText = protocolsText,
@@ -398,6 +401,8 @@ fe80::/10
                 ?: CoreRoutingTransport.Any,
             outboundTag = item.optString("outboundTag", "proxy").ifBlank { "proxy" },
             opaqueRulesBefore = item.optInt("opaqueRulesBefore", -1).takeIf { it >= 0 },
+            originalJson = item.optString("originalJson").takeIf { it.isNotBlank() },
+            preserveOriginalMatchers = item.optBoolean("preserveOriginalMatchers"),
         )
     }
 
@@ -405,12 +410,14 @@ fe80::/10
         rule: JSONObject,
         index: Int,
         defaultRuleName: (Int) -> String,
+        preserveOriginalMatchers: Boolean = false,
+        captureOriginal: Boolean = true,
     ): CoreRoutingRule? {
         if (hasUnsupportedKeys(rule)) return null
         if (!isSupportedNetwork(rule.opt("network"))) return null
 
-        val domainsText = migrateDomains(extractValues(rule.opt("domain")))
-        val ipsText = migrateIps(extractValues(rule.opt("ip")))
+        val domainsText = extractValues(rule.opt("domain")).let { if (preserveOriginalMatchers) it else migrateDomains(it) }
+        val ipsText = extractValues(rule.opt("ip")).let { if (preserveOriginalMatchers) it else migrateIps(it) }
         val portsText = extractValues(rule.opt("port"))
         val sourcePortsText = extractValues(rule.opt("sourcePort"))
         val protocolsText = extractValues(rule.opt("protocol"))
@@ -423,7 +430,7 @@ fe80::/10
         ).any { it.isNotBlank() }
         if (!hasMatchers) return null
 
-        return CoreRoutingRule(
+        val parsed = CoreRoutingRule(
             name = rule.optString("remarks").ifBlank { defaultRuleName(index + 1) },
             enabled = rule.optBoolean("enabled", true),
             domainsText = domainsText,
@@ -433,7 +440,9 @@ fe80::/10
             protocolsText = protocolsText,
             network = CoreRoutingTransport.fromJsonValue(rule.opt("network")),
             outboundTag = rule.optString("outboundTag", "proxy").ifBlank { "proxy" },
+            preserveOriginalMatchers = preserveOriginalMatchers,
         )
+        return if (captureOriginal && preserveOriginalMatchers) parsed.copy(originalJson = rule.toString()) else parsed
     }
 
     private fun hasUnsupportedKeys(rule: JSONObject): Boolean {
@@ -478,16 +487,24 @@ fe80::/10
         if (!rule.enabled) return null
         if (!rule.hasAnyMatchers()) return null
 
-        return JSONObject()
-            .put("outboundTag", rule.outboundTag.trim().ifBlank { "proxy" })
-            .apply {
-                putIfPresent("domain", buildArrayValue(rule.domainsText))
-                putIfPresent("ip", buildArrayValue(rule.ipsText))
-                putIfPresent("port", buildPortValue(rule.portsText))
-                putIfPresent("sourcePort", buildPortValue(rule.sourcePortsText))
-                putIfPresent("protocol", buildArrayValue(rule.protocolsText))
-                rule.network.jsonValue?.let { put("network", it) }
-            }
+        val result = rule.originalJson?.let(::JSONObject) ?: JSONObject()
+        // Patch only edited fields; untouched numeric ports, arrays and metadata stay exact.
+        val baseline = if (rule.originalJson == null) null
+            else parseRule(result, 0, { "" }, preserveOriginalMatchers = true, captureOriginal = false)
+        fun patch(key: String, value: Any?) {
+            if (value == null) result.remove(key) else result.put(key, value)
+        }
+        if (baseline == null || baseline.outboundTag != rule.outboundTag)
+            patch("outboundTag", rule.outboundTag.trim().ifBlank { "proxy" })
+        if (baseline == null || baseline.domainsText != rule.domainsText) patch("domain", buildArrayValue(rule.domainsText))
+        if (baseline == null || baseline.ipsText != rule.ipsText) patch("ip", buildArrayValue(rule.ipsText))
+        if (baseline == null || baseline.portsText != rule.portsText) patch("port", buildPortValue(rule.portsText))
+        if (baseline == null || baseline.sourcePortsText != rule.sourcePortsText) patch("sourcePort", buildPortValue(rule.sourcePortsText))
+        if (baseline == null || baseline.protocolsText != rule.protocolsText) patch("protocol", buildArrayValue(rule.protocolsText))
+        if (baseline == null || baseline.network != rule.network) patch("network", rule.network.jsonValue)
+        if (result.has("enabled")) result.put("enabled", true)
+        if (result.has("remarks") && baseline?.name != rule.name) result.put("remarks", rule.name)
+        return result
     }
 
     private fun buildExchangeRule(
@@ -515,6 +532,7 @@ fe80::/10
         rulesArray: JSONArray,
         domainStrategy: String,
         defaultRuleName: (Int) -> String,
+        preserveImportedStructure: Boolean = false,
     ): ParsedCoreRouting {
         val rules = mutableListOf<CoreRoutingRule>()
         val ruleOrder = mutableListOf<CoreRoutingRuleSlot>()
@@ -522,7 +540,8 @@ fe80::/10
 
         for (index in 0 until rulesArray.length()) {
             val ruleObject = rulesArray.optJSONObject(index) ?: continue
-            val parsedRule = parseRule(ruleObject, index, defaultRuleName)
+            val parsedRule = parseRule(ruleObject, index, defaultRuleName,
+                preserveOriginalMatchers = preserveImportedStructure)
             if (parsedRule != null) {
                 rules.add(parsedRule)
                 ruleOrder.add(CoreRoutingRuleSlot.Editable(parsedRule.id))

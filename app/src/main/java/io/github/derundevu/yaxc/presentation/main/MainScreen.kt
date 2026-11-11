@@ -168,8 +168,11 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickab
 import io.github.derundevu.yaxc.presentation.root.AppUpdateCheckButton
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsScreen
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsState
-import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionFilter
-import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionGrouping
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsQuery
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -226,8 +229,8 @@ fun MainScreen(
     onDownloadAppUpdate: () -> Unit,
     onInstallAppUpdate: () -> Unit,
     connectionAnalytics: ConnectionAnalyticsState,
-    onConnectionGrouping: (ConnectionGrouping) -> Unit,
-    onConnectionFilter: (ConnectionFilter) -> Unit,
+    onConnectionQuery: (ConnectionAnalyticsQuery) -> Unit,
+    onConnectionCaptureEnabled: (Boolean) -> Unit,
     onConnectionPersistence: (Boolean) -> Unit,
     onClearConnectionHistory: () -> Unit,
     onConnectionAnalyticsVisibility: (Boolean) -> Unit,
@@ -242,13 +245,20 @@ fun MainScreen(
     val connectBottomPadding = 162.dp + reservedBottomInset
     val tabBottomPadding = 112.dp + reservedBottomInset
     val connectListState = rememberLazyListState()
-    val analyticsListState = rememberLazyListState()
+    val analyticsSavedState = rememberSaveableStateHolder()
     var analyticsVisible by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = analyticsVisible) { analyticsVisible = false }
     val reportAnalyticsVisibility = rememberUpdatedState(onConnectionAnalyticsVisibility)
-    DisposableEffect(analyticsVisible) {
-        reportAnalyticsVisibility.value(analyticsVisible)
-        onDispose { reportAnalyticsVisibility.value(false) }
+    val analyticsLifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(analyticsVisible, analyticsLifecycle) {
+        val report = { reportAnalyticsVisibility.value(analyticsVisible && analyticsLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
+        val observer = LifecycleEventObserver { _, _ -> report() }
+        analyticsLifecycle.addObserver(observer)
+        report()
+        onDispose {
+            analyticsLifecycle.removeObserver(observer)
+            reportAnalyticsVisibility.value(false)
+        }
     }
     val backdropBaseColor = MaterialTheme.colorScheme.background
     val backdrop = rememberLayerBackdrop {
@@ -427,15 +437,16 @@ fun MainScreen(
             exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180)),
         ) {
             Surface(modifier = Modifier.fillMaxSize()) {
-                ConnectionAnalyticsScreen(
-                    state = connectionAnalytics,
-                    listState = analyticsListState,
-                    onBack = { analyticsVisible = false },
-                    onGrouping = onConnectionGrouping,
-                    onFilter = onConnectionFilter,
-                    onPersistence = onConnectionPersistence,
-                    onClearHistory = onClearConnectionHistory,
-                )
+                analyticsSavedState.SaveableStateProvider("analytics") {
+                    ConnectionAnalyticsScreen(
+                        state = connectionAnalytics,
+                        onBack = { analyticsVisible = false },
+                        onQuery = onConnectionQuery,
+                        onCaptureEnabled = onConnectionCaptureEnabled,
+                        onPersistence = onConnectionPersistence,
+                        onClearHistory = onClearConnectionHistory,
+                    )
+                }
             }
         }
     }

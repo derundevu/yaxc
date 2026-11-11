@@ -1,0 +1,23 @@
+## What's new in 1.5.6
+
+### Connections and history
+
+- Reworked Connections into app and configuration summaries. Select an app or configuration to inspect only its connections, with an opposite-side identity filter.
+- Added compact connection rows with selectable details and copying; destination search; combined state, TCP/UDP, route, outcome and start-period filters; and sorting by time, traffic or duration. Back preserves filters and scroll position; incoming traffic does not force scrolling.
+- Reduced presentation work for the grouped view and stopped presentation updates while the screen is hidden. Totals describe retained filtered observations, not lifetime traffic.
+- Keep active records first and rotate finished history in completion order. History now reports native evictions/refusals and Android rotations/refusals separately instead of treating them as one exact lost-connection count; clearing resets history counters and rejects stale snapshots.
+- Added History → Record connection analytics, enabled by default. Turning it off stops native capture and Android polling immediately without restarting the proxy or interrupting TCP/UDP traffic, in ordinary and Live Routing modes.
+- Turning recording back on captures only new connections. Existing observations finish as interrupted/incomplete at the cutoff; their real connections keep running.
+- The recording preference survives app/proxy restarts and is independent of Save history on this device. Turning recording off keeps existing history; use Clear finished history to release retained history memory. Existing bounds and 24-hour expiry still apply.
+
+### Core Routing
+
+- Import selected rules from a profile into the Core Routing draft, with a preview, optional domain strategy and append/replace choices. Save explicitly to apply; the source profile stays unchanged.
+- Preserve Profile only / Core Routing only / Combine when saving. Repeat imports and equivalent runtime aliases no longer duplicate identical rules.
+- Distinguish shared Proxy/Direct/Block roles from literal profile outbound tags. Ambiguous destinations require confirmation; unsupported outbound dependencies are rejected with an explanation.
+
+### Embedded core
+
+- Updated the embedded derundevu/proxide core to 26.11.9.2, based on the unchanged Xray 26.11.9 upstream base, with safe live connection-observation shutdown.
+
+The package ID and Room schema are unchanged. The separately managed root-mode Xray executable is not upgraded by this release; connection analytics remains unavailable in root mode.

@@ -3,10 +3,17 @@ package io.github.derundevu.yaxc.presentation.main
 import androidx.compose.runtime.Composable
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsState
+import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsQuery
 
 /** Supplies unrelated app-version/update chrome without invoking native code or networking. */
 @Composable
-internal fun MainScreenTestContent(state: MainUiState, onAction: (MainAction) -> Unit) {
+internal fun MainScreenTestContent(
+    state: MainUiState,
+    onAction: (MainAction) -> Unit,
+    analytics: ConnectionAnalyticsState = ConnectionAnalyticsState(),
+    onAnalyticsQuery: (ConnectionAnalyticsQuery) -> Unit = {},
+    onAnalyticsCaptureEnabled: (Boolean) -> Unit = {},
+) {
     MainScreen(
         tabs = state.tabs,
         selectedTabId = state.selectedTabId,
@@ -39,9 +46,9 @@ internal fun MainScreenTestContent(state: MainUiState, onAction: (MainAction) ->
         onCheckAppUpdate = {},
         onDownloadAppUpdate = {},
         onInstallAppUpdate = {},
-        connectionAnalytics = ConnectionAnalyticsState(),
-        onConnectionGrouping = {},
-        onConnectionFilter = {},
+        connectionAnalytics = analytics,
+        onConnectionQuery = onAnalyticsQuery,
+        onConnectionCaptureEnabled = onAnalyticsCaptureEnabled,
         onConnectionPersistence = {},
         onClearConnectionHistory = {},
         onConnectionAnalyticsVisibility = {},

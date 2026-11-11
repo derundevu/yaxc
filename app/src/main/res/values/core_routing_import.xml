@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="coreImportTitle">Import from profile</string>
+    <string name="coreImportLead">Choose a saved profile, then select its rules. Destinations map to this app’s Proxy, Direct or Block; outbound settings, DNS and hosts are not copied. Nothing is persisted until Save.</string>
+    <string name="coreImportNoProfiles">No saved profiles</string>
+    <string name="coreImportNoRules">This profile has no routing rules</string>
+    <string name="coreImportSelectAll">Select supported rules</string>
+    <string name="coreImportSelectNone">Clear selection</string>
+    <string name="coreImportRuleNumber">Rule %1$d</string>
+    <string name="coreImportMapOutbound">Destination: %1$s</string>
+    <string name="coreImportProxy">Proxy — current default route</string>
+    <string name="coreImportDirect">Direct</string>
+    <string name="coreImportBlock">Block</string>
+    <string name="coreImportMapInbound">Map source inbound “%1$s” to current listener “%2$s”</string>
+    <string name="coreImportStrategy">Import domainStrategy: %1$s</string>
+    <string name="coreImportAppend">Append to draft rules</string>
+    <string name="coreImportReplace">Replace draft rules</string>
+    <string name="coreImportReplaceLead">All current draft rules, including hidden or disabled rules, will be discarded. Other routing settings stay unchanged unless domainStrategy is selected.</string>
+    <string name="coreImportMappingRequired">Choose every unresolved destination and confirm each inbound mapping before importing</string>
+    <string name="coreImportIntoDraft">Import into draft</string>
+    <string name="coreImportCancel">Cancel</string>
+    <string name="coreImportDraftResult">Added %1$d rules, skipped %2$d exact duplicates. Use Save to apply.</string>
+    <string name="coreModeProfile">Profile only</string>
+    <string name="coreModeReplace">Core Routing only</string>
+    <string name="coreModeCombine">Combine</string>
+    <string name="coreModeProfileLead">Use ordinary profile routing; in Live Routing, disable shared Core Routing without importing member rules. Keep the draft for later.</string>
+    <string name="coreModeReplaceLead">Replaces the entire profile routing object, discarding its rules, balancers and strategy. Managed rules still apply.</string>
+    <string name="coreModeCombineLead">Profile rules first, then Core Routing; exact duplicates are skipped. Core Routing settings override matching profile settings.</string>
+    <string name="coreRoutingModesHelp">Profile only uses ordinary profile routing; in Live Routing it disables shared Core Routing, never imports member rules. Core Routing only replaces the entire profile routing object, including unique rules, balancers and domainStrategy. Combine keeps profile rules first and appends Core Routing rules, skipping only exact duplicates. Managed rules still apply; Live Routing keeps priority. Proxy uses the selected primary outbound or Live Routing default group. Import copies selected rules into a draft, not DNS or hosts. Save applies the selected mode and draft.</string>
+    <string name="coreImportDraftChanged">The draft changed during import. Try importing again.</string>
+</resources>

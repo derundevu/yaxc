@@ -189,6 +189,9 @@ class CoreRoutingReorderTest {
                         rules.value = rules.value.toMutableList().apply { add(to, removeAt(from)) }
                     },
                     onDeleteRule = { id -> rules.value = rules.value.filterNot { it.id == id } },
+                    routingMode = io.github.derundevu.yaxc.database.Config.Mode.Merge,
+                    onRoutingModeChange = {},
+                    onImportFromProfile = {},
                 )
             }
         }

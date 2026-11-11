@@ -325,6 +325,220 @@ class ConfigHelperTest : HelperSettingsTest() {
         assertFalse(disabledRules.any { it.optString("ruleTag").startsWith("yaxc-antifilter-") })
     }
 
+    @Test
+    fun routingMergeSkipsOnlyExactStructuralDuplicatesKeepingProfilePriority() {
+        val profile = baseProfile().put("routing", JSONObject("""{
+            "domainStrategy":"AsIs","rules":[
+                {"domain":["full:first.test"],"outboundTag":"lan-egress","attrs":{"b":2,"a":1}},
+                {"domain":["full:shared.test"],"outboundTag":"lan-egress"}
+            ]
+        }"""))
+        val global = GlobalConfig(routingMode = GlobalConfig.Mode.Merge, routing = """{
+            "domainStrategy":"IPOnDemand","rules":[
+                {"attrs":{"a":1,"b":2},"outboundTag":"lan-egress","domain":["full:first.test"]},
+                {"domain":["full:shared.test"],"outboundTag":"reject-egress"}
+            ]
+        }""")
+        val routing = generate(global, profile).getJSONObject("routing")
+        assertEquals("IPOnDemand", routing.getString("domainStrategy"))
+        val rules = routing.getJSONArray("rules").objectValues()
+        assertEquals(5, rules.size)
+        assertEquals(listOf("lan-egress", "lan-egress", "reject-egress"),
+            rules.take(3).map { it.getString("outboundTag") })
+        assertEquals("full:first.test", rules.first().getJSONArray("domain").getString(0))
+    }
+
+    @Test
+    fun coreOnlyReplacesEntireProfileRoutingWhileAllModesKeepManagedRules() {
+        val profile = baseProfile().put("routing", JSONObject("""{
+            "domainStrategy":"AsIs","domainMatcher":"linear",
+            "balancers":[{"tag":"profile-balancer","selector":["primary"]}],
+            "rules":[{"port":"80","outboundTag":"lan-egress"}]
+        }"""))
+        val core = """{"domainStrategy":"IPOnDemand","rules":[{"port":"443","outboundTag":"block"}]}"""
+        GlobalConfig.Mode.entries.forEach { mode ->
+            val routing = generate(GlobalConfig(routing = core, routingMode = mode), profile).getJSONObject("routing")
+            val rules = routing.getJSONArray("rules").objectValues()
+            assertTrue(rules.any { it.optInt("port") == 53 })
+            assertTrue(rules.any { it.optJSONArray("ip")?.stringValues()?.contains("10.0.0.0/8") == true })
+            when (mode) {
+                GlobalConfig.Mode.Disable -> {
+                    assertTrue(routing.has("balancers"))
+                    assertEquals("AsIs", routing.getString("domainStrategy"))
+                    assertEquals("80", rules.first().getString("port"))
+                }
+                GlobalConfig.Mode.Replace -> {
+                    assertFalse(routing.has("balancers"))
+                    assertFalse(routing.has("domainMatcher"))
+                    assertEquals("IPOnDemand", routing.getString("domainStrategy"))
+                    assertEquals("443", rules.first().getString("port"))
+                }
+                GlobalConfig.Mode.Merge -> {
+                    assertTrue(routing.has("balancers"))
+                    assertEquals("IPOnDemand", routing.getString("domainStrategy"))
+                    assertEquals(listOf("80", "443"), rules.take(2).map { it.getString("port") })
+                }
+            }
+        }
+    }
+
+    @Test
+    fun mergeDeduplicatesOnlyAfterCoreRoleResolvesToLiteralProfileDestination() {
+        val profile = baseProfile()
+            .put("outbounds", JSONArray("""[{"tag":"exit","protocol":"freedom"},{"tag":"upstream","protocol":"vless"}]"""))
+            .put("routing", JSONObject("""{"rules":[{"domain":["full:same.test"],"outboundTag":"exit","meta":{"b":2,"a":1}}]}"""))
+        val config = GlobalConfig(routingMode = GlobalConfig.Mode.Merge, routing = """{"rules":[
+            {"meta":{"a":1,"b":2},"outboundTag":"direct","domain":["full:same.test"]},
+            {"domain":["full:same.test"],"outboundTag":"block","meta":{"a":1,"b":2}}
+        ]}""")
+        val rules = generate(config, profile).getJSONObject("routing").getJSONArray("rules").objectValues()
+        assertEquals(4, rules.size)
+        assertEquals("exit", rules[0].getString("outboundTag"))
+        assertEquals("block", rules[1].getString("outboundTag"))
+        assertJsonEquals(JSONObject(profile.getJSONObject("routing").getJSONArray("rules").getJSONObject(0).toString()), rules[0])
+    }
+
+    @Test
+    fun coreAndManagedRolesIgnoreWrongProtocolReservedTagsWithoutChangingProfileTags() {
+        val profile = baseProfile().put("outbounds", JSONArray("""[
+            {"tag":"block","protocol":"vless"},{"tag":"direct","protocol":"trojan"},
+            {"tag":"proxy","protocol":"blackhole"},{"tag":"exit","protocol":"freedom"},
+            {"tag":"reject","protocol":"blackhole"}
+        ]""")).put("routing", JSONObject("""{"rules":[
+            {"domain":["full:literal.test"],"outboundTag":"block"}
+        ]}"""))
+        val config = GlobalConfig(routingMode = GlobalConfig.Mode.Merge, routing = """{"rules":[
+            {"domain":["full:blocked.test"],"outboundTag":"block"},
+            {"domain":["full:direct.test"],"outboundTag":"direct"},
+            {"domain":["full:proxy.test"],"outboundTag":"proxy"}
+        ]}""")
+        val generated = generate(config, profile)
+        val protocols = generated.getJSONArray("outbounds").objectValues().associate { it.getString("tag") to it.getString("protocol") }
+        val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
+        assertEquals("block", rules[0].getString("outboundTag"))
+        assertEquals("vless", protocols[rules[0].getString("outboundTag")])
+        assertEquals("blackhole", protocols[rules[1].getString("outboundTag")])
+        assertEquals("freedom", protocols[rules[2].getString("outboundTag")])
+        assertEquals("vless", protocols[rules[3].getString("outboundTag")])
+        assertEquals("vless", protocols[rules[4].getString("outboundTag")])
+        assertEquals("freedom", protocols[rules[5].getString("outboundTag")])
+        assertEquals("trojan", protocols["direct"])
+        assertEquals("blackhole", protocols["proxy"])
+    }
+
+    @Test
+    fun managedRoleCreationAvoidsOccupiedTagsAndRedirectedFreedomIsNeverDirect() {
+        settings.transparentProxy = true
+        val profile = baseProfile().put("outbounds", JSONArray("""[
+            {"tag":"proxy","protocol":"freedom","settings":{"redirect":"127.0.0.1:8080"}},
+            {"tag":"direct","protocol":"vless"},{"tag":"block","protocol":"trojan"},
+            {"tag":"dns-out","protocol":"vless"},{"tag":"yaxc-direct","protocol":"vless"}
+        ]""")).put("routing", JSONObject("""{"rules":[]}"""))
+        val config = GlobalConfig(routingMode = GlobalConfig.Mode.Merge, routing = """{"rules":[
+            {"domain":["full:direct.test"],"outboundTag":"direct"},{"domain":["full:block.test"],"outboundTag":"block"}
+        ]}""")
+        val generated = generate(config, profile)
+        val outbounds = generated.getJSONArray("outbounds").objectValues().associateBy { it.getString("tag") }
+        val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
+        assertEquals("yaxc-direct-2", rules[0].getString("outboundTag"))
+        assertEquals("yaxc-block", rules[1].getString("outboundTag"))
+        assertEquals("yaxc-dns-out", rules[2].getString("outboundTag"))
+        assertEquals("freedom", outbounds.getValue("yaxc-direct-2").getString("protocol"))
+        assertFalse(outbounds.getValue("yaxc-direct-2").has("settings"))
+        assertEquals("blackhole", outbounds.getValue("yaxc-block").getString("protocol"))
+        assertEquals("dns", outbounds.getValue("yaxc-dns-out").getString("protocol"))
+        assertEquals("vless", outbounds.getValue("direct").getString("protocol"))
+        assertEquals("trojan", outbounds.getValue("block").getString("protocol"))
+        assertEquals("127.0.0.1:8080", outbounds.getValue("proxy").getJSONObject("settings").getString("redirect"))
+    }
+
+    @Test
+    fun directOnlyPrimaryIsAValidProxyRoleAndManagedDnsDestination() {
+        listOf("proxy", "direct-exit").forEach { primaryTag ->
+            val profile = baseProfile().put("outbounds", JSONArray().put(JSONObject()
+                .put("tag", primaryTag).put("protocol", "freedom")))
+                .put("routing", JSONObject().put("rules", JSONArray()))
+            val config = GlobalConfig(routingMode = GlobalConfig.Mode.Replace,
+                routing = """{"rules":[{"domain":["full:default.test"],"outboundTag":"proxy"}]}""")
+            val generated = generate(config, profile)
+            val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
+            assertEquals(primaryTag, rules[0].getString("outboundTag"))
+            assertEquals(primaryTag, rules[1].getString("outboundTag"))
+            assertEquals(53, rules[1].getInt("port"))
+            assertEquals("freedom", generated.getJSONArray("outbounds").objectValues()
+                .first { it.getString("tag") == primaryTag }.getString("protocol"))
+        }
+    }
+
+    @Test
+    fun emptyProfilesUseManagedDirectForCoreProxyAndDnsWithoutInventingAProxyOutbound() {
+        listOf("""{"revision":1}""", """{"revision":1,"outbounds":[]}""").forEach { raw ->
+            listOf(false, true).forEach { transparent ->
+                settings.transparentProxy = transparent
+                GlobalConfig.Mode.entries.forEach { mode ->
+                    val config = GlobalConfig(routingMode = mode, routing = """{"rules":[
+                        {"ruleTag":"core-proxy","domain":["full:default.test"],"outboundTag":"proxy"}
+                    ]}""")
+                    val generated = generate(config, JSONObject(raw))
+                    val outbounds = generated.getJSONArray("outbounds").objectValues()
+                    assertEquals(if (transparent) listOf("freedom", "blackhole", "dns") else listOf("freedom", "blackhole"),
+                        outbounds.map { it.getString("protocol") })
+                    assertEquals("direct", outbounds.first().getString("tag"))
+                    assertFalse(outbounds.any { it.getString("tag") == "proxy" })
+                    assertEquals(1, generated.getInt("revision"))
+                    val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
+                    assertEquals(if (transparent) "dns-out" else "direct",
+                        rules.single { it.optInt("port") == 53 }.getString("outboundTag"))
+                    if (mode != GlobalConfig.Mode.Disable) {
+                        assertEquals("direct", rules.single { it.optString("ruleTag") == "core-proxy" }.getString("outboundTag"))
+                    }
+                    assertTrue(rules.all { rule -> outbounds.any { it.getString("tag") == rule.getString("outboundTag") } })
+                }
+            }
+        }
+    }
+
+    @Test
+    fun standaloneLiveBaseKeepsCoreAndDnsProxyRolesUntilSelectedGroupCompilation() {
+        listOf("[]", """[{"tag":"proxy","protocol":"freedom"}]""",
+            """[{"tag":"proxy","protocol":"blackhole"}]""").forEach { sharedOutbounds ->
+            val global = GlobalConfig(
+                outbounds = sharedOutbounds, outboundsMode = GlobalConfig.Mode.Merge,
+                routingMode = GlobalConfig.Mode.Merge, routing = """{"rules":[
+                    {"ruleTag":"core-proxy","domain":["full:core.test"],"outboundTag":"proxy"},
+                    {"ruleTag":"core-direct","domain":["full:direct.test"],"outboundTag":"direct"},
+                    {"ruleTag":"core-block","domain":["full:block.test"],"outboundTag":"block"}
+                ]}""",
+            )
+            val base = ConfigHelper(settings, global, "{}", target = ConfigHelper.Target.LiveRoutingBase).toString()
+            val baseRules = JSONObject(base).getJSONObject("routing").getJSONArray("rules").objectValues()
+            assertEquals("proxy", baseRules.single { it.optString("ruleTag") == "core-proxy" }.getString("outboundTag"))
+            assertEquals("proxy", baseRules.single { it.optInt("port") == 53 }.getString("outboundTag"))
+            val profiles = (1L..2L).associateWith { id ->
+                io.github.derundevu.yaxc.database.Profile(id = id, name = "Member $id",
+                    config = """{"outbounds":[{"tag":"member-exit","protocol":"freedom"}]}""")
+            }
+            val group = ProxyGroup(id = "default", profileIds = listOf(1, 2), selectedProfileId = 2)
+            val plan = LiveRoutingPlan(groups = listOf(group), rules = listOf(
+                AppDomainRule(id = "live-first", domains = listOf("full:core.test"), target = "block"),
+            ), defaultGroupId = group.id)
+            val compiled = JSONObject(LiveRoutingHelper.compile(base, plan, profiles, emptyMap(), "", ""))
+            val rules = compiled.getJSONObject("routing").getJSONArray("rules").objectValues()
+            val selectedTarget = rules.last().getString("outboundTag")
+            assertTrue(selectedTarget.contains("profile.2.outbound.0."))
+            assertEquals(selectedTarget, rules.single { it.optString("ruleTag") == "core-proxy" }.getString("outboundTag"))
+            assertEquals(selectedTarget, rules.single { it.optInt("port") == 53 }.getString("outboundTag"))
+            val protocols = compiled.getJSONArray("outbounds").objectValues().associate {
+                it.getString("tag") to it.getString("protocol")
+            }
+            assertEquals("freedom", protocols[rules.single { it.optString("ruleTag") == "core-direct" }.getString("outboundTag")])
+            assertFalse(rules.single { it.optString("ruleTag") == "core-direct" }.getString("outboundTag") == selectedTarget)
+            assertEquals("blackhole", protocols[rules.single { it.optString("ruleTag") == "core-block" }.getString("outboundTag")])
+            assertEquals("full:core.test", rules.first().getJSONArray("domain").getString(0))
+            assertTrue(rules.first().getString("ruleTag").contains("rule.0."))
+        }
+    }
+
     private fun generate(config: GlobalConfig = GlobalConfig(), profile: JSONObject = baseProfile()): JSONObject {
         return JSONObject(ConfigHelper(settings, config, profile.toString()).toString())
     }

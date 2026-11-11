@@ -246,19 +246,71 @@ class CoreRoutingEditorViewModelTest : RoomTestSupport() {
     }
 
     @Test
-    fun emptyEffectiveRoutingDisablesOverlayButRetainsDisabledUiDraft() = runTest(mainDispatcher.dispatcher) {
+    fun emptyEffectiveRoutingRetainsSelectedModeAndDisabledUiDraft() = runTest(mainDispatcher.dispatcher) {
         val disabled = CoreRoutingRule(name = "Disabled draft", enabled = false, portsText = "443", outboundTag = "block")
         seed(listOf(disabled), "IPIfNonMatch")
         val editor = editor()
         assertTrue(editor.save())
-        assertEquals(DatabaseConfig.Mode.Disable, database.configDao().get()!!.routingMode)
-        assertEquals("{}", database.configDao().get()!!.routing)
+        assertEquals(DatabaseConfig.Mode.Merge, database.configDao().get()!!.routingMode)
+        assertEquals(0, JSONObject(database.configDao().get()!!.routing).getJSONArray("rules").length())
         assertEquals(listOf(disabled), editor().rules)
         val reopened = editor()
         reopened.updateDomainStrategy("AsIs")
         assertTrue(reopened.save())
         assertEquals(DatabaseConfig.Mode.Merge, database.configDao().get()!!.routingMode)
         assertEquals("AsIs", JSONObject(database.configDao().get()!!.routing).getString("domainStrategy"))
+    }
+
+    @Test
+    fun everyRoutingModePersistsAcrossSaveAndReopenWithoutErasingDraft() = runTest(mainDispatcher.dispatcher) {
+        seed(listOf(CoreRoutingRule(portsText = "443", outboundTag = "direct")))
+        DatabaseConfig.Mode.entries.forEach { mode ->
+            val model = editor()
+            model.updateRoutingMode(mode)
+            assertTrue(model.save())
+            assertEquals(mode, database.configDao().get()!!.routingMode)
+            val reopened = editor()
+            assertEquals(mode, reopened.routingMode)
+            assertEquals("443", reopened.rules.single().portsText)
+            assertTrue(reopened.save())
+            assertEquals(mode, database.configDao().get()!!.routingMode)
+        }
+    }
+
+    @Test
+    fun savedProfileImportRefreshesSnapshotMapsIntoDraftAndOnlySavePersists() = runTest(mainDispatcher.dispatcher) {
+        seed(listOf(CoreRoutingRule(portsText = "80", outboundTag = "block")))
+        val profile = io.github.derundevu.yaxc.database.Profile(name = "Source",
+            config = """{"outbounds":[{"tag":"exit","protocol":"freedom"}],"routing":{"domainStrategy":"AsIs","rules":[
+                {"type":"field","domain":["full:old.test"],"outboundTag":"exit"}
+            ]}}""")
+        val id = app.profileRepository.create(profile)
+        val model = editor()
+        val before = database.configDao().get()
+        model.openProfileImport()
+        assertTrue(model.importProfiles.any { it.id == id })
+        val updated = app.profileRepository.find(id).copy(config = profile.config.replace("old.test", "new.test"))
+        app.profileRepository.update(updated)
+        model.previewProfile(id)
+        assertTrue(model.importPreview!!.rules.single().json.contains("new.test"))
+        val result = model.importProfileRules(setOf(0), emptyMap(), emptyMap(), false, false)!!
+        assertEquals(1, result.added)
+        assertEquals(before, database.configDao().get())
+        assertEquals(updated, app.profileRepository.find(id))
+        assertEquals(CoreRoutingEditorMode.Json, model.editorMode)
+        assertEquals("AsIs", JSONObject(model.document.text).getString("domainStrategy"))
+        model.updateRoutingMode(DatabaseConfig.Mode.Replace)
+        assertTrue(model.save())
+        val saved = database.configDao().get()!!
+        assertEquals(DatabaseConfig.Mode.Replace, saved.routingMode)
+        assertEquals(2, JSONObject(saved.routing).getJSONArray("rules").length())
+        assertTrue(JSONObject(saved.routing).getJSONArray("rules").getJSONObject(1).getJSONArray("domain").getString(0).contains("new.test"))
+        model.openProfileImport()
+        model.previewProfile(id)
+        assertEquals(1, model.importProfileRules(setOf(0), emptyMap(), emptyMap(), false, false)!!.skipped)
+        assertTrue(model.save())
+        assertEquals(2, JSONObject(database.configDao().get()!!.routing).getJSONArray("rules").length())
+        assertEquals(updated, app.profileRepository.find(id))
     }
 
     @Test
@@ -323,6 +375,39 @@ class CoreRoutingEditorViewModelTest : RoomTestSupport() {
         assertTrue(reopened.save())
         assertEquals(listOf("disabled-first", "opaque-second"),
             tags(JSONObject(database.configDao().get()!!.routing).getJSONArray("rules")))
+    }
+
+    @Test
+    fun importedCompleteRuleSurvivesVisualSaveReopenAndRepeatImport() = runTest(mainDispatcher.dispatcher) {
+        seed(emptyList())
+        val originalRule = JSONObject("""{"port":443,"network":["udp","tcp"],"remarks":"Provider label","locked":true,"outboundTag":"source-exit","domain":["geosite:ru"]}""")
+        val source = JSONObject().put("outbounds", JSONArray().put(JSONObject("""{"tag":"source-exit","protocol":"freedom"}""")))
+            .put("routing", JSONObject().put("rules", JSONArray().put(originalRule)))
+        val id = app.profileRepository.create(io.github.derundevu.yaxc.database.Profile(name = "Exact source", config = source.toString()))
+        val first = editor()
+        first.openProfileImport()
+        first.previewProfile(id)
+        assertEquals(1, first.importProfileRules(setOf(0), emptyMap(), emptyMap(), true, false)!!.added)
+        assertTrue(first.switchMode(CoreRoutingEditorMode.Visual))
+        assertTrue(first.save())
+        val expected = JSONObject(originalRule.toString()).put("outboundTag", "direct")
+        assertJsonEquals(expected, JSONObject(database.configDao().get()!!.routing).getJSONArray("rules").getJSONObject(0))
+        val reopened = editor()
+        assertEquals("geosite:ru", reopened.rules.single().domainsText)
+        assertTrue(reopened.save())
+        assertJsonEquals(expected, JSONObject(database.configDao().get()!!.routing).getJSONArray("rules").getJSONObject(0))
+        reopened.openProfileImport()
+        reopened.previewProfile(id)
+        val duplicate = reopened.importProfileRules(setOf(0), emptyMap(), emptyMap(), false, false)!!
+        assertEquals(0, duplicate.added)
+        assertEquals(1, duplicate.skipped)
+        assertTrue(reopened.switchMode(CoreRoutingEditorMode.Visual))
+        reopened.updateRule(reopened.rules.single().copy(portsText = "8443"))
+        assertTrue(reopened.save())
+        val edited = editor()
+        assertTrue(edited.save())
+        assertJsonEquals(expected.put("port", "8443"), JSONObject(database.configDao().get()!!.routing).getJSONArray("rules").getJSONObject(0))
+        assertEquals(source.toString(), app.profileRepository.find(id).config)
     }
 
     private suspend fun editor(): CoreRoutingEditorViewModel = CoreRoutingEditorViewModel(

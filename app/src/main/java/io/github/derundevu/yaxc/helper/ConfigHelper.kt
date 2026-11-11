@@ -9,7 +9,11 @@ class ConfigHelper(
     private val settings: Settings,
     config: Config,
     base: String,
+    private val target: Target = Target.Profile,
 ) {
+    /** LiveRoutingBase is compiler input: its logical Proxy destination is resolved by LiveRoutingHelper. */
+    enum class Target { Profile, LiveRoutingBase }
+
     private val base: JSONObject = JsonHelper.makeObject(base)
 
     init {
@@ -17,8 +21,7 @@ class ConfigHelper(
         process("dns", config.dns, config.dnsMode)
         process("inbounds", config.inbounds, config.inboundsMode)
         process("outbounds", config.outbounds, config.outboundsMode)
-        process("routing", config.routing, config.routingMode)
-        applyManagedRuntimeConfig()
+        applyManagedRuntimeConfig(config)
         if (settings.tproxyHotspot || settings.tproxyTethering) sharedInbounds()
     }
 
@@ -64,13 +67,22 @@ class ConfigHelper(
         base.put(key, inbounds)
     }
 
-    private fun applyManagedRuntimeConfig() {
+    private fun applyManagedRuntimeConfig(config: Config) {
         base.put("log", JsonHelper.mergeObjects(JsonHelper.getObject(base, "log"), runtimeLog()))
         val outbounds = ensureManagedOutbounds(JsonHelper.getArray(base, "outbounds"))
         base.put("outbounds", outbounds)
         base.put("dns", mergeRuntimeDns(JsonHelper.getObject(base, "dns")))
         base.put("inbounds", runtimeInbounds())
-        base.put("routing", mergeRuntimeRouting(JsonHelper.getObject(base, "routing"), outbounds))
+        base.put("routing", mergeRuntimeRouting(combineRouting(config, outbounds), outbounds))
+    }
+
+    private fun combineRouting(config: Config, outbounds: JSONArray): JSONObject {
+        val profile = JsonHelper.getObject(base, "routing")
+        normalizeRuleOutboundTags(JsonHelper.getArray(profile, "rules"), outbounds, semantic = false)
+        if (config.routingMode == Config.Mode.Disable) return profile
+        val core = JsonHelper.makeObject(config.routing)
+        normalizeRuleOutboundTags(JsonHelper.getArray(core, "rules"), outbounds, semantic = true)
+        return if (config.routingMode == Config.Mode.Replace) core else JsonHelper.mergeRouting(profile, core)
     }
 
     private fun runtimeLog(): JSONObject {
@@ -170,8 +182,6 @@ class ConfigHelper(
             rules.put(runtimeDirectPrivateRule(outbounds))
         }
 
-        normalizeRuleOutboundTags(rules, outbounds)
-
         routing.put("rules", rules)
         if (routing.optString("domainStrategy").isBlank()) {
             routing.put("domainStrategy", "IPIfNonMatch")
@@ -229,96 +239,99 @@ class ConfigHelper(
 
     private fun ensureManagedOutbounds(currentOutbounds: JSONArray): JSONArray {
         val outbounds = JSONArray(currentOutbounds.toString())
-        ensurePrimaryProxyTag(outbounds)
-        if (findOutboundTagByProtocol(outbounds, "freedom") == null &&
-            findCaseInsensitiveOutboundTag(outbounds, "direct") == null
-        ) {
-            outbounds.put(
-                JSONObject()
-                    .put("protocol", "freedom")
-                    .put("tag", "direct")
-            )
+        if (target == Target.Profile && findRoleTag(outbounds, "proxy") == null) {
+            for (index in 0 until outbounds.length()) {
+                val outbound = outbounds.optJSONObject(index) ?: continue
+                val role = outboundRole(outbound)
+                if (outbound.optString("tag").isNotBlank() || (role != "proxy" && role != "direct")) continue
+                outbound.put("tag", unusedTag(outbounds, "proxy"))
+                break
+            }
         }
-        if (findOutboundTagByProtocol(outbounds, "blackhole") == null &&
-            findCaseInsensitiveOutboundTag(outbounds, "block") == null
-        ) {
-            outbounds.put(
-                JSONObject()
-                    .put("protocol", "blackhole")
-                    .put("tag", "block")
-            )
+        fun ensure(role: String, protocol: String) {
+            if (findRoleTag(outbounds, role) == null) {
+                outbounds.put(JSONObject().put("protocol", protocol).put("tag", unusedTag(outbounds, role)))
+            }
         }
-        if (
-            settings.transparentProxy &&
-            findOutboundTagByProtocol(outbounds, "dns") == null &&
-            findCaseInsensitiveOutboundTag(outbounds, "dns-out") == null
-        ) {
-            outbounds.put(
-                JSONObject()
-                    .put("protocol", "dns")
-                    .put("tag", "dns-out")
-            )
-        }
+        // Empty profiles use the managed direct outbound as their default forwarding destination.
+        ensure("direct", "freedom")
+        ensure("block", "blackhole")
+        if (settings.transparentProxy) ensure("dns-out", "dns")
         return outbounds
     }
 
-    private fun ensurePrimaryProxyTag(outbounds: JSONArray) {
-        if (findPrimaryProxyOutboundTag(outbounds) != null) return
-        for (index in 0 until outbounds.length()) {
-            val outbound = outbounds.optJSONObject(index) ?: continue
-            val protocol = outbound.optString("protocol").trim().lowercase()
-            if (protocol in setOf("freedom", "blackhole", "dns")) continue
-            outbound.put("tag", "proxy")
-            return
+    private fun unusedTag(outbounds: JSONArray, preferred: String): String {
+        if (findExactOutboundTag(outbounds, preferred) == null) return preferred
+        val prefix = "yaxc-$preferred"
+        var candidate = prefix
+        var suffix = 2
+        while (findExactOutboundTag(outbounds, candidate) != null) candidate = "$prefix-${suffix++}"
+        return candidate
+    }
+
+    /** Routing roles are not tag names: a VLESS outbound named "block" is still a proxy. */
+    private fun outboundRole(outbound: JSONObject): String? {
+        return when (val protocol = outbound.optString("protocol").trim().lowercase()) {
+            "freedom" -> when {
+                outbound.optJSONObject("settings")?.optString("redirect")?.isNotBlank() == true ||
+                    outbound.has("proxySettings") ||
+                    outbound.optJSONObject("streamSettings")?.optJSONObject("sockopt")?.has("dialerProxy") == true -> "proxy"
+                else -> "direct"
+            }
+            "blackhole" -> "block"
+            "dns" -> "dns-out"
+            "" -> null
+            else -> if (protocol == "loopback") null else "proxy"
         }
     }
 
-    private fun normalizeRuleOutboundTags(
-        rules: JSONArray,
-        outbounds: JSONArray,
-    ) {
+    private fun findRoleTag(outbounds: JSONArray, role: String): String? {
+        var first: String? = null
+        var directFallback: String? = null
+        for (index in 0 until outbounds.length()) {
+            val outbound = outbounds.optJSONObject(index) ?: continue
+            val actualRole = outboundRole(outbound)
+            if (actualRole != role && !(role == "proxy" && actualRole == "direct")) continue
+            val tag = outbound.optString("tag").trim()
+            if (tag.isEmpty()) continue
+            // The Live compiler reserves this tag for its selected default group, regardless of protocol.
+            if (target == Target.LiveRoutingBase && role != "proxy" && tag.equals("proxy", ignoreCase = true)) continue
+            var occurrences = 0
+            for (other in 0 until outbounds.length()) {
+                if (outbounds.optJSONObject(other)?.optString("tag")?.trim() == tag) occurrences += 1
+            }
+            if (occurrences != 1) continue
+            if (role == "proxy" && actualRole == "direct") {
+                if (directFallback == null || tag == "proxy") directFallback = tag
+                continue
+            }
+            if (tag == role) return tag
+            if (first == null) first = tag
+        }
+        return first ?: directFallback
+    }
+
+    private fun normalizeRuleOutboundTags(rules: JSONArray, outbounds: JSONArray, semantic: Boolean) {
         for (index in 0 until rules.length()) {
             val rule = rules.optJSONObject(index) ?: continue
-            val outboundTag = rule.optString("outboundTag").trim()
-            if (outboundTag.isEmpty()) continue
-            rule.put("outboundTag", resolveRoutingOutboundTag(outboundTag, outbounds))
+            val tag = rule.optString("outboundTag").trim()
+            if (tag.isNotEmpty()) rule.put("outboundTag", resolveRoutingOutboundTag(tag, outbounds, semantic))
         }
     }
 
     private fun resolveRoutingOutboundTag(
         outboundTag: String,
         outbounds: JSONArray,
+        semantic: Boolean = true,
     ): String {
         val normalized = outboundTag.trim()
-        if (normalized.isEmpty()) return outboundTag
-        findExactOutboundTag(outbounds, normalized)?.let { return it }
-
-        return when (normalized.lowercase()) {
-            "proxy" -> {
-                findCaseInsensitiveOutboundTag(outbounds, normalized)
-                    ?: findPrimaryProxyOutboundTag(outbounds)
-                    ?: normalized
-            }
-
-            "direct" -> {
-                findCaseInsensitiveOutboundTag(outbounds, normalized)
-                    ?: findOutboundTagByProtocol(outbounds, "freedom")
-                    ?: normalized
-            }
-
-            "block" -> {
-                findCaseInsensitiveOutboundTag(outbounds, normalized)
-                    ?: findOutboundTagByProtocol(outbounds, "blackhole")
-                    ?: normalized
-            }
-
-            "dns-out" -> {
-                findCaseInsensitiveOutboundTag(outbounds, normalized)
-                    ?: findOutboundTagByProtocol(outbounds, "dns")
-                    ?: normalized
-            }
-
-            else -> normalized
+        // Profile tags are literal. Core Routing and managed aliases denote protocol-checked roles.
+        if (!semantic) findExactOutboundTag(outbounds, normalized)?.let { return it }
+        val role = normalized.lowercase()
+        if (target == Target.LiveRoutingBase && role == "proxy") return "proxy"
+        if (role != "proxy" && role != "direct" && role != "block" && role != "dns-out") return normalized
+        return requireNotNull(findRoleTag(outbounds, role)) {
+            "No unambiguous outbound is available for Core Routing role '$role'"
         }
     }
 
@@ -330,42 +343,6 @@ class ConfigHelper(
             val outbound = outbounds.optJSONObject(index) ?: continue
             val outboundTag = outbound.optString("tag").trim()
             if (outboundTag == tag) return outboundTag
-        }
-        return null
-    }
-
-    private fun findCaseInsensitiveOutboundTag(
-        outbounds: JSONArray,
-        tag: String,
-    ): String? {
-        for (index in 0 until outbounds.length()) {
-            val outbound = outbounds.optJSONObject(index) ?: continue
-            val outboundTag = outbound.optString("tag").trim()
-            if (outboundTag.equals(tag, ignoreCase = true)) return outboundTag
-        }
-        return null
-    }
-
-    private fun findOutboundTagByProtocol(
-        outbounds: JSONArray,
-        protocol: String,
-    ): String? {
-        for (index in 0 until outbounds.length()) {
-            val outbound = outbounds.optJSONObject(index) ?: continue
-            if (!outbound.optString("protocol").trim().equals(protocol, ignoreCase = true)) continue
-            val outboundTag = outbound.optString("tag").trim()
-            if (outboundTag.isNotEmpty()) return outboundTag
-        }
-        return null
-    }
-
-    private fun findPrimaryProxyOutboundTag(outbounds: JSONArray): String? {
-        for (index in 0 until outbounds.length()) {
-            val outbound = outbounds.optJSONObject(index) ?: continue
-            val protocol = outbound.optString("protocol").trim().lowercase()
-            if (protocol in setOf("freedom", "blackhole", "dns")) continue
-            val outboundTag = outbound.optString("tag").trim()
-            if (outboundTag.isNotEmpty()) return outboundTag
         }
         return null
     }

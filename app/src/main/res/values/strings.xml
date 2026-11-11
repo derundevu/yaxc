@@ -440,8 +440,6 @@
     <string name="connectionAnalyticsStopped">Capture stopped. Retained connections are shown below.</string>
     <string name="connectionAnalyticsUnsupported">Connection analytics is unavailable in root mode: the external Xray process has no connection observer. Retained history is still available.</string>
     <string name="connectionAnalyticsError">Connection capture or history storage failed. Displayed history may be incomplete.</string>
-    <string name="connectionAnalyticsRetention">History is bounded to 5,000 connections and 8 MiB; finished connections expire after 24 hours. Overflow can also omit active connections. Totals describe only retained connections matching this filter.</string>
-    <string name="connectionAnalyticsOverflow">Buffer drops/evictions: %1$d. A native eviction may already be present in collected history.</string>
     <string name="connectionAnalyticsTotals">%1$d connections · ↑ %2$s · ↓ %3$s</string>
     <string name="connectionAnalyticsPersistence">Save history on this device</string>
     <string name="connectionAnalyticsPrivacy">Off by default. Connection history contains private app identities, destination addresses and domain names, routes, timestamps and byte counts. Enabling saves bounded history in private app storage excluded from backups. Disabling deletes saved history, but keeps current in-memory history. No payloads or profile secrets are recorded.</string>
