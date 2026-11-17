@@ -21,6 +21,7 @@ internal fun MainScreenTestContent(
         liveRoutingAvailable = state.liveRoutingAvailable,
         liveRoutingDefaultGroupName = state.liveRoutingDefaultGroupName,
         isRunning = state.isRunning,
+        isBlocked = state.isBlocked,
         connectionFailure = state.connectionFailure,
         selectedSourceName = state.selectedSourceName,
         selectedSourceMetadata = state.selectedSourceMetadata,

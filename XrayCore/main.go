@@ -39,8 +39,8 @@ func ConnectionSnapshot() string {
 	return lib.ConnectionSnapshot()
 }
 
-// SetConnectionAnalyticsEnabled changes capture without restarting proxy traffic.
-// Empty means success; disabled capture retains already collected history.
+// SetConnectionAnalyticsEnabled changes admission without restarting proxy traffic.
+// Empty means success; disabled admission still updates previously recorded flows.
 func SetConnectionAnalyticsEnabled(enabled bool) string {
 	return lib.WrapError(lib.SetConnectionAnalyticsEnabled(enabled))
 }

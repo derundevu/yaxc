@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
-	"github.com/xtls/xray-core/app/dispatcher"
+	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/features/stats"
 )
 
@@ -96,50 +97,122 @@ func TestConnectionCapturePreferenceSurvivesClearStopStartWithoutReplacingNative
 	}
 }
 
-func TestRetiredConnectionLedgerStaysReachableOnlyUntilLastLateFinish(t *testing.T) {
+func TestConnectionAdmissionDisablePreservesLiveAccountingAndClearFences(t *testing.T) {
 	ledger := connectionLedgerFixture()
-	ledger.observer = &dispatcher.DefaultDispatcher{}
-	ledger.ledgers = map[*connectionLedger]struct{}{ledger: {}}
+	previous := currentConnections.Swap(ledger)
+	preference := connectionCapturePreference.Swap(nil)
+	t.Cleanup(func() {
+		currentConnections.Store(previous)
+		connectionCapturePreference.Store(preference)
+	})
 	ledger.started()
-	first := ledger.Open(connectionMetadataFixture(1))
-	second := ledger.Open(connectionMetadataFixture(2))
-	ledger.stop()
-	if _, retained := ledger.ledgers[ledger]; !retained || ledger.pending != 2 || ledger.observer == nil {
-		t.Fatal("stop lost dispatcher needed for a later explicit analytics cutoff")
+	flow := ledger.Open(connectionMetadataFixture(1)).(*observedConnection)
+	flow.Routed(session.ConnectionRoute{OutboundTag: "proxy"})
+	flow.AddUpload(17)
+	flow.AddDownload(29)
+	stale := ledger.snapshot()
+	if err := SetConnectionAnalyticsEnabled(false); err != nil {
+		t.Fatal(err)
 	}
-	first.AddDownload(7)
-	first.Finish("closed")
-	if _, retained := ledger.ledgers[ledger]; !retained || ledger.pending != 1 || ledger.observer == nil {
-		t.Fatal("one late finish discarded another pending observation")
+	for index := range maxConnectionRecords + 1 {
+		if observation := ledger.Open(connectionMetadataFixture(index + 2)); observation != nil {
+			t.Fatal("disabled admission accepted a new flow")
+		}
 	}
-	second.AddUpload(9)
-	second.Finish("closed")
-	second.Finish("closed")
-	if len(ledger.ledgers) != 0 || ledger.pending != 0 || ledger.observer != nil {
-		t.Fatal("completed stopped ledger retained dispatcher/route metadata")
+	flow.AddUpload(31)
+	flow.AddDownload(43)
+	ClearConnectionHistory()
+	off := ledger.snapshot()
+	if off.Enabled || !off.Running || off.CaptureGeneration != stale.CaptureGeneration+1 || off.Generation != stale.Generation+1 ||
+		len(off.Connections) != 1 || off.NativeRejected != 0 || off.NativeEvicted != 0 {
+		t.Fatalf("disabled admission/clear changed history bounds or fences: %+v", off)
 	}
-	snapshot := ledger.snapshot()
-	if len(snapshot.Connections) != 2 || snapshot.Connections[0].Download != 7 || snapshot.Connections[1].Upload != 9 {
-		t.Fatalf("releasing dispatcher deleted retained history or late bytes: %+v", snapshot)
+	if got := off.Connections[0]; got.ID != stale.Connections[0].ID || got.ProfileID != 41 || got.State != "active" || got.EndedAt != 0 ||
+		got.Upload != 48 || got.Download != 72 || !got.LiveBytesExact {
+		t.Fatalf("disabled admission froze or relabeled admitted accounting: %+v", got)
+	}
+	flow.AddUpload(5)
+	flow.AddDownload(7)
+	flow.Finish("closed")
+	flow.Finish("closed")
+	closed := ledger.snapshot()
+	if got := closed.Connections[0]; got.State != "closed" || got.EndedAt == 0 || got.Upload != 53 || got.Download != 79 || !got.LiveBytesExact || ledger.count != 1 {
+		t.Fatalf("off-period real finish lost exact totals or duplicated retention: %+v", closed)
+	}
+	if !stale.Enabled || stale.CaptureGeneration != 0 || stale.Generation != 0 || stale.Connections[0].State != "active" ||
+		stale.Connections[0].Upload != 17 || stale.Connections[0].Download != 29 {
+		t.Fatalf("later callbacks mutated a stale snapshot: %+v", stale)
+	}
+	ClearConnectionHistory()
+	if got := ledger.snapshot(); got.Enabled || len(got.Connections) != 0 || got.Generation != off.Generation+1 || got.CaptureGeneration != off.CaptureGeneration {
+		t.Fatalf("clear while disabled retained closed rows or changed admission: %+v", got)
+	}
+	if err := SetConnectionAnalyticsEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	fresh := ledger.Open(connectionMetadataFixture(9))
+	if fresh == nil {
+		t.Fatal("re-enabled admission rejected a genuinely new flow")
+	}
+	fresh.AddUpload(11)
+	fresh.Finish("closed")
+	if got := ledger.snapshot(); !got.Enabled || got.CaptureGeneration != off.CaptureGeneration+1 || len(got.Connections) != 1 ||
+		got.Connections[0].ID == flow.document.ID || got.Connections[0].Upload != 11 {
+		t.Fatalf("re-enable revived cleared history or lost new accounting: %+v", got)
 	}
 }
 
-func TestStoppedConnectionLedgerWithoutPendingFlowsReleasesDispatcher(t *testing.T) {
+func TestConnectionAdmissionCutoffSerializesConcurrentOpensAndKeepsHandlesLive(t *testing.T) {
 	ledger := connectionLedgerFixture()
-	ledger.observer = &dispatcher.DefaultDispatcher{}
-	ledger.ledgers = map[*connectionLedger]struct{}{ledger: {}}
-	flow := ledger.Open(connectionMetadataFixture(1))
-	flow.AddUpload(23)
-	flow.Finish("closed")
-	if ledger.observer == nil {
-		t.Fatal("finishing a running core observation discarded its dispatcher")
+	previous := currentConnections.Swap(ledger)
+	preference := connectionCapturePreference.Swap(nil)
+	t.Cleanup(func() {
+		currentConnections.Store(previous)
+		connectionCapturePreference.Store(preference)
+	})
+	const workers = 32
+	start := make(chan struct{})
+	disabled := make(chan struct{})
+	var ready, finished sync.WaitGroup
+	ready.Add(workers)
+	finished.Add(workers)
+	for index := range workers {
+		go func() {
+			defer finished.Done()
+			ready.Done()
+			<-start
+			flow := ledger.Open(connectionMetadataFixture(index))
+			<-disabled
+			if late := ledger.Open(connectionMetadataFixture(index + workers)); late != nil {
+				t.Error("Open admitted a flow after synchronous disable returned")
+				late.Finish("closed")
+			}
+			if flow != nil {
+				flow.AddUpload(13)
+				flow.AddDownload(19)
+				flow.Finish("closed")
+			}
+		}()
 	}
-	ledger.stop()
-	if ledger.observer != nil || len(ledger.ledgers) != 0 {
-		t.Fatal("stopped drained ledger retained its dispatcher")
+	// Guarantee one admitted handle regardless of how the competing opens order.
+	admitted := ledger.Open(connectionMetadataFixture(workers * 2))
+	ready.Wait()
+	close(start)
+	if err := SetConnectionAnalyticsEnabled(false); err != nil {
+		t.Fatal(err)
 	}
+	close(disabled)
+	finished.Wait()
+	admitted.AddUpload(13)
+	admitted.AddDownload(19)
+	admitted.Finish("closed")
 	snapshot := ledger.snapshot()
-	if len(snapshot.Connections) != 1 || snapshot.Connections[0].Upload != 23 {
-		t.Fatalf("releasing stopped dispatcher deleted retained history: %+v", snapshot)
+	if snapshot.Enabled || snapshot.CaptureGeneration != 1 || len(snapshot.Connections) == 0 || len(snapshot.Connections) > workers+1 {
+		t.Fatalf("concurrent cutoff lost its admission boundary: %+v", snapshot)
+	}
+	for _, flow := range snapshot.Connections {
+		if flow.State != "closed" || flow.EndedAt == 0 || !flow.LiveBytesExact || flow.Upload != 13 || flow.Download != 19 {
+			t.Fatalf("concurrent cutoff froze an admitted handle: %+v", flow)
+		}
 	}
 }

@@ -24,8 +24,12 @@ class VpnActionReceiver : BroadcastReceiver() {
             TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME,
             TProxyService.STATUS_VPN_SERVICE_ACTION_NAME,
         )
-        val label = intent.getStringExtra("profile")?.takeIf(String::isNotBlank)
-            ?: context.getString(R.string.appName)
+        val label = if (intent.getBooleanExtra("isBlocked", false)) {
+            context.getString(R.string.killSwitchBlocked)
+        } else {
+            intent.getStringExtra("profile")?.takeIf(String::isNotBlank)
+                ?: context.getString(R.string.appName)
+        }
         if (!allowed.contains(action)) return
         val message = when (action) {
             TProxyService.START_VPN_SERVICE_ACTION_NAME -> context.getString(R.string.feedbackConnected, label)

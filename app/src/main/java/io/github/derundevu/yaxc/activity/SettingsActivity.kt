@@ -1,5 +1,7 @@
 package io.github.derundevu.yaxc.activity
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -57,19 +59,31 @@ class SettingsActivity : AppCompatActivity() {
                     formState = formState,
                     generatedXHwid = settings.generatedXHwid,
                     tunRoutes = tunRoutes,
-                    onFormStateChange = { formState = it },
+                    onFormStateChange = {
+                        if (it.killSwitch && (it.transparentProxy || !it.tun2socks)) {
+                            feedback.show(getString(R.string.settingsKillSwitchRequiresVpn), FeedbackKind.Warning)
+                        } else {
+                            formState = it
+                        }
+                    },
                     onTunRoutesSave = { routes ->
                         tunRoutes = routes.sorted()
                         settings.tunRoutes = routes.toSet()
                     },
                     onBack = ::finish,
                     onSave = { applySettings(formState) },
+                    onSystemVpnSettings = ::openSystemVpnSettings,
                 )
             }
         }
     }
 
     private fun applySettings(formState: SettingsFormState) {
+        if (formState.killSwitch && (formState.transparentProxy || !formState.tun2socks)) {
+            feedback.show(getString(R.string.settingsKillSwitchRequiresVpn), FeedbackKind.Warning)
+            return
+        }
+
         if (formState.transparentProxy && !settings.xrayCoreFile().exists()) {
             feedback.show(getString(R.string.installAssetsFirst), FeedbackKind.Warning)
             return
@@ -114,6 +128,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldSecondaryDnsV6 = settings.secondaryDnsV6
         val oldSocksUdp = settings.socksUdp
         val oldTun2socks = settings.tun2socks
+        val oldKillSwitch = settings.killSwitch
         val oldTunOwnerDefense = settings.tunOwnerDefense
         val oldTunName = settings.tunName
         val oldTunMtu = settings.tunMtu
@@ -186,6 +201,7 @@ class SettingsActivity : AppCompatActivity() {
                 oldSecondaryDnsV6 != newSecondaryDnsV6 ||
                 oldSocksUdp != formState.socksUdp ||
                 oldTun2socks != formState.tun2socks ||
+                oldKillSwitch != formState.killSwitch ||
                 oldTunOwnerDefense != formState.tunOwnerDefense ||
                 oldTunName != newTunName ||
                 oldTunMtu != tunMtu ||
@@ -221,6 +237,7 @@ class SettingsActivity : AppCompatActivity() {
             settings.enableIpV6 = formState.enableIpV6
             settings.socksUdp = formState.socksUdp
             settings.tun2socks = formState.tun2socks
+            settings.killSwitch = formState.killSwitch
             settings.tunOwnerDefense = formState.tunOwnerDefense
             settings.bootAutoStart = formState.bootAutoStart
             settings.refreshLinksOnOpen = formState.refreshLinksOnOpen
@@ -270,6 +287,18 @@ class SettingsActivity : AppCompatActivity() {
                 recreate()
             } else {
                 finish()
+            }
+        }
+    }
+
+    private fun openSystemVpnSettings() {
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_VPN_SETTINGS))
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+            } catch (_: ActivityNotFoundException) {
+                feedback.show(getString(R.string.settingsSystemVpnUnavailable), FeedbackKind.Warning)
             }
         }
     }

@@ -25,8 +25,6 @@ data class ConnectionRecord(
     val outboundTag: String = "",
     val route: String = "unknown",
     val apps: List<ConnectionApp> = emptyList(),
-    /** Local persistence fence: a capture cutoff is never eligible for late byte correction. */
-    val captureStopped: Boolean = false,
 )
 
 enum class ConnectionCaptureStatus { Stopped, Running, Disabled, Unsupported, Error }

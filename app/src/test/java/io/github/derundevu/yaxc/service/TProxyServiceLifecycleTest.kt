@@ -66,6 +66,7 @@ import org.robolectric.shadows.ShadowVpnService
 @RunWith(RobolectricTestRunner::class)
 @Config(application = RegressionApplication::class, sdk = [34], shadows = [VpnBuilderShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class TProxyServiceLifecycleTest : RoomTestSupport() {
     private val scheduler = TestCoroutineScheduler()
     private lateinit var controller: ServiceController<TProxyService>
@@ -79,6 +80,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     fun createService() {
         ConnectionFailureState.clear()
         settings.tun2socks = true
+        settings.killSwitch = false
         profile = Profile(id = 42, name = "Synthetic local profile", config = profileConfig("first"))
         runBlocking { database.profileDao().insert(profile) }
         settings.selectedProfile = profile.id
@@ -101,6 +103,368 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         settings.xrayConfig().delete()
         settings.tun2socksConfig().delete()
         ConnectionFailureState.clear()
+    }
+
+    @Test
+    fun protectedMissingInitialSelectionStillEstablishesFailClosedInterface() {
+        settings.killSwitch = true
+        settings.selectedProfile = 0
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertBlocked(boundary.devices.single())
+        assertEquals(0, boundary.validations)
+        assertEquals(0, boundary.coreStarts)
+        assertFalse(shadowOf(service).isStoppedBySelf)
+    }
+
+    @Test
+    fun protectedSystemStartupRejectionRemainsForegroundWithOwnedInterface() {
+        settings.killSwitch = true
+        boundary.diagnostic = "System start validation rejection"
+        service.onStartCommand(null, 0, ++startId)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertBlocked(boundary.devices.single())
+        assertFalse(shadowOf(service).isStoppedBySelf)
+        assertFalse(shadowOf(service).isForegroundStopped)
+        assertEquals(0, boundary.coreStarts)
+    }
+
+    @Test
+    fun protectedSuccessfulRestartAndSocksChangesReusePlatformInterface() {
+        startProtected()
+        val device = boundary.devices.single()
+        boundary.onCoreStop = {
+            device.assertTraffic("same descriptor owned while stopping core")
+            assertFalse(boundary.workerRunning)
+        }
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.coreStarts == 2 && boundary.workerRunning && !TProxyService.isBlocking.value }
+        settings.socksPort = "19081"
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.coreStarts == 3 && boundary.workerRunning && !TProxyService.isBlocking.value }
+        assertSame(device, boundary.devices.single())
+        assertEquals(3, boundary.tunnelStarts)
+        assertEquals(2, boundary.tunnelStops)
+        assertTrue(settings.tun2socksConfig().readText().contains("port: 19081"))
+    }
+
+    @Test
+    fun disablingBlockedProtectionReleasesInterfaceEvenWhenNextValidationRejects() {
+        settings.killSwitch = true
+        boundary.diagnostic = "Reject protected start"
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        val device = boundary.devices.single()
+        assertBlocked(device)
+        settings.killSwitch = false
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.validations == 2 && ConnectionFailureState.failure.value != null }
+        device.assertClosed()
+        assertFalse(TProxyService.isActive())
+        assertFalse(TProxyService.isBlocking.value)
+        assertEquals(1, boundary.devices.size)
+        assertEquals(0, boundary.coreStarts)
+    }
+
+    @Test
+    fun protectedValidationFailureOwnsInterfaceBeforeCoreAndExplicitStopReleasesIt() {
+        settings.killSwitch = true
+        boundary.diagnostic = "Synthetic validation rejection"
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        val device = boundary.devices.single()
+        assertBlocked(device)
+        assertEquals(0, boundary.coreStarts)
+        assertEquals(0, boundary.tunnelStarts)
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { !TProxyService.isActive() }
+        device.assertClosed()
+        assertFalse(TProxyService.isBlocking.value)
+        assertEquals(0, boundary.tunnelStops)
+    }
+
+    @Test
+    fun protectedRestartFailureRetainsSameDescriptorAndConfigChangeRecoversIt() {
+        startProtected()
+        val device = boundary.devices.single()
+        boundary.onCoreStart = {
+            device.assertTraffic("descriptor retained before replacement core starts")
+            assertTrue(TProxyService.isBlocking.value)
+            assertFalse(boundary.workerRunning)
+        }
+        boundary.failCoreStart = true
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertBlocked(device)
+        assertEquals(1, boundary.devices.size)
+        boundary.failCoreStart = false
+        updateProfileConfig("recover-protected-runtime")
+        command(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.workerRunning && !TProxyService.isBlocking.value }
+        assertEquals(1, boundary.devices.size)
+        assertSame(device, boundary.devices.single())
+        assertTrue(boundary.coreRunning)
+        assertNull(ConnectionFailureState.failure.value)
+        device.assertTraffic("recovered forwarding retains interface")
+    }
+
+    @Test
+    fun protectedFailedInterfaceReplacementRetainsOldDescriptorUntilSuccessfulEstablish() {
+        startProtected()
+        val old = boundary.devices.single()
+        settings.tunMtu += 100
+        boundary.denyEstablish = true
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertBlocked(old)
+        assertEquals(1, boundary.devices.size)
+        assertEquals(1, boundary.coreStarts)
+        boundary.denyEstablish = false
+        boundary.onEstablish = {
+            old.assertTraffic("old interface survives until successful establish")
+            assertFalse(boundary.workerRunning)
+        }
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.workerRunning && !TProxyService.isBlocking.value }
+        old.assertClosed()
+        assertEquals(2, boundary.devices.size)
+        boundary.devices.last().assertTraffic("new interface forwarding")
+    }
+
+    @Test
+    fun protectedHealthyValidationRejectionLeavesActualForwardingUnchanged() {
+        startProtected()
+        val device = boundary.devices.single()
+        boundary.diagnostic = "Reject candidate without stopping live core"
+        updateProfileConfig("invalid-new-candidate")
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertFalse(TProxyService.isBlocking.value)
+        assertTrue(boundary.workerRunning)
+        assertTrue(boundary.coreRunning)
+        assertEquals(0, boundary.coreStops)
+        assertEquals(0, boundary.tunnelStops)
+        device.assertTraffic("healthy runtime survives rejected validation")
+    }
+
+    @Test
+    fun protectedStandaloneCoreDeathBlocksWithoutAnyUiCommandAndCanReconnect() {
+        startProtected()
+        val device = boundary.devices.single()
+        boundary.coreRunning = false
+        scheduler.advanceTimeBy(1_000)
+        scheduler.runCurrent()
+        assertBlocked(device)
+        assertNotNull(ConnectionFailureState.failure.value)
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.workerRunning && !TProxyService.isBlocking.value }
+        assertSame(device, boundary.devices.single())
+        device.assertTraffic("explicit START recovers blocked ownership")
+    }
+
+    @Test
+    fun protectedStandaloneWorkerDeathBlocksAndExplicitStopCancelsMonitor() {
+        startProtected()
+        val device = boundary.devices.single()
+        boundary.workerRunning = false
+        scheduler.advanceTimeBy(1_000)
+        scheduler.runCurrent()
+        assertBlocked(device)
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { !TProxyService.isActive() }
+        device.assertClosed()
+        val stops = boundary.coreStops
+        scheduler.advanceTimeBy(10_000)
+        scheduler.runCurrent()
+        assertEquals(stops, boundary.coreStops)
+        assertFalse(TProxyService.isBlocking.value)
+    }
+
+    @Test
+    fun protectedBlockedSelectionDisappearanceRetainsDescriptorAndLaterSelectionRecovers() {
+        settings.killSwitch = true
+        boundary.allowStart = false
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        val device = boundary.devices.single()
+        assertBlocked(device)
+        settings.selectedProfile = 0
+        command(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value?.diagnostic == app.getString(R.string.connectionMissingProfile) }
+        assertBlocked(device)
+        settings.selectedProfile = profile.id
+        boundary.allowStart = true
+        command(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.workerRunning && !TProxyService.isBlocking.value }
+        assertSame(device, boundary.devices.single())
+    }
+
+    @Test
+    fun protectedStopDuringUninterruptibleValidationCannotPublishStaleStartOrFailure() {
+        settings.killSwitch = true
+        val gate = CompletableDeferred<String>()
+        boundary.validationGate = gate
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.validations == 1 }
+        val first = boundary.devices.single()
+        assertBlocked(first)
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        scheduler.runCurrent()
+        first.assertClosed()
+        assertFalse(TProxyService.isActive())
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        boundary.validationGate = null
+        gate.complete("stale validation failure")
+        pumpUntil {
+            boundary.workerRunning && !TProxyService.isBlocking.value &&
+                broadcasts().count { it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME } == 1
+        }
+        assertEquals(2, boundary.devices.size)
+        assertEquals(1, boundary.coreStarts)
+        assertNull(ConnectionFailureState.failure.value)
+        assertEquals(1, broadcasts().count { it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME })
+    }
+
+    @Test
+    fun protectedStopDuringNativeStartNeverPublishesCompletedConnection() {
+        settings.killSwitch = true
+        boundary.onTunnelStart = { command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME) }
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { shadowOf(service).isStoppedBySelf }
+        boundary.devices.single().assertClosed()
+        assertFalse(TProxyService.isActive())
+        assertFalse(TProxyService.isBlocking.value)
+        assertFalse(boundary.workerRunning)
+        assertFalse(boundary.coreRunning)
+        assertFalse(broadcasts().any { it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME })
+    }
+
+    @Test
+    fun disablingProtectionWhileBlockedUsesNewPolicyAndClosesTunOnFailedRecovery() {
+        settings.killSwitch = true
+        boundary.allowStart = false
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        val device = boundary.devices.single()
+        assertBlocked(device)
+        settings.killSwitch = false
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { boundary.coreStarts == 2 && ConnectionFailureState.failure.value != null }
+        device.assertClosed()
+        assertFalse(TProxyService.isBlocking.value)
+        assertFalse(boundary.coreRunning)
+    }
+
+    @Test
+    fun protectedStopRefusalPreservesWorkerAndDescriptorOwnershipUntilExplicitRetry() {
+        startProtected()
+        val device = boundary.devices.single()
+        boundary.allowStop = false
+        command(TProxyService.RESTART_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertTrue(boundary.workerRunning)
+        assertTrue(boundary.coreRunning)
+        assertFalse(TProxyService.isBlocking.value)
+        assertEquals(1, boundary.tunnelStops)
+        assertEquals(1, boundary.coreStarts)
+        device.assertTraffic("unjoined worker still owns descriptor")
+        boundary.allowStop = true
+        command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { !TProxyService.isActive() }
+        device.assertClosed()
+    }
+
+    @Test
+    fun protectedRevokeReleasesRetainedInterface() {
+        settings.killSwitch = true
+        boundary.diagnostic = "Retain before revoke"
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        val device = boundary.devices.single()
+        assertBlocked(device)
+        service.onRevoke()
+        pumpUntil { !TProxyService.isActive() }
+        device.assertClosed()
+        assertFalse(TProxyService.isBlocking.value)
+    }
+
+    @Test
+    fun protectedDestroyReleasesRetainedInterfaceAndPreservesDiagnostic() {
+        settings.killSwitch = true
+        boundary.diagnostic = "Retain before destroy"
+        command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        val device = boundary.devices.single()
+        val failure = ConnectionFailureState.failure.value
+        controller.destroy()
+        destroyed = true
+        device.assertClosed()
+        assertFalse(TProxyService.isActive())
+        assertFalse(TProxyService.isBlocking.value)
+        assertSame(failure, ConnectionFailureState.failure.value)
+    }
+
+    @Test
+    fun idleStatusBroadcastDoesNotStartVpnAndStopsIdleService() {
+        command(TProxyService.STATUS_VPN_SERVICE_ACTION_NAME)
+        pumpUntil { shadowOf(service).isStoppedBySelf }
+        assertTrue(boundary.devices.isEmpty())
+        assertEquals(0, boundary.validations)
+        assertEquals(0, boundary.coreStarts)
+        assertFalse(broadcasts().single().getBooleanExtra("isRunning", true))
+    }
+
+    @Test
+    fun androidAlwaysOnAndStickyNullStartUseSavedProfileInTunMode() {
+        command(VpnService.SERVICE_INTERFACE)
+        pumpUntil { boundary.workerRunning }
+        val device = boundary.devices.single()
+        service.onStartCommand(null, 0, ++startId)
+        scheduler.runCurrent()
+        assertEquals(1, boundary.coreStarts)
+        assertEquals(1, boundary.devices.size)
+        device.assertTraffic("system start owns selected VPN")
+    }
+
+    @Test
+    fun androidAlwaysOnRejectsCoreOnlySettingsInsteadOfStartingUnprotectedCore() {
+        settings.tun2socks = false
+        command(VpnService.SERVICE_INTERFACE)
+        pumpUntil { ConnectionFailureState.failure.value != null }
+        assertEquals(0, boundary.coreStarts)
+        assertEquals(0, boundary.validations)
+        assertTrue(boundary.devices.isEmpty())
+        assertFalse(TProxyService.isActive())
+        assertFalse(settings.tun2socks)
+    }
+
+    @Test
+    fun killSwitchOffDoesNotInstallBackgroundFailureMonitor() {
+        startAndAwait()
+        boundary.coreRunning = false
+        scheduler.advanceTimeBy(5_000)
+        scheduler.runCurrent()
+        assertFalse(TProxyService.isBlocking.value)
+        assertTrue(boundary.workerRunning)
+        assertEquals(0, boundary.tunnelStops)
+        assertNull(ConnectionFailureState.failure.value)
+    }
+
+    private fun startProtected() {
+        settings.killSwitch = true
+        startAndAwait()
+    }
+
+    private fun assertBlocked(device: Device) {
+        assertTrue(TProxyService.isActive())
+        assertTrue(TProxyService.isBlocking.value)
+        assertFalse(boundary.coreRunning)
+        assertFalse(boundary.workerRunning)
+        // Pipe transport proves the descriptor remains open, not that a worker forwards it.
+        device.assertTraffic("retained protective descriptor")
+        assertTrue(lastStatus())
+        assertTrue(broadcasts().last { it.action == TProxyService.STATUS_VPN_SERVICE_ACTION_NAME }
+            .getBooleanExtra("isBlocked", false))
     }
 
     @Test
@@ -1403,8 +1767,12 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
     }
 
     private fun startAndAwait() {
+        val starts = broadcasts().count { it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME }
         command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
-        pumpUntil { TProxyService.isActive() }
+        pumpUntil {
+            TProxyService.isActive() &&
+                broadcasts().count { it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME } > starts
+        }
     }
 
     private fun command(action: String) {
@@ -1489,6 +1857,9 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         var validations = 0
         var onTunnelStart: (() -> Unit)? = null
         var onCoreStop: (() -> Unit)? = null
+        var onCoreStart: (() -> Unit)? = null
+        var onEstablish: (() -> Unit)? = null
+        var failCoreStart = false
         var coreRunning = false
         var workerRunning = false
         var transparentEnabled = false
@@ -1516,10 +1887,12 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
             coreRunning = true
             coreStarts++
             startedCoreModes += transparent
+            onCoreStart?.invoke()
+            check(!failCoreStart) { "Synthetic core start failure" }
         }
 
         override fun stopCore(transparent: Boolean) {
-            check(coreRunning) { "Core stopped without ownership" }
+            check(coreStarts > coreStops) { "Core stopped without ownership" }
             assertEquals(startedCoreModes.last(), transparent)
             onCoreStop?.invoke()
             coreRunning = false
@@ -1535,7 +1908,8 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
 
         override fun establish(builder: VpnService.Builder): ParcelFileDescriptor? {
             if (denyEstablish) return null
-            check(devices.none { runCatching { it.tun.fd }.isSuccess }) { "Overlapping tunnel ownership" }
+            check(!workerRunning) { "Replacing an interface before joining its worker" }
+            onEstablish?.invoke()
             return Device().also { devices += it }.tun
         }
 
@@ -1558,6 +1932,7 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         }
 
         override fun tunnelRunning() = workerRunning
+        override fun coreRunning() = coreRunning
         override fun transparentRunning() = coreRunning && transparentEnabled
         override fun enableTransparent() {
             check(coreRunning)

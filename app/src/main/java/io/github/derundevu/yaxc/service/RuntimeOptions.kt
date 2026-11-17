@@ -9,6 +9,7 @@ internal data class RuntimeOptions(
     val mode: Mode,
     val tun: Tun? = null,
     val transparent: Transparent? = null,
+    val killSwitch: Boolean = false,
 ) {
     enum class Mode { CORE, TUN, TRANSPARENT }
 
@@ -30,7 +31,14 @@ internal data class RuntimeOptions(
         val socksUsername: String,
         val socksPassword: String,
         val socksUdp: Boolean,
-    )
+    ) {
+        /** SOCKS endpoint/credentials and owner checks do not change Android's interface. */
+        fun sameInterface(other: Tun): Boolean =
+            name == other.name && mtu == other.mtu && address == other.address && prefix == other.prefix &&
+                primaryDns == other.primaryDns && secondaryDns == other.secondaryDns && ipv6 == other.ipv6 &&
+                bypassLan == other.bypassLan && routes == other.routes &&
+                appsRoutingMode == other.appsRoutingMode && appsRouting == other.appsRouting
+    }
 
     data class Ipv6(
         val address: String,
@@ -54,7 +62,14 @@ internal data class RuntimeOptions(
     )
 
     companion object {
-        fun capture(settings: Settings, packageName: String): RuntimeOptions = when {
+        fun capture(settings: Settings, packageName: String): RuntimeOptions {
+            check(!settings.killSwitch || (!settings.transparentProxy && settings.tun2socks)) {
+                "Kill switch requires VPN mode. Disable Kill switch before changing modes."
+            }
+            return captureMode(settings, packageName)
+        }
+
+        private fun captureMode(settings: Settings, packageName: String): RuntimeOptions = when {
             settings.transparentProxy -> {
                 val appsMode = settings.appsRoutingMode
                 val autoConnect = settings.tproxyAutoConnect
@@ -83,6 +98,7 @@ internal data class RuntimeOptions(
                 val authenticated = username.isNotBlank() && password.isNotBlank()
                 RuntimeOptions(
                     mode = Mode.TUN,
+                    killSwitch = settings.killSwitch,
                     tun = Tun(
                         name = settings.tunName.trim(),
                         mtu = settings.tunMtu,

@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
                     liveRoutingAvailable = uiState.liveRoutingAvailable,
                     liveRoutingDefaultGroupName = uiState.liveRoutingDefaultGroupName,
                     isRunning = uiState.isRunning,
+                    isBlocked = uiState.isBlocked,
                     connectionFailure = uiState.connectionFailure,
                     selectedSourceName = uiState.selectedSourceName,
                     selectedSourceMetadata = uiState.selectedSourceMetadata,
@@ -281,7 +282,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleToggleVpnRequest() {
-        if (mainViewModel.uiState.value.isRunning) {
+        if (mainViewModel.uiState.value.isRunning || TProxyService.isActive()) {
             TProxyService.stop(applicationContext)
         } else {
             requestVpnStart()
@@ -307,7 +308,9 @@ class MainActivity : AppCompatActivity() {
         when (effect) {
             MainEffect.HandleToggleVpn -> handleToggleVpnRequest()
             MainEffect.RetryConnection -> {
-                if (TProxyService.isActive()) {
+                if (TProxyService.isBlocking.value) {
+                    TProxyService.restart(applicationContext)
+                } else if (TProxyService.isActive()) {
                     TProxyService.newConfig(applicationContext)
                 } else {
                     requestVpnStart()

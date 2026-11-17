@@ -171,7 +171,7 @@ class Settings(private val context: Context) {
             )
         }
 
-    /** Capture metadata independently of whether retained history is saved to disk. */
+    /** Admit new connection records independently of disk persistence; existing records keep updating. */
     var connectionAnalyticsEnabled: Boolean
         get() = sharedPreferences.getBoolean("connectionAnalyticsEnabled", true)
         set(value) {
@@ -329,6 +329,10 @@ class Settings(private val context: Context) {
     var tun2socks: Boolean
         get() = sharedPreferences.getBoolean("tun2socks", true)
         set(value) = sharedPreferences.edit { putBoolean("tun2socks", value) }
+    /** Retain an established TUN after runtime failure; Android lockdown is configured separately. */
+    var killSwitch: Boolean
+        get() = sharedPreferences.getBoolean("killSwitch", false)
+        set(value) = sharedPreferences.edit { putBoolean("killSwitch", value) }
     var tunOwnerDefense: Boolean
         get() = sharedPreferences.getBoolean("tunOwnerDefense", false)
         set(value) = sharedPreferences.edit { putBoolean("tunOwnerDefense", value) }

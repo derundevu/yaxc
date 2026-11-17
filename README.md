@@ -37,6 +37,7 @@ The standard Android VPN mode does **not** require root.
 - **Per-app split tunneling:** route all apps through the VPN, exclude selected apps or include only selected apps.
 - **Core routing:** build ordered rules in the visual editor or edit routing JSON directly. Send matching traffic through the proxy, directly or to a blocking outbound.
 - **Live Routing:** combine profiles across subscriptions into proxy groups, then connect using the special Live Routing group without selecting a profile. Route apps or domains and change group choices without reconnecting. See [Live Routing](#live-routing).
+- **Kill switch:** optionally retain the VPN interface during failures and reconnects, with a visible blocked state and explicit recovery. See [Kill switch](#kill-switch) for its scope and Android system protection.
 - Match domains, IP ranges, ports, protocols and TCP/UDP transport; import and export routing JSON through the clipboard.
 - Download or import GeoIP, GeoSite and Antifilter lists in the app. Choose a bundled provider preset or your own geodata URLs.
 
@@ -176,6 +177,27 @@ For split tunneling, open **Routing → Apps Routing**, choose **Off**, **Exclud
 Selected apps stay at the top. **Select all visible apps** checks every app matching the current search and system-app
 filter; tap it again to clear those matches. Selections hidden by the filters are left unchanged.
 
+### Kill switch
+
+Open **Settings → Preferences → Basic → VPN protection**, enable **Kill switch**, then save.
+It is off by default and requires TUN VPN mode, not root/transparent proxy or SOCKS-only mode.
+Saving does not start an inactive VPN.
+
+Once you request a connection, yaxc establishes the protective interface before validating or starting Xray.
+If validation, Xray or the tunnel worker fails, VPN-routed traffic stays blocked while the process remains alive.
+The Connect screen, notification and Quick Settings tile distinguish this blocked state from a working connection.
+Use **Retry** or select a valid profile to recover; **Disconnect** releases the in-app block.
+Reconnecting retains the interface when its Android settings are unchanged; a changed interface replaces the old one
+only after successful establishment. A rejected update never silently removes existing protection.
+
+Excluded apps and LAN bypasses remain outside this protection. Rules that intentionally select an Xray `direct`
+outbound are still direct while Xray is working; Kill switch does not turn split routing into an all-proxy policy.
+
+For protection when the process dies or the device restarts, use **Android VPN protection → Configure in Android**
+and enable both **Always-on VPN** and **Block connections without VPN** for yaxc. Always-on alone is not a traffic block.
+Android lockdown is separate from the yaxc preference and can prevent excluded apps and LAN bypasses from connecting.
+Disconnecting yaxc does not disable that system policy.
+
 ### Core Routing
 
 For domain/IP rules, open **Routing → Core Routing**. Rules are evaluated from top to bottom; higher rules take precedence.
@@ -247,16 +269,16 @@ are recorded. Restored active rows become interrupted. Disabling persistence del
 keeping active connections and their byte accounting. Late snapshots cannot restore pre-clear records/counters.
 It never stops traffic or deletes profiles/logs.
 
-**History → Record connection analytics** is an independent, default-on switch. Turning it off immediately stops
-native observation and Android polling without restarting the proxy or interrupting TCP/UDP traffic, in either
-ordinary or Live Routing mode. Existing active observations become interrupted/incomplete at the capture cutoff;
-their real connections keep running. Turning recording back on captures only new connections, never the missing
-part of existing streams. The setting persists across application and proxy restarts.
+**History → Record new connections** is an independent, default-on switch. Turning it off stops admitting new
+connection records without restarting the proxy or interrupting TCP/UDP traffic, in either ordinary or Live Routing
+mode. Previously recorded connections keep updating their byte totals and actual status until they finish.
+Connections opened while recording is Off are never added retroactively when recording resumes; only genuinely new
+connections are admitted. The setting persists across application and proxy restarts.
 
 Past history and the separate **Save history on this device** preference are preserved. Recording Off does not
 delete history or immediately free its retained RAM; use **Clear finished history** explicitly when wanted.
-The existing 24-hour expiry still applies. New connections started while Off have no observation handles/hooks;
-pre-existing connections may retain a small inert hook shell until they close, not active analytics accounting.
+The existing 24-hour expiry still applies. Already recorded active connections continue using accounting resources
+until they finish; switching recording Off is not a history wipe.
 
 ### Live Routing
 
@@ -378,8 +400,9 @@ apply live, retaining established streams, when shared core and platform setting
 core changes reload Xray; changed VPN/platform settings require a restart. Invalid candidates or rejected live
 updates keep the previous runtime and report an error; a reconnect-required rejection never forces a reconnect.
 If conditional subscription reconciliation (`NEW_CONFIG`) finds that the selected ordinary profile was removed, it
-stops the runtime rather than silently selecting another profile. A missing Live Routing group member instead
-rejects a Live Routing start/update without substituting a member; it does not affect an ordinary profile connection.
+stops an unprotected runtime rather than silently selecting another profile. With Kill switch enabled, existing VPN
+protection is retained and the missing selection is reported. A missing Live Routing group member rejects a Live
+Routing start/update without substituting a member; it does not affect an ordinary profile connection.
 When refreshing multiple sources, successful sources can still update; the result reports any partial failures.
 
 ## FAQ
@@ -401,12 +424,14 @@ A routing rule references `geoip.dat`, `geosite.dat` or a group inside one of th
 On the error dialog, choose **Resources**, download or import a compatible file, then return and tap **Retry**.
 If a group is missing, choose a rule set containing it or change the rule. Recovery does not automatically download files or connect.
 
-### Do I need root? Can this replace a kill switch?
+### Do I need root? How strong is the kill switch?
 
 Normal VPN use does not require root. Transparent-proxy mode is an advanced, root-dependent path and requires a separately
 installed Xray executable in **Assets**. Root/iptables behavior varies by device and is not as broadly verified as VPN mode.
 
-Experimental TUN protection is **not a guaranteed kill switch**. Do not rely on yaxc to prevent every possible traffic leak.
+Kill switch protects VPN-routed traffic only while its process owns the TUN. Use Android lockdown for protection
+outside that lifetime; neither setting overrides your intentional Xray routing rules. Experimental TUN owner checks
+are a separate feature, not a system-wide kill switch.
 
 ### What information is sent over the network?
 

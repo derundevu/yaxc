@@ -203,6 +203,7 @@ fun MainScreen(
     liveRoutingAvailable: Boolean,
     liveRoutingDefaultGroupName: String,
     isRunning: Boolean,
+    isBlocked: Boolean,
     connectionFailure: ConnectionFailure?,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
@@ -324,6 +325,7 @@ fun MainScreen(
                                     liveRoutingAvailable = liveRoutingAvailable,
                                     liveRoutingDefaultGroupName = liveRoutingDefaultGroupName,
                                     isRunning = isRunning,
+                                    isBlocked = isBlocked,
                                     selectedSourceName = selectedSourceName,
                                     selectedSourceMetadata = selectedSourceMetadata,
                                     selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
@@ -395,6 +397,7 @@ fun MainScreen(
                 MainBottomConnectRow(
                     visible = rootTab == MainRootTab.Connect,
                     isRunning = isRunning,
+                    isBlocked = isBlocked,
                     selectedSourceName = selectedSourceName,
                     selectedProfileName = selectedProfileName,
                     pingState = pingState,
@@ -686,6 +689,7 @@ private fun ConnectContent(
     selectedTabId: Long,
     selectedSourceId: Long,
     isRunning: Boolean,
+    isBlocked: Boolean,
     liveRoutingAvailable: Boolean,
     liveRoutingDefaultGroupName: String,
     selectedSourceName: String,
@@ -841,6 +845,7 @@ private fun ConnectContent(
             item(key = "connection", contentType = "connection") {
                 ConnectionTopCard(
                     isRunning = isRunning,
+                    isBlocked = isBlocked,
                     selectedSourceName = selectedSourceName,
                     selectedSourceMetadata = selectedSourceMetadata,
                     selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
@@ -852,6 +857,7 @@ private fun ConnectContent(
                         onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
                     },
                     onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
+                    onReconnect = { onAction(MainAction.ReconnectVpnClicked) },
                 )
                 Spacer(Modifier.height(spacing.md))
             }
@@ -1245,6 +1251,7 @@ private fun SettingsContent(
 @Composable
 private fun ConnectionTopCard(
     isRunning: Boolean,
+    isBlocked: Boolean,
     selectedSourceName: String,
     selectedSourceMetadata: SubscriptionMetadata?,
     selectedSourceLastRefreshedAt: Long?,
@@ -1254,6 +1261,7 @@ private fun ConnectionTopCard(
     onPingCurrent: () -> Unit,
     onOpenConnectionAnalytics: () -> Unit,
     onOpenConnectionInfo: () -> Unit,
+    onReconnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -1280,7 +1288,9 @@ private fun ConnectionTopCard(
             .yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onOpenConnectionAnalytics),
         shape = MaterialTheme.shapes.extraLarge,
         contentPadding = PaddingValues(16.dp),
-        accentColor = if (isRunning) {
+        accentColor = if (isBlocked) {
+            MaterialTheme.colorScheme.error
+        } else if (isRunning) {
             MaterialTheme.colorScheme.primary
         } else {
             MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
@@ -1317,6 +1327,18 @@ private fun ConnectionTopCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                }
+
+                if (isBlocked) {
+                    Text(
+                        text = textResource(R.string.killSwitchBlocked),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("main:kill-switch-blocked"),
+                    )
+                    TextButton(onClick = onReconnect) {
+                        Text(textResource(R.string.connectionRetry))
+                    }
                 }
 
                 if (!subscriptionSummary.isNullOrBlank()) {
@@ -1446,6 +1468,7 @@ private fun formatBytesCompact(bytes: Long): String {
 @Composable
 private fun FloatingConnectButton(
     isRunning: Boolean,
+    isBlocked: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1457,7 +1480,9 @@ private fun FloatingConnectButton(
         label = "floating_connect_scale",
     )
     val containerColor by animateColorAsState(
-        targetValue = if (isRunning) {
+        targetValue = if (isBlocked) {
+            MaterialTheme.colorScheme.errorContainer
+        } else if (isRunning) {
             lerp(
                 mainFloatingContainerColor(),
                 YaxcTheme.extendedColors.success,
@@ -1470,7 +1495,9 @@ private fun FloatingConnectButton(
         label = "floating_connect_color",
     )
     val borderColor by animateColorAsState(
-        targetValue = if (isRunning) {
+        targetValue = if (isBlocked) {
+            MaterialTheme.colorScheme.error
+        } else if (isRunning) {
             YaxcTheme.extendedColors.success.copy(alpha = if (yaxcIsLightTheme()) 0.50f else 0.42f)
         } else {
             mainFloatingBorderColor()
@@ -1479,7 +1506,11 @@ private fun FloatingConnectButton(
         label = "floating_connect_border",
     )
     val iconTint by animateColorAsState(
-        targetValue = if (isRunning) YaxcTheme.extendedColors.success else yaxcSoftOnSurface(darkAlpha = 0.94f, lightAlpha = 0.90f),
+        targetValue = when {
+            isBlocked -> MaterialTheme.colorScheme.error
+            isRunning -> YaxcTheme.extendedColors.success
+            else -> yaxcSoftOnSurface(darkAlpha = 0.94f, lightAlpha = 0.90f)
+        },
         animationSpec = spring(dampingRatio = 0.88f, stiffness = 420f),
         label = "floating_connect_icon",
     )
@@ -1686,6 +1717,7 @@ private fun MainTopChrome(
 private fun MainBottomConnectRow(
     visible: Boolean,
     isRunning: Boolean,
+    isBlocked: Boolean,
     selectedSourceName: String,
     selectedProfileName: String,
     pingState: MainPingState,
@@ -1712,7 +1744,7 @@ private fun MainBottomConnectRow(
         ) {
             MiniControlBar(
                 selectedSourceName = selectedSourceName,
-                selectedProfileName = selectedProfileName,
+                selectedProfileName = if (isBlocked) textResource(R.string.killSwitchBlocked) else selectedProfileName,
                 pingState = pingState,
                 onPingCurrent = onPingCurrent,
                 onPingAll = onPingAll,
@@ -1722,6 +1754,7 @@ private fun MainBottomConnectRow(
 
             FloatingConnectButton(
                 isRunning = isRunning,
+                isBlocked = isBlocked,
                 onClick = onToggleVpn,
             )
         }

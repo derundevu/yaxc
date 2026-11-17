@@ -129,6 +129,7 @@ class VpnDeviceIntegrationTest {
         settings.liveRoutingPlan = "{}"
         settings.transparentProxy = false
         settings.tun2socks = true
+        settings.killSwitch = false
         settings.enableIpV6 = false
         settings.bypassLan = false
         settings.appsRoutingMode = Settings.AppsRoutingMode.Exclude
@@ -191,6 +192,72 @@ class VpnDeviceIntegrationTest {
             editor.commit()
             ConnectionFailureState.clear()
         }
+    }
+
+    @Test
+    fun killSwitchRetainsRealTunAcrossCoreFailureRejectedRecoveryAndReconnectUntilExplicitStop() = runBlocking {
+        settings.killSwitch = true
+        settings.connectionAnalyticsEnabled = false
+        start()
+        requireTunTransfer("kill-switch-before-failure")
+        val network = checkNotNull(routedNetwork)
+
+        assertEquals("", XrayCore.stop())
+        withTimeout(10_000) { TProxyService.isBlocking.first { it } }
+        withTimeout(10_000) { ConnectionFailureState.failure.filterNotNull().first() }
+        assertTrue("Blocking TUN must remain stoppable", TProxyService.isActive())
+        assertVpnNetworkStillPublished(network)
+        assertNotNull(ConnectionFailureState.failure.value)
+        assertFalse(JSONObject(XrayCore.liveRoutingStatus()).getBoolean("running"))
+        try {
+            transferTunHttp("kill-switch-blocked", target.port, "198.18.0.1")
+            fail("Stopped core still forwarded VPN traffic")
+        } catch (_: java.io.IOException) {
+            // The real shell-UID flow cannot receive an HTTP response through the retained TUN.
+        }
+        assertNull(target.requests.poll())
+        assertVpnNetworkStillPublished(network)
+
+        ActivityScenario.launch(MainActivity::class.java).use { activity ->
+            lateinit var main: io.github.derundevu.yaxc.viewmodel.MainViewModel
+            activity.onActivity { main = ViewModelProvider(it)[io.github.derundevu.yaxc.viewmodel.MainViewModel::class.java] }
+            withTimeout(10_000) { main.uiState.first { it.isBlocked } }
+            ConnectionFailureState.failure.value?.let { failure ->
+                activity.onActivity {
+                    main.onAction(io.github.derundevu.yaxc.presentation.main.MainAction.DismissConnectionFailure(failure))
+                }
+            }
+            compose.waitForIdle()
+            captureActivitySurface(activity, "kill-switch-blocked")
+        }
+
+        val valid = profile.config
+        db.profileDao().update(profile.copy(config = """{"outbounds":[{"protocol":"not-a-protocol"}]}"""))
+        events.clear()
+        ConnectionFailureState.clear()
+        TProxyService.restart(context)
+        withTimeout(10_000) { ConnectionFailureState.failure.filterNotNull().first() }
+        assertNotNull(ConnectionFailureState.failure.value)
+        assertTrue(TProxyService.isBlocking.value)
+        assertVpnNetworkStillPublished(network)
+        db.profileDao().update(profile.copy(config = valid))
+
+        TProxyService.restart(context)
+        await(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        assertFalse(TProxyService.isBlocking.value)
+        assertEquals("Recovery replaced the protected TUN", network, routedNetwork)
+        requireTunTransfer("kill-switch-recovered")
+        TProxyService.restart(context)
+        await(TProxyService.START_VPN_SERVICE_ACTION_NAME)
+        assertEquals("Explicit reconnect dropped the protected TUN", network, routedNetwork)
+        requireTunTransfer("kill-switch-reconnected")
+
+        TProxyService.stop(context)
+        await(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
+        assertFalse(TProxyService.isBlocking.value)
+        assertFalse(TProxyService.isActive())
+        requireSocksListenerReleased()
+        assertFalse(JSONObject(XrayCore.liveRoutingStatus()).getBoolean("running"))
     }
 
     @Test
@@ -375,7 +442,7 @@ class VpnDeviceIntegrationTest {
     }
 
     @Test
-    fun analyticsHistorySwitchCutsOffOnlyObservationsWhileEstablishedTcpAndUdpKeepForwarding() = runBlocking {
+    fun analyticsAdmissionPauseUpdatesExistingTcpUdpWithoutRecordingOffPeriodFlows() = runBlocking {
         val repository = (context.applicationContext as Yaxc).connectionRepository
         // Exercise the absent-preference default, not a fixture that preselects On.
         assertTrue(context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
@@ -394,8 +461,22 @@ class VpnDeviceIntegrationTest {
         settings.socksUsername = "capture-fixture"
         settings.socksPassword = "capture-fixture-password"
         val shellUid = context.packageManager.getApplicationInfo("com.android.shell", 0).uid
-        suspend fun awaitFlow(predicate: (ConnectionRecord) -> Boolean): ConnectionRecord = withTimeout(15_000) {
-            repository.state.first { state -> state.connections.any(predicate) }.connections.first(predicate)
+        suspend fun awaitFlow(stage: String, predicate: (ConnectionRecord) -> Boolean): ConnectionRecord = try {
+            withTimeout(15_000) {
+                repository.state.first { state -> state.connections.any(predicate) }.connections.first(predicate)
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            val native = JSONObject(XrayCore.connectionSnapshot()).getJSONArray("connections")
+            val nativeTotals = (0 until native.length()).map { index ->
+                native.getJSONObject(index).let {
+                    listOf(it.getString("protocol"), it.getString("state"), it.getLong("upload"),
+                        it.getLong("download"), it.getBoolean("liveBytesExact"))
+                }
+            }
+            val state = repository.state.value
+            val appTotals = state.connections.map { listOf(it.protocol, it.state, it.upload, it.download, it.liveBytesExact) }
+            throw AssertionError("$stage: status=${state.status}, enabled=${state.captureEnabled}, " +
+                "native=$nativeTotals, app=$appTotals", timeout)
         }
         UdpEchoPeer(0x67).use { udp ->
             ChainedStreamTarget(frames = 6, idleTimeoutMillis = 120_000).use { stream ->
@@ -435,20 +516,27 @@ class VpnDeviceIntegrationTest {
                 }
                 ShellTcpFlow(stream.port, idleSeconds = 120).use { tcp ->
                     ShellUdpFlow(udp.port).use { datagrams ->
+                        var expectedTcpUpload = 0L
+                        var expectedTcpDownload = 0L
+                        var tcpPayloadBytes = 0L
+                        var udpExchanges = 1L
                         fun exchangeTcp(stage: String): Int {
                             val payload = byteArrayOf(0, 0xff.toByte()) + "$stage 東京\n".toByteArray()
                             tcp.assertNextChainedResponse(payload)
                             assertArrayEquals("$stage: controlled TCP peer saw wrong frame",
                                 payload, stream.received.poll(5, TimeUnit.SECONDS))
+                            expectedTcpUpload += payload.size + 4L
+                            tcpPayloadBytes += payload.size
+                            expectedTcpDownload += tcpPayloadBytes + 4L
                             return payload.size
                         }
                         val firstPayloadSize = exchangeTcp("before-capture-off")
                         val udpSender = datagrams.assertNextResponse(udp, "before-capture-off")
-                        val tcpBefore = awaitFlow {
+                        val tcpBefore = awaitFlow("initial TCP") {
                             it.uid == shellUid && it.protocol == "tcp" && it.destination.endsWith(":${stream.port}") &&
                                 it.upload == firstPayloadSize + 4L
                         }
-                        val udpBefore = awaitFlow {
+                        val udpBefore = awaitFlow("initial UDP") {
                             it.uid == shellUid && it.protocol == "udp" && it.destinationKind == "association" &&
                                 it.upload == 512L && it.download == 513L
                         }
@@ -471,8 +559,10 @@ class VpnDeviceIntegrationTest {
                                 !settings.connectionAnalyticsEnabled && !repository.state.value.captureEnabled &&
                                     repository.state.value.status == ConnectionCaptureStatus.Disabled &&
                                     repository.state.value.connections.filter { it.id == tcpBefore.id || it.id == udpBefore.id }
-                                        .let { it.size == 2 && it.all { row -> row.state == "interrupted" && !row.liveBytesExact } }
+                                        .let { it.size == 2 && it.all { row -> row.state == "active" && row.endedAt == 0L } }
                             }
+                            compose.waitUntil(10_000) { !model.uiState.value.captureEnabled }
+                            compose.onNodeWithTag("analytics:capture").assertIsOff()
                             assertFalse(Settings(context).connectionAnalyticsEnabled)
                             val cutoff = JSONObject(XrayCore.connectionSnapshot())
                             assertFalse(cutoff.toString(), cutoff.getBoolean("enabled"))
@@ -486,15 +576,37 @@ class VpnDeviceIntegrationTest {
                                 oldRows.single { it.id == tcpBefore.id }.download <= firstPayloadSize + 4L)
                             assertEquals(512L, oldRows.single { it.id == udpBefore.id }.upload)
                             assertEquals(513L, oldRows.single { it.id == udpBefore.id }.download)
-                            fun assertFrozen(stage: String, enabled: Boolean) {
+                            val cutoffIds = cutoffRows.mapTo(HashSet()) { it.id }
+                            fun nativeRows(snapshot: JSONObject): Map<String, JSONObject> {
+                                val rows = snapshot.getJSONArray("connections")
+                                return (0 until rows.length()).associate { index ->
+                                    rows.getJSONObject(index).let { it.getString("id") to it }
+                                }
+                            }
+                            suspend fun assertTrackedUpdates(stage: String, enabled: Boolean) {
+                                val trackedTcp = awaitFlow("$stage TCP") { it.id == tcpBefore.id && it.upload == expectedTcpUpload }
+                                val trackedUdp = awaitFlow("$stage UDP") {
+                                    it.id == udpBefore.id && it.upload == udpExchanges * 512L &&
+                                        it.download == udpExchanges * 513L
+                                }
+                                assertEquals("active", trackedTcp.state)
+                                assertEquals("active", trackedUdp.state)
+                                assertEquals(0L, trackedTcp.endedAt)
+                                assertEquals(0L, trackedUdp.endedAt)
+                                assertEquals(tcpBefore.profileFingerprint, trackedTcp.profileFingerprint)
+                                assertEquals(udpBefore.apps, trackedUdp.apps)
+                                assertTrue(trackedTcp.download <= expectedTcpDownload)
+                                if (trackedTcp.liveBytesExact) assertEquals(expectedTcpDownload, trackedTcp.download)
                                 val native = JSONObject(XrayCore.connectionSnapshot())
-                                assertEquals("$stage: wrong native capture state", enabled, native.getBoolean("enabled"))
-                                assertEquals("$stage: history changed", cutoff.getJSONArray("connections").toString(),
-                                    native.getJSONArray("connections").toString())
-                                assertEquals("$stage: native evictions grew", cutoff.getLong("nativeEvicted"), native.getLong("nativeEvicted"))
-                                assertEquals("$stage: native rejections grew", cutoff.getLong("nativeRejected"), native.getLong("nativeRejected"))
-                                assertEquals("$stage: repository history changed", cutoffRows, repository.state.value.connections)
-                                assertEquals("$stage: repository counters changed", cutoffCounters, repository.state.value.counters)
+                                assertEquals("$stage: wrong native admission state", enabled, native.getBoolean("enabled"))
+                                val rows = nativeRows(native)
+                                assertEquals("$stage: off-period flow was admitted", cutoffIds, rows.keys)
+                                assertEquals(expectedTcpUpload, rows.getValue(tcpBefore.id).getLong("upload"))
+                                assertEquals(udpExchanges * 512L, rows.getValue(udpBefore.id).getLong("upload"))
+                                assertEquals(udpExchanges * 513L, rows.getValue(udpBefore.id).getLong("download"))
+                                assertEquals("$stage: app admitted an off-period flow", cutoffIds,
+                                    repository.state.value.connections.mapTo(HashSet()) { it.id })
+                                assertEquals(cutoffCounters, repository.state.value.counters)
                                 assertSameRuntime(stage)
                             }
                             captureActivitySurface(activity, "analytics-capture-disabled-history")
@@ -507,7 +619,7 @@ class VpnDeviceIntegrationTest {
                             compose.onNodeWithTag("analytics:list").performScrollToKey("flow:${tcpBefore.id}")
                             compose.onNodeWithTag("flow:${tcpBefore.id}").performClick()
                             compose.onNodeWithTag("analytics:detail").assertTextContains(tcpBefore.profileName, substring = true)
-                                .assertTextContains(context.getString(R.string.connectionAnalyticsStateInterrupted), substring = true)
+                                .assertTextContains(context.getString(R.string.connectionAnalyticsActive), substring = true)
                             captureActivitySurface(activity, "analytics-capture-disabled-retained-detail")
                             compose.onNodeWithText(context.getString(R.string.ca_done)).performClick()
                             compose.onNodeWithTag("analytics:back").performClick()
@@ -535,12 +647,13 @@ class VpnDeviceIntegrationTest {
                                     val bytesBefore = tunByteCounts(network)
                                     exchangeTcp("off-old-tcp-$index")
                                     assertEquals(udpSender, datagrams.assertNextResponse(udp, "off-old-udp-$index"))
+                                    udpExchanges++
                                     requireTunTransfer("capture-off-new-tcp-$index")
                                     assertArrayEquals(target.payload,
                                         transferSocksHttp("capture-off-listener-$index", target.port, "198.18.0.1", authenticate = true))
                                     assertEquals("/vpn-capture-off-listener-$index",
                                         target.requests.poll(5, TimeUnit.SECONDS)!!.path)
-                                    assertFrozen("disabled response boundary $index", enabled = false)
+                                    assertTrackedUpdates("disabled response boundary $index", enabled = false)
                                     assertTunBytesIncrease("disabled response boundary $index", bytesBefore, tunByteCounts(network))
                                 }
                                 compose.onNodeWithTag("analytics:capture").performScrollTo().performClick()
@@ -569,12 +682,13 @@ class VpnDeviceIntegrationTest {
                                     val bytesBefore = tunByteCounts(network)
                                     exchangeTcp("resumed-old-tcp-$index")
                                     assertEquals(udpSender, datagrams.assertNextResponse(udp, "resumed-old-udp-$index"))
+                                    udpExchanges++
                                     assertEquals(offSender, startedWhileOff.assertNextResponse(udp, "resumed-off-udp-$index"))
-                                    assertFrozen("resumed old-flow response boundary $index", enabled = true)
+                                    assertTrackedUpdates("resumed old-flow response boundary $index", enabled = true)
                                     assertTunBytesIncrease("resumed old-flow response boundary $index", bytesBefore, tunByteCounts(network))
                                 }
                                 requireTunTransfer("capture-on-new-tcp")
-                                val freshTcp = awaitFlow {
+                                val freshTcp = awaitFlow("fresh TCP after resume") {
                                     it.uid == shellUid && it.protocol == "tcp" && it.id !in cutoffRows.map { row -> row.id } &&
                                         it.destination.endsWith(":${target.port}") && it.upload > 0 && it.download > 0
                                 }
@@ -582,14 +696,15 @@ class VpnDeviceIntegrationTest {
                                     val newSender = fresh.assertNextResponse(udp, "capture-on-new-udp")
                                     assertNotEquals(udpSender, newSender)
                                     assertNotEquals(offSender, newSender)
-                                    val freshUdp = awaitFlow {
+                                    val freshUdp = awaitFlow("fresh UDP after resume") {
                                         it.uid == shellUid && it.protocol == "udp" && it.id != udpBefore.id &&
                                             it.upload == 512L && it.download == 513L
                                     }
                                     assertNotEquals(tcpBefore.id, freshTcp.id)
-                                    assertEquals(oldRows, repository.state.value.connections.filter {
-                                        it.id == tcpBefore.id || it.id == udpBefore.id
-                                    })
+                                    assertEquals(expectedTcpUpload,
+                                        repository.state.value.connections.single { it.id == tcpBefore.id }.upload)
+                                    assertEquals(udpExchanges * 513L,
+                                        repository.state.value.connections.single { it.id == udpBefore.id }.download)
                                     assertEquals("Only newly admitted TCP and UDP should be added", cutoffRows.size + 2,
                                         repository.state.value.connections.size)
                                     assertEquals("association", freshUdp.destinationKind)
@@ -598,25 +713,41 @@ class VpnDeviceIntegrationTest {
                                     compose.onNodeWithTag("analytics:capture").performClick()
                                     compose.waitUntil(10_000) {
                                         !repository.state.value.captureEnabled &&
-                                            repository.state.value.connections.none { it.state == "active" }
+                                            repository.state.value.status == ConnectionCaptureStatus.Disabled
                                     }
+                                    exchangeTcp("finish-tracked-tcp-while-off")
+                                    tcp.close()
+                                    val terminalTcp = awaitFlow("tracked TCP finishes while Off") {
+                                        it.id == tcpBefore.id && it.state != "active" && it.endedAt > 0L && it.liveBytesExact
+                                    }
+                                    assertTrue(terminalTcp.endedAt >= terminalTcp.startedAt)
+                                    assertEquals(expectedTcpUpload, terminalTcp.upload)
+                                    assertEquals(expectedTcpDownload, terminalTcp.download)
+                                    assertSameRuntime("tracked TCP closes while admission paused")
+                                    awaitFlow("fresh HTTP closed before clear") { it.id == freshTcp.id && it.state != "active" && it.endedAt > 0L }
                                     val beforeClear = JSONObject(XrayCore.connectionSnapshot())
                                     compose.onNodeWithTag("analytics:clear").performScrollTo().performClick()
-                                    compose.waitUntil(10_000) { repository.state.value.connections.isEmpty() }
+                                    val retainedIds = setOf(udpBefore.id, freshUdp.id)
+                                    compose.waitUntil(10_000) {
+                                        repository.state.value.connections.mapTo(HashSet()) { it.id } == retainedIds
+                                    }
                                     compose.onNodeWithTag("analytics:capture").performScrollTo().assertIsOff()
                                     assertFalse(Settings(context).connectionAnalyticsEnabled)
                                     val cleared = JSONObject(XrayCore.connectionSnapshot())
                                     assertFalse(cleared.getBoolean("enabled"))
                                     assertEquals(beforeClear.getLong("captureGeneration"), cleared.getLong("captureGeneration"))
                                     assertTrue(cleared.getLong("generation") > beforeClear.getLong("generation"))
-                                    exchangeTcp("clear-while-off-old-tcp")
+                                    assertEquals(retainedIds, nativeRows(cleared).keys)
                                     assertEquals(udpSender, datagrams.assertNextResponse(udp, "clear-while-off-old-udp"))
+                                    udpExchanges++
                                     fresh.assertNextResponse(udp, "clear-while-off-resumed-udp")
                                     requireTunTransfer("clear-while-off-new-tcp")
-                                    assertEquals(0, JSONObject(XrayCore.connectionSnapshot()).getJSONArray("connections").length())
-                                    assertTrue(repository.state.value.connections.isEmpty())
+                                    awaitFlow("old UDP updates after clear") { it.id == udpBefore.id && it.download == udpExchanges * 513L }
+                                    awaitFlow("new UDP updates after clear") { it.id == freshUdp.id && it.upload == 1024L && it.download == 1026L }
+                                    assertEquals(retainedIds, nativeRows(JSONObject(XrayCore.connectionSnapshot())).keys)
+                                    assertEquals(retainedIds, repository.state.value.connections.mapTo(HashSet()) { it.id })
                                     assertEquals(ConnectionCaptureStatus.Disabled, repository.state.value.status)
-                                    assertSameRuntime("clear while capture disabled")
+                                    assertSameRuntime("clear while admission disabled")
                                 }
                             }
                         }
@@ -1783,14 +1914,14 @@ class VpnDeviceIntegrationTest {
     private fun awaitVpnRouting() {
         // establish()/START acknowledge native ownership, not ConnectivityService's later route
         // publication. The application is excluded from its VPN, so observe other-UID networks.
-        // Reject the previous network: a restart must not pass this barrier on stale readiness.
+        // Protected reconnects intentionally retain the same network; unprotected restarts replace it.
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val networks = LinkedBlockingQueue<Network>()
         val previousNetwork = routedNetwork
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
                 val capabilities = manager.getNetworkCapabilities(network)
-                if (network != previousNetwork &&
+                if ((network != previousNetwork || settings.killSwitch) &&
                     capabilities?.ownerUid == Process.myUid() &&
                     properties.interfaceName?.startsWith("tun") == true &&
                     properties.routes.any { it.isDefaultRoute && it.destination.address is Inet4Address }) {

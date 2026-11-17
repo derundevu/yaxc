@@ -22,6 +22,7 @@ sealed interface MainAction {
     data class CommitSourceOrder(val orderedIds: List<Long>) : MainAction
 
     data object ToggleVpnClicked : MainAction
+    data object ReconnectVpnClicked : MainAction
     data object PingClicked : MainAction
     data object PingAllProfilesClicked : MainAction
     data object RefreshLinksClicked : MainAction

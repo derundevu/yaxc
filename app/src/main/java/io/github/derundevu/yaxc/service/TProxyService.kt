@@ -48,6 +48,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.net.InetAddress
 import org.json.JSONObject
@@ -81,6 +85,8 @@ class TProxyService : VpnService() {
         private const val STOP_VPN_SERVICE_ACTION_ID = 3
         @Volatile
         private var serviceRunning: Boolean = false
+        private val blockingState = MutableStateFlow(false)
+        val isBlocking: StateFlow<Boolean> = blockingState.asStateFlow()
 
         fun isActive(): Boolean = serviceRunning
 
@@ -128,6 +134,7 @@ class TProxyService : VpnService() {
     private val runtimeLock = Any()
     private var commandJob: Job? = null
     private var stopJob: Job? = null
+    private var healthJob: Job? = null
     @Volatile
     private var configJob: Job? = null
     // Android service lifetime is owned by the main thread, independently of native teardown.
@@ -138,6 +145,8 @@ class TProxyService : VpnService() {
 
     private var isRunning: Boolean = false
     private var tunDevice: ParcelFileDescriptor? = null
+    private var coreOwned = false
+    private var tunnelOwned = false
     private var cellularCallback: ConnectivityManager.NetworkCallback? = null
     private val tunOwnerPolicyCache = linkedMapOf<Int, Boolean>()
     private val uncertainConnectionUids = mutableSetOf<Int>()
@@ -183,6 +192,7 @@ class TProxyService : VpnService() {
         suspend fun validate(config: String): String
         fun startCore(config: XrayConfig, transparent: Boolean)
         fun stopCore(transparent: Boolean)
+        fun coreRunning(): Boolean
         fun applyRouting(config: String): String
         fun establish(builder: Builder): ParcelFileDescriptor?
         fun startTunnel(configPath: String, fd: Int): Boolean
@@ -224,6 +234,7 @@ class TProxyService : VpnService() {
                 repository.endRuntime(if (repository.state.value.captureEnabled) XrayCore.connectionSnapshot() else null)
             }
         }
+        override fun coreRunning(): Boolean = JSONObject(XrayCore.liveRoutingStatus()).optBoolean("running", false)
         override fun applyRouting(config: String): String {
             val changedPackages = connectionCapturedPackages != connectionIdentityPackages
             val preceding = if (changedPackages && Yaxc::class.cast(application).connectionRepository.state.value.captureEnabled) {
@@ -266,7 +277,8 @@ class TProxyService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
-        val action = intent?.action
+        val systemStart = intent == null || intent.action == SERVICE_INTERFACE
+        val action = if (systemStart) START_VPN_SERVICE_ACTION_NAME else intent?.action
         if (action == START_VPN_SERVICE_ACTION_NAME || action == RESTART_VPN_SERVICE_ACTION_NAME) {
             startGeneration++
             stopPending = false
@@ -289,7 +301,7 @@ class TProxyService : VpnService() {
                         if (previousStop !== previous) previousStop?.join()
                         previous?.join()
                         currentCoroutineContext().ensureActive()
-                        configure(checkNotNull(action), generation)
+                        configure(checkNotNull(action), generation, systemStart)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
@@ -301,9 +313,10 @@ class TProxyService : VpnService() {
                         )
                         currentCoroutineContext().ensureActive()
                         ConnectionFailureState.report(failure)
-                        if (!getIsRunning()) {
-                            stopVpn(generation, notifyStop = false)
+                        synchronized(runtimeLock) {
+                            if (hasProtection() && !isRunning) markBlocked()
                         }
+                        if (!getIsRunning()) stopVpn(generation, notifyStop = false)
                         broadcastStatus()
                     } finally {
                         withContext(NonCancellable + Dispatchers.Main.immediate) {
@@ -316,7 +329,10 @@ class TProxyService : VpnService() {
             STOP_VPN_SERVICE_ACTION_NAME -> enqueueStop()
             STATUS_VPN_SERVICE_ACTION_NAME -> scope.launch {
                 broadcastStatus()
-                withContext(Dispatchers.Main.immediate) { finishPendingStop() }
+                withContext(Dispatchers.Main.immediate) {
+                    if (!getIsRunning() && commandJob?.isActive != true) stopPending = true
+                    finishPendingStop()
+                }
             }
             NETWORK_UPDATE_SERVICE_ACTION_NAME -> scope.launch {
                 transparentProxyHelper.networkUpdate()
@@ -344,6 +360,7 @@ class TProxyService : VpnService() {
 
 
     private fun getIsRunning(): Boolean = synchronized(runtimeLock) {
+        if (hasProtection()) return@synchronized true
         when (activeMode) {
             RuntimeMode.TRANSPARENT -> isRunning && runtime.transparentRunning()
             RuntimeMode.TUN -> isRunning && runtime.tunnelRunning()
@@ -352,8 +369,9 @@ class TProxyService : VpnService() {
         }
     }
 
-    private suspend fun configure(action: String, generation: Long) {
-        if (action == START_VPN_SERVICE_ACTION_NAME && getIsRunning()) return
+    private suspend fun configure(action: String, generation: Long, systemStart: Boolean) {
+        if (action == START_VPN_SERVICE_ACTION_NAME && getIsRunning() && !blockingState.value &&
+            (!systemStart || activeMode == RuntimeMode.TUN)) return
         if (isConditionalUpdate(action) && !getIsRunning()) {
             broadcastStatus()
             return
@@ -370,12 +388,36 @@ class TProxyService : VpnService() {
                 val profile = if (selected > 0L && database.profileDao().indexOf(selected) != null) {
                     profileRepository.find(selected)
                 } else null
+                val options = RuntimeOptions.capture(settings, applicationContext.packageName)
+                check(!systemStart || options.mode == RuntimeMode.TUN) {
+                    "Android Always-on VPN requires VPN mode. Select VPN mode in yaxc settings."
+                }
+                if (!options.killSwitch && action == RESTART_VPN_SERVICE_ACTION_NAME) {
+                    val context = currentCoroutineContext()
+                    synchronized(runtimeLock) {
+                        context.ensureActive()
+                        if (blockingState.value) {
+                            check(stopVpnInternal()) { "Failed to stop the previous VPN" }
+                        }
+                    }
+                }
+                if (options.killSwitch) {
+                    val context = currentCoroutineContext()
+                    synchronized(runtimeLock) {
+                        context.ensureActive()
+                        if (activeMode == null) {
+                            establishProtection(
+                                options,
+                                if (standalone) getString(R.string.liveRouting) else profile?.name ?: getString(R.string.killSwitch),
+                            )
+                        }
+                    }
+                }
                 val candidate = if (standalone || profile != null) {
                     if (action == APPLY_ROUTING_SERVICE_ACTION_NAME && !standalone) {
                         broadcastStatus()
                         return@withTransaction true
                     }
-                    val options = RuntimeOptions.capture(settings, applicationContext.packageName)
                     val packageUids = if (options.mode == RuntimeMode.TUN && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         packageManager.getInstalledApplications(0).associate { app -> app.packageName to app.uid }
                     } else emptyMap()
@@ -423,6 +465,10 @@ class TProxyService : VpnService() {
                     val hadRuntime = synchronized(runtimeLock) { activeMode != null }
                     currentCoroutineContext().ensureActive()
                     ConnectionFailureState.report(ConnectionFailure(getString(R.string.connectionMissingProfile)))
+                    if (synchronized(runtimeLock) { hasProtection() }) {
+                        broadcastStatus()
+                        return@withTransaction true
+                    }
                     check(stopVpn(generation, notifyStop = hadRuntime)) {
                         "Failed to stop the previous VPN"
                     }
@@ -436,7 +482,7 @@ class TProxyService : VpnService() {
                         broadcastStatus()
                         return@synchronized true
                     }
-                    if (isConditionalUpdate(action) && candidate.snapshot == activeConfig) {
+                    if (isConditionalUpdate(action) && !blockingState.value && candidate.snapshot == activeConfig) {
                         activeProfileName = candidate.name
                         notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(candidate.name))
                         broadcastStatus()
@@ -479,7 +525,7 @@ class TProxyService : VpnService() {
 
     private fun canApplyRouting(snapshot: RuntimeSnapshot): Boolean {
         val active = activeConfig ?: return false
-        return activeMode != RuntimeMode.TRANSPARENT && getIsRunning() &&
+        return activeMode != RuntimeMode.TRANSPARENT && isRunning && !blockingState.value && getIsRunning() &&
             active.options == snapshot.options && active.restartKey == snapshot.restartKey
     }
 
@@ -510,6 +556,11 @@ class TProxyService : VpnService() {
             ConnectionFailureState.clear()
             notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(candidate.name))
             broadcastStart(NEW_CONFIG_SERVICE_ACTION_NAME, candidate.name)
+            return
+        }
+        if (snapshot.options.mode == RuntimeMode.TUN &&
+            (snapshot.options.killSwitch || hasProtection())) {
+            applyProtectedCandidate(candidate, context, action)
             return
         }
         if (
@@ -543,6 +594,7 @@ class TProxyService : VpnService() {
         runtimeOptions = snapshot.options
         tunIdentityPackages = snapshot.uidPackages
         try {
+            coreOwned = true
             runtime.startCore(config, activeMode == RuntimeMode.TRANSPARENT)
             context.ensureActive()
             startVPN(candidate, context, action)
@@ -560,48 +612,8 @@ class TProxyService : VpnService() {
             val options = checkNotNull(candidate.snapshot.options.tun)
             synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
             val result = runCatching {
-                /** Create Tun */
-                val tun = Builder()
                 val tunName = options.name.ifBlank { getString(R.string.appName) }
-
-                /** Basic tun config */
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tun.setMetered(false)
-                tun.setMtu(options.mtu)
-                tun.setSession(tunName)
-
-                /** IPv4 */
-                tun.addAddress(options.address, options.prefix)
-                tun.addDnsServer(options.primaryDns)
-                tun.addDnsServer(options.secondaryDns)
-
-                /** IPv6 */
-                options.ipv6?.let { ipv6 ->
-                    tun.addAddress(ipv6.address, ipv6.prefix)
-                    tun.addDnsServer(ipv6.primaryDns)
-                    tun.addDnsServer(ipv6.secondaryDns)
-                    tun.addRoute("::", 0)
-                }
-
-                /** Bypass LAN (IPv4) */
-                if (options.bypassLan) {
-                    options.routes.forEach {
-                        val address = it.split('/')
-                        tun.addRoute(address[0], address[1].toInt())
-                    }
-                } else {
-                    tun.addRoute("0.0.0.0", 0)
-                }
-
-                /** Apps Routing */
-                applyAppsRouting(tun, options)
-
-                /** Build tun device */
-                tunDevice = runtime.establish(tun)
-
-                /** Check tun device */
-                if (tunDevice == null) {
-                    error("tun#establish failed")
-                }
+                if (tunDevice == null) tunDevice = establishTun(options)
 
                 /** Create, Update tun2socks config */
                 val tun2socksConfig = arrayListOf(
@@ -624,6 +636,7 @@ class TProxyService : VpnService() {
                 )
 
                 /** Start tun2socks */
+                tunnelOwned = true
                 check(runtime.startTunnel(settings.tun2socksConfig().absolutePath, tunDevice!!.fd)) {
                     "Failed to start tun2socks worker"
                 }
@@ -642,7 +655,6 @@ class TProxyService : VpnService() {
         /** Service Notification */
         val name = candidate.name
         activeProfileName = name
-        notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(name))
 
         /** Listen for cellular changes */
         if (cellularCallback == null) {
@@ -664,11 +676,133 @@ class TProxyService : VpnService() {
         isRunning = true
         serviceRunning = true
         activeConfig = candidate.snapshot
+        blockingState.value = false
+        notificationManager.notify(VPN_SERVICE_NOTIFICATION_ID, createNotification(name))
+        monitorProtectedRuntime()
         ConnectionFailureState.clear()
         broadcastStart(
             if (action == NEW_CONFIG_SERVICE_ACTION_NAME) action else START_VPN_SERVICE_ACTION_NAME,
             name,
         )
+    }
+
+    private fun hasProtection(): Boolean =
+        tunDevice != null && runtimeOptions?.killSwitch == true
+
+    /** Must be called with runtimeLock held, including during asynchronous validation. */
+    private fun establishProtection(candidate: ConfigCandidate) {
+        establishProtection(candidate.snapshot.options, candidate.name)
+        tunIdentityPackages = candidate.snapshot.uidPackages
+    }
+
+    private fun establishProtection(options: RuntimeOptions, name: String) {
+        val device = establishTun(checkNotNull(options.tun))
+        tunDevice = device
+        activeMode = RuntimeMode.TUN
+        runtimeOptions = options
+        activeProfileName = name
+        markBlocked()
+    }
+
+    private fun applyProtectedCandidate(candidate: ConfigCandidate, context: CoroutineContext, action: String) {
+        val snapshot = candidate.snapshot
+        if (activeMode != null && activeMode != RuntimeMode.TUN) {
+            check(stopVpnInternal()) { "Failed to stop the previous VPN" }
+        }
+        if (tunDevice == null) establishProtection(candidate)
+        check(stopForwarding()) { "Failed to stop the previous VPN" }
+        markBlocked()
+        try {
+            context.ensureActive()
+            val previousOptions = checkNotNull(runtimeOptions?.tun)
+            val nextOptions = checkNotNull(snapshot.options.tun)
+            if (!previousOptions.sameInterface(nextOptions)) {
+                // Android replaces its interface only on successful establish. Keep our old
+                // descriptor owned until then; a rejected replacement must remain fail-closed.
+                val replacement = establishTun(nextOptions)
+                val previous = tunDevice
+                tunDevice = replacement
+                runCatching { previous?.close() }
+            }
+            runtimeOptions = snapshot.options
+            tunIdentityPackages = snapshot.uidPackages
+            activeProfileName = candidate.name
+            connectionIdentityPackages = snapshot.identityPackages
+            context.ensureActive()
+            val config = writeConfig(snapshot)
+            coreOwned = true
+            runtime.startCore(config, transparent = false)
+            context.ensureActive()
+            startVPN(candidate, context, action)
+        } catch (error: Exception) {
+            if (hasProtection()) {
+                if (stopForwarding()) markBlocked()
+            } else {
+                stopVpnInternal()
+            }
+            throw error
+        }
+    }
+
+    private fun markBlocked() {
+        if (!hasProtection() || tunnelOwned) return
+        isRunning = false
+        serviceRunning = true
+        blockingState.value = true
+        notificationManager.notify(
+            VPN_SERVICE_NOTIFICATION_ID,
+            createNotification(activeProfileName ?: getString(R.string.killSwitch)),
+        )
+        broadcastStatus()
+    }
+
+    private fun monitorProtectedRuntime() {
+        healthJob?.cancel()
+        healthJob = null
+        if (!hasProtection()) return
+        healthJob = scope.launch {
+            while (true) {
+                delay(1_000)
+                synchronized(runtimeLock) {
+                    if (!hasProtection() || !isRunning) return@launch
+                    val healthy = runCatching { runtime.coreRunning() && runtime.tunnelRunning() }
+                        .getOrDefault(false)
+                    if (!healthy) {
+                        if (stopForwarding()) markBlocked()
+                        ConnectionFailureState.report(
+                            ConnectionFailure(getString(R.string.killSwitchRuntimeStopped)),
+                        )
+                        broadcastStatus()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun establishTun(options: RuntimeOptions.Tun): ParcelFileDescriptor {
+        val tun = Builder()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) tun.setMetered(false)
+        tun.setMtu(options.mtu)
+        tun.setSession(options.name.ifBlank { getString(R.string.appName) })
+        tun.addAddress(options.address, options.prefix)
+        tun.addDnsServer(options.primaryDns)
+        tun.addDnsServer(options.secondaryDns)
+        options.ipv6?.let { ipv6 ->
+            tun.addAddress(ipv6.address, ipv6.prefix)
+            tun.addDnsServer(ipv6.primaryDns)
+            tun.addDnsServer(ipv6.secondaryDns)
+            tun.addRoute("::", 0)
+        }
+        if (options.bypassLan) {
+            options.routes.forEach {
+                val address = it.split('/')
+                tun.addRoute(address[0], address[1].toInt())
+            }
+        } else {
+            tun.addRoute("0.0.0.0", 0)
+        }
+        applyAppsRouting(tun, options)
+        return checkNotNull(runtime.establish(tun)) { "tun#establish failed" }
     }
 
     private fun enqueueStop() {
@@ -712,27 +846,38 @@ class TProxyService : VpnService() {
         }
     }
 
-    private fun stopVpnInternal(): Boolean = synchronized(runtimeLock) {
-        synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
-        val mode = activeMode
-        if (mode == RuntimeMode.TRANSPARENT) {
-            runtime.disableTransparent()
-        } else if (tunDevice != null) {
+    /** Stop/join forwarding without relinquishing Android's routing ownership. */
+    private fun stopForwarding(): Boolean {
+        if (tunnelOwned) {
             if (!runtime.stopTunnel()) {
                 Log.e("TProxyService", "Failed to join tun2socks worker")
                 return false
             }
-            runCatching { tunDevice?.close() }
-            tunDevice = null
+            tunnelOwned = false
         }
+        healthJob?.cancel()
+        healthJob = null
         isRunning = false
+        if (coreOwned) {
+            runtime.stopCore(activeMode == RuntimeMode.TRANSPARENT)
+            coreOwned = false
+        }
+        return true
+    }
+
+    private fun stopVpnInternal(): Boolean = synchronized(runtimeLock) {
+        if (activeMode == RuntimeMode.TRANSPARENT) runtime.disableTransparent()
+        if (!stopForwarding()) return false
+        synchronized(tunOwnerPolicyCache) { tunOwnerPolicyCache.clear() }
+        runCatching { tunDevice?.close() }
+        tunDevice = null
         activeMode = null
         activeConfig = null
         activeProfileName = null
         runtimeOptions = null
         tunIdentityPackages = emptyMap()
         serviceRunning = false
-        if (mode != null) runtime.stopCore(mode == RuntimeMode.TRANSPARENT)
+        blockingState.value = false
         return true
     }
 
@@ -921,6 +1066,7 @@ class TProxyService : VpnService() {
         Intent(STATUS_VPN_SERVICE_ACTION_NAME).also {
             it.`package` = BuildConfig.APPLICATION_ID
             it.putExtra("isRunning", getIsRunning())
+            it.putExtra("isBlocked", blockingState.value)
             it.putExtra("profile", synchronized(runtimeLock) { activeProfileName })
             sendBroadcast(it)
         }
@@ -946,7 +1092,8 @@ class TProxyService : VpnService() {
         return NotificationCompat
             .Builder(applicationContext, createNotificationChannel())
             .setSmallIcon(R.drawable.baseline_vpn_lock)
-            .setContentTitle(name)
+            .setContentTitle(if (blockingState.value) getString(R.string.killSwitchBlocked) else name)
+            .setContentText(if (blockingState.value) name else null)
             .setContentIntent(pendingActivity)
             .addAction(0, getString(R.string.vpnStop), pendingStop)
             .setPriority(NotificationCompat.PRIORITY_MAX)

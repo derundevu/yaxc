@@ -95,7 +95,6 @@ type connectionHistory struct {
 	generation        uint64
 	enabled           bool
 	captureGeneration uint64
-	ledgers           map[*connectionLedger]struct{}
 	evicted           uint64
 	rejected          uint64
 	records           map[uint64]*observedConnection
@@ -111,14 +110,11 @@ type connectionLedger struct {
 	runtimeID string
 	accepting bool
 	routes    map[string]connectionProfile
-	observer  *dispatcher.DefaultDispatcher
-	pending   int
 }
 
 type observedConnection struct {
 	history      *connectionHistory
 	bindings     *connectionLedger
-	owner        *connectionLedger
 	runtimeID    string
 	sequence     uint64
 	document     connectionDocument // history.mu owns metadata, never session pointers.
@@ -203,18 +199,12 @@ func newConnectionLedger(server *core.Instance, document map[string]any, state *
 			captureGeneration: setting.generation, records: make(map[uint64]*observedConnection)}
 	}
 	ledger := &connectionLedger{connectionHistory: history, runtimeID: runtimeID, accepting: true,
-		routes: make(map[string]connectionProfile), observer: observer}
+		routes: make(map[string]connectionProfile)}
 	ledger.publishProfiles(profiles, state.outbounds)
-	ledger.mu.Lock()
-	if ledger.ledgers == nil {
-		ledger.ledgers = make(map[*connectionLedger]struct{})
-	}
-	ledger.ledgers[ledger] = struct{}{}
-	enabled := ledger.enabled
-	ledger.mu.Unlock()
-	if enabled {
-		observer.SetConnectionObserver(ledger)
-	}
+	// The dispatcher observer is installed before core start and never replaced:
+	// its setter is not synchronized with live dispatch. Open owns admission under
+	// history.mu, while admitted handles keep accounting through disabled periods.
+	observer.SetConnectionObserver(ledger)
 	return ledger, nil
 }
 
@@ -273,8 +263,7 @@ func (l *connectionLedger) Open(metadata session.ConnectionMetadata) session.Con
 	if metadata.Network == net.Network_UDP {
 		kind = "association"
 	}
-	l.pending++
-	observation := &observedConnection{history: l.connectionHistory, bindings: l, owner: l, runtimeID: l.runtimeID, sequence: l.nextID,
+	observation := &observedConnection{history: l.connectionHistory, bindings: l, runtimeID: l.runtimeID, sequence: l.nextID,
 		document: connectionDocument{ID: l.epoch + "." + strconv.FormatUint(l.nextID, 10), Protocol: metadata.Network.SystemString(),
 			Destination: boundConnectionText(metadata.Destination.NetAddr(), 320), DestinationKind: kind,
 			StartedAt: time.Now().UnixMilli(), State: "active", UID: uid, Route: "unknown", LiveBytesExact: true}}
@@ -375,14 +364,6 @@ func (c *observedConnection) Finish(state string) {
 	defer l.mu.Unlock()
 	c.bindings = nil
 	c.destinations = [maxConnectionDestinations]net.Destination{}
-	if owner := c.owner; owner != nil {
-		owner.pending--
-		if !owner.accepting && owner.pending == 0 {
-			delete(l.ledgers, owner)
-			owner.observer = nil
-		}
-		c.owner = nil
-	}
 	c.deferred.Store(false)
 	if _, retained := l.records[c.sequence]; !retained {
 		return
@@ -412,10 +393,6 @@ func (l *connectionLedger) stop() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.accepting = false
-	if l.pending == 0 {
-		delete(l.ledgers, l)
-		l.observer = nil
-	}
 	if l.activeRuntime == l.runtimeID {
 		l.running = false
 	}
@@ -491,9 +468,8 @@ func ClearConnectionHistory() {
 	}
 }
 
-// SetConnectionAnalyticsEnabled changes only observation, never forwarding or
-// routing. Disabling joins callbacks from the current and any still-draining
-// stopped cores before publishing the final, fenced snapshot.
+// SetConnectionAnalyticsEnabled changes admission of new observations, never
+// forwarding or routing. Existing handles retain live accounting until Finish.
 func SetConnectionAnalyticsEnabled(enabled bool) error {
 	lifecycleMu.Lock()
 	defer lifecycleMu.Unlock()
@@ -507,23 +483,6 @@ func SetConnectionAnalyticsEnabled(enabled bool) error {
 	}
 	if coreServer != nil {
 		ledger = routingState.connections
-		if ledger.observer == nil {
-			return errors.New("core dispatcher does not support connection observation")
-		}
-	}
-	if !enabled && ledger != nil {
-		ledger.mu.Lock()
-		observers := make([]*dispatcher.DefaultDispatcher, 0, len(ledger.ledgers))
-		for owner := range ledger.ledgers {
-			if owner.observer != nil {
-				observers = append(observers, owner.observer)
-			}
-		}
-		ledger.mu.Unlock()
-		// Never hold the history lock: the setter completes observation callbacks.
-		for _, observer := range observers {
-			observer.SetConnectionObserver(nil)
-		}
 	}
 	setting.enabled = enabled
 	setting.generation++
@@ -533,9 +492,6 @@ func SetConnectionAnalyticsEnabled(enabled bool) error {
 		ledger.mu.Unlock()
 	}
 	connectionCapturePreference.Store(&setting)
-	if enabled && coreServer != nil {
-		ledger.observer.SetConnectionObserver(ledger)
-	}
 	return nil
 }
 

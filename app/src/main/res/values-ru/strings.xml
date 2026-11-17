@@ -568,6 +568,16 @@
     <string name="settingsBypassLanLead">Оставляет локальные IPv4-сети вроде 192.168.x.x и 10.x.x.x вне VPN.</string>
     <string name="settingsSocksUdpLead">Разрешает UDP через локальный SOCKS-inbound. Нужен для QUIC, DNS и части приложений.</string>
     <string name="settingsTun2socksLead">Передает трафик из TUN в локальный SOCKS-прокси. Обычно лучше держать включенным.</string>
+    <string name="killSwitch">Kill switch</string>
+    <string name="killSwitchBlocked">Соединение потеряно — трафик VPN заблокирован</string>
+    <string name="killSwitchRuntimeStopped">Компонент VPN остановился. Трафик VPN остаётся заблокированным до переподключения или отключения.</string>
+    <string name="settingsSectionVpnProtection">Защита VPN</string>
+    <string name="settingsKillSwitchLead">По умолчанию выключено. При сбое Xray или туннеля сохраняет созданный TUN и блокирует направленный в VPN трафик во время переподключения, пока жив процесс приложения. Исключённые приложения и обход локальной сети не меняются и не защищены. Отключение освобождает VPN. Сохранение изменения перезапускает активный или заблокированный сеанс, но не запускает неактивный VPN.</string>
+    <string name="settingsKillSwitchRequiresVpn">Kill switch требует режима TUN VPN: tun2socks включён, root/прозрачный прокси выключен. Режим только SOCKS не защищён. Перед сменой режима отключите Kill switch.</string>
+    <string name="settingsSystemVpnProtection">Системная защита VPN в Android</string>
+    <string name="settingsConfigureInAndroid">Настроить в Android</string>
+    <string name="settingsSystemVpnProtectionLead">Для защиты при остановке процесса приложения откройте настройки VPN yaxc в Android и включите «Постоянная VPN» и «Блокировать соединения без VPN». Это отдельные системные настройки: переключатель Kill switch их не включает. Используйте режим TUN VPN. Системная блокировка может лишить связи исключённые приложения и заблокировать обход локальной сети: не включайте её, если эти исключения должны работать. yaxc не меняет ваши исключения.</string>
+    <string name="settingsSystemVpnUnavailable">Не удалось открыть настройки Android. Откройте системные настройки и найдите раздел VPN вручную.</string>
     <string name="settingsSectionTransparentProxyLead">Продвинутый режим перехвата трафика хотспота и tethering через TPROXY. Большинству пользователей не нужен.</string>
     <string name="settingsTproxyAddressLead">Локальный адрес, на котором слушает прозрачный прокси.</string>
     <string name="settingsTproxyPortLead">Локальный порт для перехваченного трафика прозрачного прокси.</string>

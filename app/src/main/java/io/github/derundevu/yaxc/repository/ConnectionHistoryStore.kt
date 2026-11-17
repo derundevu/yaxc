@@ -57,6 +57,8 @@ internal class ConnectionHistoryStore(
         get() = finished.firstOrNull()?.record?.endedAt?.let { saturatingAdd(it, closedTtlMillis) }
     val hasIncompleteTerminal: Boolean
         get() = finished.any { !it.record.liveBytesExact }
+    val hasPendingUpdates: Boolean
+        get() = rows.size != finished.size || hasIncompleteTerminal
 
     init {
         require(maxRecords in 1..5_000)
@@ -146,7 +148,6 @@ internal class ConnectionHistoryStore(
             }
         }
         enforceEnvelope()
-        if (!snapshot.enabled) freezeCapture(now)
         return true
     }
 
@@ -182,7 +183,7 @@ internal class ConnectionHistoryStore(
     }
 
     private fun merge(old: ConnectionRecord, incoming: ConnectionRecord): ConnectionRecord {
-        if (old.captureStopped || (old.state != "active" && incoming.state == "active")) return old
+        if (old.state != "active" && incoming.state == "active") return old
         val terminal = old.state != "active"
         return incoming.copy(
             protocol = old.protocol,
@@ -217,16 +218,6 @@ internal class ConnectionHistoryStore(
         captureEnabled = enabled
         captureGeneration = saturatingAdd(captureGeneration, 1)
         revision++
-    }
-
-    /** Preserve the cutoff even when a later retained native frame contains this ID. */
-    fun freezeCapture(now: Long) {
-        interruptActive(now)
-        val ids = rows.values.filter { !it.record.captureStopped }.map { it.record.id }
-        for (id in ids) {
-            val old = checkNotNull(remove(id))
-            admit(entry(old.record.copy(captureStopped = true)), wasRetained = true)
-        }
     }
 
     fun prune(now: Long): Boolean {
@@ -464,7 +455,6 @@ internal object ConnectionJson {
                 profileFingerprint = json.optString("profileFingerprint"),
                 outboundTag = json.optString("outboundTag"),
                 route = json.optString("route", "unknown"),
-                captureStopped = includeApps && json.optBoolean("captureStopped"),
                 apps = List(apps.length()) {
                     val app = apps.getJSONObject(it)
                     ConnectionApp(app.getString("packageName"), app.getString("name"))
@@ -495,7 +485,6 @@ internal object ConnectionJson {
         put("profileFingerprint", record.profileFingerprint)
         put("outboundTag", record.outboundTag)
         put("route", record.route)
-        if (includeApps) put("captureStopped", record.captureStopped)
         if (includeApps) put("apps", JSONArray().apply {
             record.apps.forEach { app -> put(JSONObject().put("packageName", app.packageName).put("name", app.name)) }
         })

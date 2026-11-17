@@ -104,6 +104,7 @@ data class SettingsFormState(
     val languageTag: String,
     val themeStyle: String,
     val liveRoutingHealthInterval: String,
+    val killSwitch: Boolean,
 ) {
     companion object {
         val Saver: Saver<SettingsFormState, Any> = listSaver(
@@ -148,6 +149,7 @@ data class SettingsFormState(
                     it.themeStyle,
                     it.xHwid,
                     it.liveRoutingHealthInterval,
+                    it.killSwitch,
                 )
             },
             restore = { values ->
@@ -192,6 +194,7 @@ data class SettingsFormState(
                     themeStyle = values.getOrNull(36) as? String ?: io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle.System.value,
                     liveRoutingHealthInterval = values.getOrNull(38) as? String
                         ?: Settings.DEFAULT_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS.toString(),
+                    killSwitch = values.getOrNull(39) as? Boolean ?: false,
                 )
             },
         )
@@ -236,6 +239,7 @@ data class SettingsFormState(
             languageTag = settings.languageTag,
             themeStyle = settings.themeStyle.value,
             liveRoutingHealthInterval = settings.liveRoutingHealthIntervalSeconds.toString(),
+            killSwitch = settings.killSwitch,
         )
     }
 }
@@ -255,6 +259,7 @@ fun SettingsScreen(
     onTunRoutesSave: (List<String>) -> Unit,
     onBack: () -> Unit,
     onSave: () -> Unit,
+    onSystemVpnSettings: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.Basic) }
@@ -472,6 +477,7 @@ fun SettingsScreen(
                         onLanguageClick = { showLanguageDialog = true },
                         onThemeClick = { showThemeDialog = true },
                         onPingTypeClick = { showPingTypeDialog = true },
+                        onSystemVpnSettings = onSystemVpnSettings,
                     )
 
                     SettingsTab.Advanced -> AdvancedSettingsTab(
@@ -537,6 +543,7 @@ private fun BasicSettingsTab(
     onLanguageClick: () -> Unit,
     onThemeClick: () -> Unit,
     onPingTypeClick: () -> Unit,
+    onSystemVpnSettings: () -> Unit,
 ) {
     val clipboardManager = LocalClipboardManager.current
     val feedback = LocalYaxcFeedback.current
@@ -730,6 +737,32 @@ private fun BasicSettingsTab(
                     Settings.MIN_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
                     Settings.MAX_LIVE_ROUTING_HEALTH_INTERVAL_SECONDS,
                 ),
+            )
+        }
+
+        SettingsSection(
+            title = textResource(R.string.settingsSectionVpnProtection),
+            description = textResource(R.string.settingsKillSwitchLead),
+        )
+        SettingsCard {
+            YaxcSwitchRow(
+                title = textResource(R.string.killSwitch),
+                checked = formState.killSwitch,
+                onCheckedChange = { onFormStateChange(formState.copy(killSwitch = it)) },
+                icon = Icons.Outlined.Security,
+            )
+            SettingsDivider()
+            YaxcSettingsRow(
+                title = textResource(R.string.settingsSystemVpnProtection),
+                subtitle = textResource(R.string.settingsConfigureInAndroid),
+                icon = Icons.Outlined.SettingsEthernet,
+                onClick = onSystemVpnSettings,
+            )
+            Text(
+                text = textResource(R.string.settingsSystemVpnProtectionLead),
+                style = MaterialTheme.typography.bodySmall,
+                color = YaxcTheme.extendedColors.textMuted,
+                modifier = Modifier.padding(top = YaxcTheme.spacing.sm),
             )
         }
 

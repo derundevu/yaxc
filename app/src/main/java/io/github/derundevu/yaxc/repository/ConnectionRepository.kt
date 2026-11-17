@@ -81,6 +81,7 @@ class ConnectionRepository(
         var awaitingClearBoundary = false
         var captureEnabled: Boolean? = null
         var captureGeneration: Long? = null
+        var followUpdates = false
         var pump: Job? = null
     }
 
@@ -245,7 +246,7 @@ class ConnectionRepository(
             is Command.Packages -> {
                 runtime?.let { active ->
                     synchronized(active.nativeLock) { active.revision++ }
-                    if (captureEnabled) command.precedingSnapshot?.let { ingest(it, active) }
+                    command.precedingSnapshot?.let { ingest(it, active) }
                     active.apps = captureApps(command.packages)
                 }
                 publish()
@@ -311,6 +312,7 @@ class ConnectionRepository(
     }
 
     private fun start(command: Command.Start) {
+        val followUpdates = runtime?.followUpdates == true || tailRuntime?.followUpdates == true
         runtime?.pump?.cancel()
         stopTail()
         nativeClear = command.clear
@@ -319,16 +321,22 @@ class ConnectionRepository(
         attributionError = null
         val apps = captureApps(command.packages)
         val active = Runtime(command.token, command.reader, command.clear, apps)
+        active.followUpdates = followUpdates
         runtime = active
         synchronizeCapture(active, preferredCaptureEnabled())
         dirty = true
         flush(force = false)
         publish()
-        if (active.captureEnabled == true) startPump(active)
+        if (shouldPoll(active)) startPump(active)
     }
 
-    private fun startPump(active: Runtime) {
+    private fun shouldPoll(active: Runtime): Boolean =
+        active.captureEnabled != null && (captureEnabled ||
+            (active.followUpdates && (active.lastSnapshot == null || history.hasPendingUpdates)))
+
+    private fun startPump(active: Runtime, immediate: Boolean = true) {
         active.pump = scope.launch {
+            if (!immediate) delay(1_000)
             while (isActive) {
                 val result = read(active, tail = false)
                 currentCoroutineContext().ensureActive()
@@ -363,7 +371,7 @@ class ConnectionRepository(
         val active = (if (command.tail) tailRuntime else runtime) ?: return
         if (active.token != command.token) return
         if (active.revision != command.revision) return
-        if (!captureEnabled || active.captureEnabled != true) return
+        if (active.captureEnabled == null) return
         if (command.failed) {
             captureError = "Connection snapshot could not be read."
             if (!command.tail) status = ConnectionCaptureStatus.Error
@@ -371,11 +379,12 @@ class ConnectionRepository(
             ingest(checkNotNull(command.raw), active, fromReader = true)
         }
         if (command.tail) {
-            status = ConnectionCaptureStatus.Stopped
+            status = if (captureEnabled) ConnectionCaptureStatus.Stopped else ConnectionCaptureStatus.Disabled
             if (!history.hasIncompleteTerminal) stopTail()
         }
         flush(force = command.tail && tailRuntime == null)
         publish()
+        if (!command.tail && !shouldPoll(active)) active.pump?.cancel()
     }
 
     private fun ingest(raw: String, active: Runtime, fromReader: Boolean = false) {
@@ -411,14 +420,14 @@ class ConnectionRepository(
         active?.pump?.cancel()
         runtime = null // Late polls from this reader cannot overwrite this or a subsequent start.
         idleStatus = stoppedStatus
-        if (captureEnabled && finalSnapshot != null && active != null) ingest(finalSnapshot, active)
+        if (finalSnapshot != null && active != null) ingest(finalSnapshot, active)
         history.interruptActive(clock())
         history.prune(clock())
         status = if (captureEnabled) stoppedStatus else ConnectionCaptureStatus.Disabled
         dirty = true
         flush(force = true)
         publish()
-        if (captureEnabled && active?.captureEnabled == true && stoppedStatus == ConnectionCaptureStatus.Stopped && history.hasIncompleteTerminal) {
+        if (active?.followUpdates == true && stoppedStatus == ConnectionCaptureStatus.Stopped && history.hasIncompleteTerminal) {
             startTail(active)
         }
     }
@@ -457,7 +466,7 @@ class ConnectionRepository(
                     active.awaitingClearBoundary = requiresBoundary
                     // Clear can win the actor queue before the first poll. Establish its
                     // native epoch/generation now so even a late final snapshot is fenced.
-                    if (requiresBoundary && captureEnabled) ingest(active.reader(), active, fromReader = true)
+                    if (requiresBoundary && shouldPoll(active)) ingest(active.reader(), active, fromReader = true)
                 } catch (_: Exception) {
                     historyClearError = "Native closed connection history could not be cleared."
                 }
@@ -491,16 +500,21 @@ class ConnectionRepository(
         captureEnabled = enabled
         captureError = null
         captureToggleError = null
-        if (previous != enabled) history.captureChanged(enabled)
+        if (previous != enabled) {
+            history.captureChanged(enabled)
+            dirty = true
+        }
         if (active != null) {
             val wasCapturing = active.captureEnabled == true
             val transitioned = active.captureEnabled != null && active.captureEnabled != enabled
             if (transitioned) active.captureGeneration = (active.captureGeneration ?: 0) + 1
             active.captureEnabled = enabled
+            if (enabled) active.followUpdates = true
             active.lastSnapshot = null
             if (!enabled && previous) {
                 if (wasCapturing) {
-                    // One quiescent native cutoff, never a periodic disabled reader.
+                    // Native admission is already off. Include every observation admitted before
+                    // the cutoff, even if its opening frame has not reached this actor yet.
                     try {
                         ingest(active.reader(), active, fromReader = true)
                         if (active.lastSnapshot == null) {
@@ -512,8 +526,6 @@ class ConnectionRepository(
                         status = ConnectionCaptureStatus.Error
                     }
                 }
-                history.freezeCapture(clock())
-                dirty = true
             }
         }
         if (enabled || captureError == null) {
@@ -548,19 +560,17 @@ class ConnectionRepository(
                         captureSettingError = "Connection analytics preference could not be saved."
                     }
                 }
-                if (active?.captureEnabled == true) {
+                if (active != null && shouldPoll(active)) {
                     if (runtime === active) startPump(active)
                     else if (wasTail) startTail(active)
                 }
                 publish()
                 return
             }
-            if (!captureEnabled) {
-                history.freezeCapture(clock())
-                dirty = true
-                flush(force = true)
-            } else if (active != null && runtime === active) {
-                startPump(active)
+            if (!captureEnabled) flush(force = true)
+            if (active != null && shouldPoll(active)) {
+                if (runtime === active) startPump(active, immediate = captureEnabled)
+                else if (wasTail && history.hasIncompleteTerminal) startTail(active)
             }
         }
         if (command.updateSetting || settings.connectionAnalyticsEnabled != captureEnabled) {

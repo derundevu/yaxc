@@ -692,54 +692,224 @@ class ConnectionRepositoryTest {
     }
 
     @Test
-    fun captureOffQuiescesReadsPublicationsAndCheckpointsWithoutErasingHistory() = runTest {
+    fun captureOffKeepsAdmittedRowsLiveAndExactWithoutAdmittingOffStartedFlows() = runTest {
         val disk = File(temporary.root, "capture-off.json")
-        val raw = AtomicReference(snapshot("process", row("old", upload = 7)))
+        val old = row("old", uid = 100, upload = 7).put("profileName", "Original")
+        val raw = AtomicReference(snapshot("process", old))
         val reads = AtomicInteger()
         val repo = repository(disk)
-        val native = repo.startCapture(emptyMap(), { reads.incrementAndGet(); raw.get() }, {})
-        var publications = 0
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            repo.state.collect { publications++ }
-        }
+        val native = repo.startCapture(mapOf("old.pkg" to 100), { reads.incrementAndGet(); raw.get() }, {})
         runCurrent()
-        assertTrue(settings.connectionAnalyticsEnabled)
         repo.setPersistence(true)
         runCurrent()
-        raw.set(snapshot("process", row("old", upload = 19)))
+        raw.set(snapshot("process", row("old", uid = 100, upload = 19), row("unpolled", upload = 11)))
         repo.setCaptureEnabled(false)
         runCurrent()
         assertFalse(settings.connectionAnalyticsEnabled)
         assertFalse(repo.state.value.captureEnabled)
         assertTrue(repo.state.value.persistOnDisk)
         assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
-        val cutoff = repo.state.value.connections.single()
-        assertEquals("interrupted", cutoff.state)
-        assertFalse(cutoff.liveBytesExact)
-        assertEquals(19L, cutoff.upload)
-        assertEquals(2, reads.get()) // Initial poll plus exactly one quiescent cutoff.
-        val published = publications
-        val saved = disk.readText()
-        assertTrue(disk.setLastModified(1_000))
-        raw.set(JSONObject(snapshot("process", row("old", upload = 999), row("disabled-flow")))
-            .put("nativeEvicted", 99).toString())
-        advanceTimeBy(30_000)
-        runCurrent()
+        assertEquals(setOf("old", "unpolled"), repo.state.value.connections.map { it.id }.toSet())
+        assertEquals("active", repo.state.value.connections.single { it.id == "old" }.state)
+        assertEquals(19L, repo.state.value.connections.single { it.id == "old" }.upload)
         assertEquals(2, reads.get())
-        assertEquals(published, publications)
-        assertEquals(listOf(cutoff), repo.state.value.connections)
-        assertEquals(ConnectionHistoryCounters(), repo.state.value.counters)
-        assertEquals(saved, disk.readText())
-        assertEquals(1_000L, disk.lastModified())
-        raw.set(snapshot("process", row("old", state = "interrupted", upload = 999), row("new", upload = 4)))
+        repo.updatePackages(mapOf("replacement.pkg" to 100))
+        raw.set(snapshot("process", row("old", uid = 100, upload = 101, download = 103),
+            row("unpolled", upload = 37), row("disabled-flow")))
+        advanceTimeBy(5_000)
+        runCurrent()
+        val tracked = repo.state.value.connections.single { it.id == "old" }
+        assertEquals(101L, tracked.upload)
+        assertEquals(103L, tracked.download)
+        assertEquals("active", tracked.state)
+        assertTrue(tracked.liveBytesExact)
+        assertEquals("Original", tracked.profileName)
+        assertEquals(listOf(ConnectionApp("old.pkg", "label:old.pkg")), tracked.apps)
+        assertEquals(setOf("old", "unpolled"), repo.state.value.connections.map { it.id }.toSet())
+        assertEquals(101L, JSONObject(disk.readText()).getJSONArray("connections").let { array ->
+            (0 until array.length()).map(array::getJSONObject).single { it.getString("id") == "old" }.getLong("upload")
+        })
+        raw.set(snapshot("process", row("old", state = "closed", upload = 107, download = 109),
+            row("unpolled", upload = 41), row("disabled-flow")))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("closed", repo.state.value.connections.single { it.id == "old" }.state)
+        assertEquals(107L, repo.state.value.connections.single { it.id == "old" }.upload)
+        assertEquals(109L, repo.state.value.connections.single { it.id == "old" }.download)
+        repo.setPersistence(false)
+        runCurrent()
+        assertFalse(disk.exists())
+        raw.set(snapshot("process", row("old", state = "closed", upload = 107, download = 109),
+            row("unpolled", upload = 43), row("disabled-flow"), row("new", upload = 4)))
         repo.setCaptureEnabled(true)
         runCurrent()
-        assertTrue(settings.connectionAnalyticsEnabled)
         assertEquals(ConnectionCaptureStatus.Running, repo.state.value.status)
-        assertEquals(19L, repo.state.value.connections.single { it.id == "old" }.upload)
+        assertEquals(setOf("old", "unpolled", "new"), repo.state.value.connections.map { it.id }.toSet())
+        assertEquals(43L, repo.state.value.connections.single { it.id == "unpolled" }.upload)
         assertEquals(4L, repo.state.value.connections.single { it.id == "new" }.upload)
         assertEquals(listOf(true, false, true), native.toggles)
         assertEquals(2L, native.captureGeneration)
+    }
+
+    @Test
+    fun failedUnpolledCutoffKeepsReaderAliveUntilItsNativeAdmissionBoundaryArrives() = runTest {
+        val raw = AtomicReference<String?>(null)
+        val native = CaptureRuntime({ checkNotNull(raw.get()) })
+        val repo = repository(File(temporary.root, "unpolled-cutoff.json"))
+        repo.startRuntime(emptyMap(), native::read, {}, native::setCapture)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Error, repo.state.value.status)
+        repo.setCaptureEnabled(false)
+        runCurrent()
+        assertFalse(repo.state.value.captureEnabled)
+        assertTrue(repo.state.value.connections.isEmpty())
+        assertNotNull(repo.state.value.error)
+        raw.set(snapshot("process", row("admitted-before-off", upload = 17, download = 19)))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
+        assertNull(repo.state.value.error)
+        assertEquals("active", repo.state.value.connections.single().state)
+        assertEquals(17L, repo.state.value.connections.single().upload)
+        assertEquals(19L, repo.state.value.connections.single().download)
+        raw.set(snapshot("process", row("admitted-before-off", state = "closed", upload = 23, download = 29),
+            row("off-started")))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("admitted-before-off", repo.state.value.connections.single().id)
+        assertEquals("closed", repo.state.value.connections.single().state)
+        assertEquals(23L, repo.state.value.connections.single().upload)
+        assertEquals(29L, repo.state.value.connections.single().download)
+    }
+
+    @Test
+    fun malformedDisabledSnapshotReportsErrorWithoutFreezingAndNextValidFrameRecovers() = runTest {
+        val raw = AtomicReference(snapshot("process", row("old", upload = 5)))
+        val native = CaptureRuntime(raw::get)
+        val frame = AtomicReference<String?>(null)
+        val repo = repository(File(temporary.root, "off-malformed.json"))
+        repo.startRuntime(emptyMap(), { frame.get() ?: native.read() }, {}, native::setCapture)
+        runCurrent()
+        repo.setCaptureEnabled(false)
+        runCurrent()
+        frame.set(JSONObject(snapshot("process", row("old", upload = 999), row("invalid")))
+            .put("enabled", false).put("captureGeneration", -1).toString())
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Error, repo.state.value.status)
+        assertNotNull(repo.state.value.error)
+        assertFalse(repo.state.value.captureEnabled)
+        assertEquals("old", repo.state.value.connections.single().id)
+        assertEquals("active", repo.state.value.connections.single().state)
+        assertEquals(5L, repo.state.value.connections.single().upload)
+        frame.set(null)
+        raw.set(snapshot("process", row("old", state = "closed", upload = 101, download = 103)))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
+        assertNull(repo.state.value.error)
+        assertEquals("closed", repo.state.value.connections.single().state)
+        assertEquals(101L, repo.state.value.connections.single().upload)
+        assertEquals(103L, repo.state.value.connections.single().download)
+    }
+
+    @Test
+    fun clearAndRuntimeReloadWhileOffKeepLiveUdpBytesAndNeverAttachOffStartedSessions() = runTest {
+        val disk = File(temporary.root, "off-clear-reload.json")
+        fun udp(upload: Long, download: Long = 0) = row("udp", upload = upload, download = download)
+            .put("protocol", "udp").put("destinationKind", "association")
+        val raw = AtomicReference(snapshot("process", row("tcp", upload = 5), udp(7), row("finished", state = "closed")))
+        var generation = 0L
+        val native = CaptureRuntime(raw::get)
+        val repo = repository(disk)
+        val clear = {
+            generation++
+            val frame = JSONObject(raw.get())
+            val live = frame.getJSONArray("connections")
+            frame.put("connections", JSONArray((0 until live.length()).map(live::getJSONObject)
+                .filter { it.getString("state") == "active" }))
+            raw.set(frame.put("generation", generation).toString())
+        }
+        repo.startRuntime(emptyMap(), native::read, clear, native::setCapture)
+        runCurrent()
+        repo.setCaptureEnabled(false)
+        runCurrent()
+        repo.clearHistory()
+        runCurrent()
+        assertEquals(setOf("tcp", "udp"), repo.state.value.connections.map { it.id }.toSet())
+        assertTrue(repo.state.value.connections.all { it.state == "active" })
+        raw.set(snapshot("process", row("tcp", state = "closed", upload = 101, download = 103),
+            udp(107, 109), row("off-started"), generation = generation))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("closed", repo.state.value.connections.single { it.id == "tcp" }.state)
+        assertEquals(101L, repo.state.value.connections.single { it.id == "tcp" }.upload)
+        assertEquals(103L, repo.state.value.connections.single { it.id == "tcp" }.download)
+        assertEquals(107L, repo.state.value.connections.single { it.id == "udp" }.upload)
+        assertEquals(109L, repo.state.value.connections.single { it.id == "udp" }.download)
+        repo.clearHistory()
+        runCurrent()
+        assertEquals("udp", repo.state.value.connections.single().id)
+        raw.set(snapshot("process", udp(113, 127), row("off-started"), generation = generation))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(113L, repo.state.value.connections.single().upload)
+        assertEquals(127L, repo.state.value.connections.single().download)
+        assertEquals("active", repo.state.value.connections.single().state)
+        repo.setPersistence(true)
+        runCurrent()
+        assertEquals(113L, savedUpload(disk))
+        raw.set(snapshot("process", row("udp", state = "interrupted", upload = 131, download = 137)
+            .put("protocol", "udp").put("liveBytesExact", false), row("off-started"), generation = generation))
+        repo.endRuntime(native.read())
+        repo.startRuntime(emptyMap(), native::read, clear, native::setCapture)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
+        assertEquals(131L, repo.state.value.connections.single().upload)
+        raw.set(snapshot("process", row("udp", state = "interrupted", upload = 139, download = 149)
+            .put("protocol", "udp"), row("off-started"), generation = generation))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(139L, repo.state.value.connections.single().upload)
+        assertEquals(149L, repo.state.value.connections.single().download)
+        assertTrue(repo.state.value.connections.single().liveBytesExact)
+        raw.set(snapshot("process", row("udp", state = "interrupted", upload = 139, download = 149),
+            row("off-started"), row("new-after-on", upload = 151), generation = generation))
+        repo.setCaptureEnabled(true)
+        runCurrent()
+        assertEquals(setOf("udp", "new-after-on"), repo.state.value.connections.map { it.id }.toSet())
+        assertEquals(151L, repo.state.value.connections.single { it.id == "new-after-on" }.upload)
+    }
+
+    @Test
+    fun disabledRuntimeStopStillReadsBoundedTailAndPersistsExactFinalCredits() = runTest {
+        val disk = File(temporary.root, "off-tail.json")
+        val raw = AtomicReference(snapshot("process", row("old", upload = 5)))
+        val reads = AtomicInteger()
+        val repo = repository(disk)
+        val native = repo.startCapture(emptyMap(), { reads.incrementAndGet(); raw.get() }, {})
+        runCurrent()
+        repo.setPersistence(true)
+        repo.setCaptureEnabled(false)
+        runCurrent()
+        raw.set(snapshot("process", row("old", state = "interrupted", upload = 17, download = 19)
+            .put("liveBytesExact", false)))
+        repo.endRuntime(native.read())
+        runCurrent()
+        val beforeTail = reads.get()
+        raw.set(snapshot("process", row("old", state = "interrupted", upload = 23, download = 29)))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
+        assertFalse(repo.state.value.captureEnabled)
+        assertEquals(23L, repo.state.value.connections.single().upload)
+        assertEquals(29L, repo.state.value.connections.single().download)
+        assertTrue(repo.state.value.connections.single().liveBytesExact)
+        assertEquals(23L, savedUpload(disk))
+        assertEquals(beforeTail + 1, reads.get())
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(beforeTail + 1, reads.get())
     }
 
     @Test
@@ -859,7 +1029,7 @@ class ConnectionRepositoryTest {
         assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
         assertTrue(failingSettings.connectionAnalyticsEnabled)
         assertNotNull(repo.state.value.error)
-        assertEquals("interrupted", repo.state.value.connections.single().state)
+        assertEquals("active", repo.state.value.connections.single().state)
         repo.startNativeRuntime(native::setCapture) {
             assertFalse(native.enabled) // A stale persisted On cannot overwrite completed Off.
         }
@@ -893,7 +1063,7 @@ class ConnectionRepositoryTest {
     }
 
     @Test
-    fun delayedReadAtDisableCannotPublishItsPreCutoffSnapshotOrStartAnotherReadOff() = runBlocking {
+    fun delayedReadAtDisableCannotPublishItsPreCutoffSnapshotAndUpdatesContinueOff() = runBlocking {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val reads = AtomicInteger()
@@ -919,9 +1089,14 @@ class ConnectionRepositoryTest {
             release.countDown()
             val disabled = withTimeout(5_000) { repo.state.first { !it.captureEnabled } }
             assertEquals(23L, disabled.connections.single().upload)
-            assertEquals("interrupted", disabled.connections.single().state)
-            assertFalse(disabled.connections.single().liveBytesExact)
+            assertEquals("active", disabled.connections.single().state)
+            assertTrue(disabled.connections.single().liveBytesExact)
             assertEquals(3, reads.get())
+            raw.set(snapshot("process", row("old", state = "closed", upload = 101, download = 103)))
+            val closed = withTimeout(5_000) { repo.state.first { it.connections.single().state == "closed" } }
+            assertEquals(101L, closed.connections.single().upload)
+            assertEquals(103L, closed.connections.single().download)
+            assertFalse(closed.captureEnabled)
         } finally {
             release.countDown()
             repo.close()
@@ -935,14 +1110,14 @@ class ConnectionRepositoryTest {
         val repo = repository(File(temporary.root, "rapid-capture.json"))
         val native = repo.startCapture(emptyMap(), { reads.incrementAndGet(); raw.get() }, {})
         runCurrent()
-        repo.endRuntime(snapshot("process", row("old", state = "interrupted").put("liveBytesExact", false)))
+        repo.endRuntime(snapshot("process", row("old", state = "interrupted", upload = 5).put("liveBytesExact", false)))
         runCurrent()
         repo.setCaptureEnabled(false)
         runCurrent()
         val cutoffReads = reads.get()
         advanceTimeBy(10_000)
         runCurrent()
-        assertEquals(cutoffReads, reads.get())
+        assertTrue(reads.get() > cutoffReads)
         repo.setCaptureEnabled(true)
         repo.setCaptureEnabled(false)
         repo.setCaptureEnabled(true)
@@ -954,7 +1129,6 @@ class ConnectionRepositoryTest {
         assertFalse(settings.connectionAnalyticsEnabled)
         assertFalse(repo.state.value.captureEnabled)
         assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
-        assertEquals(cutoffReads, reads.get())
         repo.unsupportedRuntime()
         runCurrent()
         assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
@@ -968,7 +1142,7 @@ class ConnectionRepositoryTest {
         val disk = File(temporary.root, "off-expiry.json")
         val reads = AtomicInteger()
         val repo = repository(disk)
-        repo.startCapture(emptyMap(), { reads.incrementAndGet(); snapshot("process", row("old", upload = 5)) }, {})
+        repo.startCapture(emptyMap(), { reads.incrementAndGet(); snapshot("process", row("old", state = "closed", upload = 5)) }, {})
         runCurrent()
         repo.setPersistence(true)
         repo.setCaptureEnabled(false)
@@ -1014,7 +1188,7 @@ class ConnectionRepositoryTest {
     }
 
     @Test
-    fun failedCutoffReadStillFreezesLastKnownRowsAndFencesStaleFramesOnResume() = runTest {
+    fun failedCutoffReadKeepsRowsLiveRecoversOffAndFencesStaleFramesOnResume() = runTest {
         val raw = AtomicReference<String?>(snapshot("process", row("old", upload = 5)))
         val native = CaptureRuntime({ checkNotNull(raw.get()) })
         val staleFrame = AtomicReference<String?>(null)
@@ -1029,19 +1203,28 @@ class ConnectionRepositoryTest {
         assertEquals(ConnectionCaptureStatus.Error, repo.state.value.status)
         assertNotNull(repo.state.value.error)
         assertEquals(5L, repo.state.value.connections.single().upload)
-        assertEquals("interrupted", repo.state.value.connections.single().state)
+        assertEquals("active", repo.state.value.connections.single().state)
+        raw.set(snapshot("process", row("old", upload = 23, download = 29)))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
+        assertNull(repo.state.value.error)
+        assertEquals(23L, repo.state.value.connections.single { it.id == "old" }.upload)
+        assertEquals(29L, repo.state.value.connections.single { it.id == "old" }.download)
         staleFrame.set(snapshot("process", row("old", upload = 999), row("stale")))
         repo.setCaptureEnabled(true)
         runCurrent()
         assertEquals(listOf("old"), repo.state.value.connections.map { it.id })
-        assertEquals(5L, repo.state.value.connections.single().upload)
+        assertEquals(23L, repo.state.value.connections.single { it.id == "old" }.upload)
         staleFrame.set(null)
-        raw.set(snapshot("process", row("old", state = "interrupted", upload = 999), row("fresh")))
+        raw.set(snapshot("process", row("old", state = "closed", upload = 999, download = 1001), row("fresh")))
         advanceTimeBy(1_000)
         runCurrent()
         assertEquals(setOf("old", "fresh"), repo.state.value.connections.map { it.id }.toSet())
-        assertEquals(5L, repo.state.value.connections.single { it.id == "old" }.upload)
-        assertFalse(repo.state.value.connections.single { it.id == "old" }.liveBytesExact)
+        assertEquals(999L, repo.state.value.connections.single { it.id == "old" }.upload)
+        assertEquals(1001L, repo.state.value.connections.single { it.id == "old" }.download)
+        assertEquals("closed", repo.state.value.connections.single { it.id == "old" }.state)
+        assertTrue(repo.state.value.connections.single { it.id == "old" }.liveBytesExact)
     }
 
     @Test
@@ -1128,6 +1311,9 @@ class ConnectionRepositoryTest {
             private set
         var diagnostic = ""
         val toggles = mutableListOf<Boolean>()
+        private val admitted = mutableSetOf<String>()
+        private val offStarted = mutableSetOf<String>()
+        private var cutoffPending = false
 
         fun setCapture(enabled: Boolean): String {
             toggles += enabled
@@ -1135,6 +1321,7 @@ class ConnectionRepositoryTest {
             if (this.enabled != enabled) {
                 this.enabled = enabled
                 captureGeneration++
+                cutoffPending = !enabled
             }
             return ""
         }
@@ -1142,15 +1329,19 @@ class ConnectionRepositoryTest {
         fun read(): String = JSONObject(source()).apply {
             put("enabled", enabled)
             put("captureGeneration", captureGeneration)
-            if (!enabled) {
-                val rows = getJSONArray("connections")
-                for (index in 0 until rows.length()) {
-                    val row = rows.getJSONObject(index)
-                    if (row.getString("state") == "active") {
-                        row.put("state", "interrupted").put("endedAt", now).put("liveBytesExact", false)
-                    }
+            val incoming = getJSONArray("connections")
+            val retained = JSONArray()
+            for (index in 0 until incoming.length()) {
+                val row = incoming.getJSONObject(index)
+                val id = row.getString("id")
+                if (!enabled && !cutoffPending && id !in admitted) offStarted += id
+                if (id !in offStarted && (enabled || cutoffPending || id in admitted)) {
+                    admitted += id
+                    retained.put(row)
                 }
             }
+            cutoffPending = false
+            put("connections", retained)
         }.toString()
     }
 

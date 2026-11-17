@@ -38,6 +38,7 @@ data class MainUiState(
     val pingAddress: String = "",
     val profilesCount: Int = 0,
     val isRunning: Boolean = false,
+    val isBlocked: Boolean = false,
     val connectionFailure: ConnectionFailure? = null,
     val pingState: MainPingState = MainPingState.Idle,
     val activeBatchPingSourceId: Long? = null,

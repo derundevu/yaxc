@@ -41,7 +41,7 @@ func restoreObservedCapture(t *testing.T) {
 	})
 }
 
-func TestConnectionCaptureHotTCPPreservesForwardingAndOnlyResumesNewFlows(t *testing.T) {
+func TestConnectionCaptureHotTCPKeepsAdmittedFlowsLiveAndOnlyAdmitsNewFlowsOnResume(t *testing.T) {
 	dir := isolateFacadeCore(t)
 	restoreObservedCapture(t)
 	peer := newLiveRoutingEcho(t, 'C')
@@ -86,42 +86,61 @@ func TestConnectionCaptureHotTCPPreservesForwardingAndOnlyResumesNewFlows(t *tes
 		t.Fatalf("wrong synchronous cutoff fence: %+v", cutoff)
 	}
 	flow := cutoff.Connections[0]
-	if flow.State != "interrupted" || flow.EndedAt == 0 || flow.LiveBytesExact || flow.Upload != size {
-		t.Fatalf("cutoff failed to retain interrupted/incomplete totals: %+v", flow)
+	if flow.State != "active" || flow.EndedAt != 0 || flow.Upload != size || flow.ProfileID != 501 {
+		t.Fatalf("disable changed admitted flow lifecycle or identity: %+v", flow)
 	}
 	setObservedCapture(t, false)
-	if got := readObservedCapture(t); !reflect.DeepEqual(got, cutoff) {
-		t.Fatalf("idempotent disable changed snapshot: before=%+v after=%+v", cutoff, got)
+	if got := readObservedCapture(t); got.Enabled || got.CaptureGeneration != cutoff.CaptureGeneration || got.Generation != cutoff.Generation {
+		t.Fatalf("idempotent disable changed admission fences: %+v", got)
 	}
 	if diagnostic := xray.ApplyRouting(config(502)); diagnostic != "" {
 		t.Fatal(diagnostic)
 	}
 	openedOff := dial()
-	for _, conn := range []net.Conn{startedOff, held, openedOff} {
-		exchangeObservedPayload(t, conn, "still-forwarding-while-off")
-	}
-	if got := readObservedCapture(t); !reflect.DeepEqual(got, cutoff) {
-		t.Fatalf("off traffic or apply changed frozen history: before=%+v after=%+v", cutoff, got)
+	exchangeObservedPayload(t, startedOff, "still-forwarding-while-off")
+	size += exchangeObservedPayload(t, held, "still-accounted-while-off")
+	exchangeObservedPayload(t, openedOff, "new-off-flow-unobserved")
+	off := awaitObservedFlows(t, func(s observedFlows) bool {
+		return !s.Enabled && len(s.Connections) == 1 && s.Connections[0].Upload == size
+	})
+	if got := off.Connections[0]; got.ID != flow.ID || got.ProfileID != 501 || got.State != "active" || got.EndedAt != 0 ||
+		got.Download > size+1 || (got.LiveBytesExact && got.Download != size+1) {
+		t.Fatalf("off stopped accounting or relabeled retained route: %+v", got)
 	}
 	setObservedCapture(t, true)
-	for _, conn := range []net.Conn{startedOff, held, openedOff} {
-		exchangeObservedPayload(t, conn, "old-flows-never-reattach")
-	}
+	exchangeObservedPayload(t, startedOff, "startup-off-flow-never-attaches")
+	size += exchangeObservedPayload(t, held, "admitted-flow-keeps-accounting-on")
+	exchangeObservedPayload(t, openedOff, "off-flow-never-attaches")
 	fresh := dial()
 	freshSize := exchangeObservedPayload(t, fresh, "fresh-capture-after-resume")
 	after := awaitObservedFlows(t, func(s observedFlows) bool {
-		return len(s.Connections) == 2 && s.Connections[1].Upload == freshSize
+		return len(s.Connections) == 2 && s.Connections[0].Upload == size && s.Connections[1].Upload == freshSize
 	})
-	if !after.Enabled || after.CaptureGeneration != cutoff.CaptureGeneration+1 || after.Generation != cutoff.Generation || after.Epoch != cutoff.Epoch || !reflect.DeepEqual(after.Connections[0], flow) || after.Connections[1].ProfileID != 502 {
-		t.Fatalf("resume lost history or route identity: %+v", after)
+	if !after.Enabled || after.CaptureGeneration != cutoff.CaptureGeneration+1 || after.Generation != cutoff.Generation || after.Epoch != cutoff.Epoch ||
+		after.Connections[0].ID != flow.ID || after.Connections[0].ProfileID != 501 || after.Connections[0].State != "active" || after.Connections[1].ProfileID != 502 {
+		t.Fatalf("resume lost accounting or route identity: %+v", after)
 	}
+	setObservedCapture(t, false)
+	size += exchangeObservedPayload(t, held, "old-flow-second-off")
+	freshSize += exchangeObservedPayload(t, fresh, "new-flow-second-off")
 	held.Close()
+	fresh.Close()
 	openedOff.Close()
 	startedOff.Close()
-	setObservedCapture(t, false)
-	final := readObservedCapture(t)
-	if len(final.Connections) != 2 || !reflect.DeepEqual(final.Connections[0], flow) || final.Connections[1].State != "interrupted" || final.Connections[1].LiveBytesExact {
-		t.Fatalf("later finalization revived frozen flow: %+v", final)
+	final := awaitObservedFlows(t, func(s observedFlows) bool {
+		if s.Enabled || !s.Running || len(s.Connections) != 2 {
+			return false
+		}
+		for index, total := range []int64{size, freshSize} {
+			got := s.Connections[index]
+			if got.State == "active" || got.EndedAt == 0 || !got.LiveBytesExact || got.Upload != total || got.Download != total+1 {
+				return false
+			}
+		}
+		return true
+	})
+	if final.Connections[0].ID != flow.ID || final.Connections[0].ProfileID != 501 || final.Connections[1].ProfileID != 502 {
+		t.Fatalf("real terminal accounting changed admitted identities: %+v", final)
 	}
 	xray.ClearConnectionHistory()
 	cleared := readObservedCapture(t)
@@ -142,7 +161,7 @@ func TestConnectionCaptureHotTCPPreservesForwardingAndOnlyResumesNewFlows(t *tes
 	}
 }
 
-func TestConnectionCaptureHotUDPKeepsOldAssociationsUnobservedAfterResume(t *testing.T) {
+func TestConnectionCaptureHotUDPKeepsAdmittedAssociationsLiveAndOffAssociationsUnobserved(t *testing.T) {
 	dir := isolateFacadeCore(t)
 	restoreObservedCapture(t)
 	setObservedCapture(t, true)
@@ -190,31 +209,62 @@ func TestConnectionCaptureHotUDPKeepsOldAssociationsUnobservedAfterResume(t *tes
 		}
 		return int64(len(payload))
 	}
-	_, held := openObservedUDPAssociation(t, address)
+	heldControl, held := openObservedUDPAssociation(t, address)
 	size := exchange(held, "captured-udp")
 	before := awaitObservedFlows(t, func(s observedFlows) bool {
 		return len(s.Connections) == 1 && s.Connections[0].Upload == size && s.Connections[0].Download == size
 	})
 	setObservedCapture(t, false)
 	cutoff := readObservedCapture(t)
-	if cutoff.CaptureGeneration != before.CaptureGeneration+1 || len(cutoff.Connections) != 1 || cutoff.Connections[0].State != "interrupted" || cutoff.Connections[0].LiveBytesExact {
-		t.Fatalf("UDP cutoff not finalized: %+v", cutoff)
+	if cutoff.Enabled || !cutoff.Running || cutoff.CaptureGeneration != before.CaptureGeneration+1 || len(cutoff.Connections) != 1 ||
+		cutoff.Connections[0].State != "active" || cutoff.Connections[0].EndedAt != 0 {
+		t.Fatalf("UDP disable changed admitted association lifecycle: %+v", cutoff)
 	}
 	_, openedOff := openObservedUDPAssociation(t, address)
-	exchange(held, "held-off")
+	size += exchange(held, "held-off")
 	exchange(openedOff, "opened-off")
-	if got := readObservedCapture(t); !reflect.DeepEqual(got, cutoff) {
-		t.Fatalf("UDP off period changed analytics: %+v", got)
+	off := awaitObservedFlows(t, func(s observedFlows) bool {
+		return !s.Enabled && len(s.Connections) == 1 && s.Connections[0].Upload == size && s.Connections[0].Download == size
+	})
+	if got := off.Connections[0]; got.ID != before.Connections[0].ID || got.ProfileID != 601 || got.State != "active" || got.EndedAt != 0 || !got.LiveBytesExact {
+		t.Fatalf("UDP off froze accounting or changed association identity: %+v", got)
 	}
 	setObservedCapture(t, true)
-	exchange(held, "held-on-remains-inert")
-	exchange(openedOff, "opened-off-on-remains-inert")
-	_, fresh := openObservedUDPAssociation(t, address)
+	size += exchange(held, "held-on-keeps-accounting")
+	exchange(openedOff, "opened-off-on-remains-unobserved")
+	freshControl, fresh := openObservedUDPAssociation(t, address)
 	freshSize := exchange(fresh, "fresh-on")
 	after := awaitObservedFlows(t, func(s observedFlows) bool {
-		return len(s.Connections) == 2 && s.Connections[1].Upload == freshSize && s.Connections[1].Download == freshSize
+		return len(s.Connections) == 2 && s.Connections[0].Upload == size && s.Connections[0].Download == size &&
+			s.Connections[1].Upload == freshSize && s.Connections[1].Download == freshSize
 	})
-	if !reflect.DeepEqual(after.Connections[0], cutoff.Connections[0]) || after.Epoch != cutoff.Epoch || after.Generation != cutoff.Generation || after.CaptureGeneration != cutoff.CaptureGeneration+1 {
-		t.Fatalf("UDP resumed old accounting or lost fences: %+v", after)
+	if !after.Enabled || after.Connections[0].ID != before.Connections[0].ID || after.Connections[0].State != "active" ||
+		after.Epoch != cutoff.Epoch || after.Generation != cutoff.Generation || after.CaptureGeneration != cutoff.CaptureGeneration+1 {
+		t.Fatalf("UDP resume lost admitted accounting or fences: %+v", after)
+	}
+	setObservedCapture(t, false)
+	size += exchange(held, "held-second-off")
+	freshSize += exchange(fresh, "fresh-second-off")
+	heldControl.Close()
+	held.Close()
+	freshControl.Close()
+	fresh.Close()
+	closed := awaitObservedFlows(t, func(s observedFlows) bool {
+		if s.Enabled || !s.Running || len(s.Connections) != 2 {
+			return false
+		}
+		for index, total := range []int64{size, freshSize} {
+			got := s.Connections[index]
+			if got.State == "active" || got.EndedAt == 0 || !got.LiveBytesExact || got.Upload != total || got.Download != total {
+				return false
+			}
+		}
+		return true
+	})
+	setObservedCapture(t, true)
+	exchange(openedOff, "off-association-still-unobserved-after-real-closes")
+	final := readObservedCapture(t)
+	if len(final.Connections) != 2 || !reflect.DeepEqual(final.Connections, closed.Connections) {
+		t.Fatalf("off-started UDP association attached retroactively: %+v", final)
 	}
 }

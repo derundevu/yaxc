@@ -568,6 +568,16 @@
     <string name="settingsBypassLanLead">Keeps local IPv4 networks such as 192.168.x.x and 10.x.x.x outside the VPN.</string>
     <string name="settingsSocksUdpLead">Allows UDP through the local SOCKS inbound. Needed for QUIC, DNS and some apps.</string>
     <string name="settingsTun2socksLead">Forwards TUN traffic into the local SOCKS proxy. Usually should stay enabled.</string>
+    <string name="killSwitch">Kill switch</string>
+    <string name="killSwitchBlocked">Connection lost — VPN traffic blocked</string>
+    <string name="killSwitchRuntimeStopped">The VPN runtime stopped. VPN traffic remains blocked until you reconnect or disconnect.</string>
+    <string name="settingsSectionVpnProtection">VPN protection</string>
+    <string name="settingsKillSwitchLead">Off by default. After an Xray or tunnel failure, keeps the established TUN and blocks VPN-routed traffic during reconnect while the app process is alive. Excluded apps and LAN bypasses remain unchanged and unprotected. Disconnect releases the VPN. Saving a change restarts an active or blocked session; it does not start an inactive VPN.</string>
+    <string name="settingsKillSwitchRequiresVpn">Kill switch requires TUN VPN mode: tun2socks on and root/transparent proxy off. SOCKS-only mode is not protected. Disable Kill switch before changing modes.</string>
+    <string name="settingsSystemVpnProtection">Android VPN protection</string>
+    <string name="settingsConfigureInAndroid">Configure in Android</string>
+    <string name="settingsSystemVpnProtectionLead">For protection if Android stops the app process, open the yaxc VPN settings in Android and enable Always-on VPN and Block connections without VPN. These are separate system settings, not enabled by the Kill switch preference. Use TUN VPN mode. Android lockdown can block excluded apps and LAN bypass traffic: do not enable it if those exclusions must keep working. yaxc does not change your exclusions.</string>
+    <string name="settingsSystemVpnUnavailable">Android settings could not be opened. Open system settings and find VPN manually.</string>
     <string name="settingsSectionTransparentProxyLead">Advanced mode for hotspot and tethering traffic interception through TPROXY. Most users do not need this.</string>
     <string name="settingsTproxyAddressLead">Local bind address used by the transparent proxy listener.</string>
     <string name="settingsTproxyPortLead">Local listening port for intercepted transparent proxy traffic.</string>

@@ -20,6 +20,7 @@ import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
 import io.github.derundevu.yaxc.presentation.main.MainProfileItem
 import io.github.derundevu.yaxc.presentation.main.MainUiState
+import io.github.derundevu.yaxc.service.TProxyService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -54,6 +55,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private data class RuntimeState(
         val isRunning: Boolean,
+        val isBlocked: Boolean,
         val ping: MainPingSnapshot,
         val liveRouting: LiveRoutingPlan?,
     )
@@ -107,8 +109,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (settings.transparentProxy) null
         else runCatching { LiveRoutingHelper.decode(settings.liveRoutingPlan) }.getOrNull()
     }.flowOn(Dispatchers.Default)
-    private val runtime = combine(isRunning, pingState, liveRouting) { isRunning, ping, plan ->
-        RuntimeState(isRunning = isRunning, ping = ping, liveRouting = plan)
+    private val runtime = combine(isRunning, pingState, liveRouting, TProxyService.isBlocking) { running, ping, plan, blocked ->
+        RuntimeState(isRunning = running || blocked, isBlocked = blocked, ping = ping, liveRouting = plan)
     }
 
     val uiState = combine(
@@ -179,6 +181,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pingAddress = pingAddress,
             profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
+            isBlocked = runtime.isBlocked,
             connectionFailure = failure,
             pingState = selectedProfilePingState,
             activeBatchPingSourceId = runtime.ping.sourceId,
@@ -330,7 +333,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _effects.tryEmit(MainEffect.RefreshSelectedSource(action.linkId))
             }
             is MainAction.EditProfile -> {
-                if (uiState.value.isRunning && uiState.value.selectedProfileId == action.profile.id) {
+                if (uiState.value.isRunning && !uiState.value.isBlocked && uiState.value.selectedProfileId == action.profile.id) {
                     return
                 }
                 _effects.tryEmit(MainEffect.OpenProfileEditor(action.profile.id))
@@ -380,6 +383,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             MainAction.ToggleVpnClicked -> _effects.tryEmit(MainEffect.HandleToggleVpn)
+            MainAction.ReconnectVpnClicked -> _effects.tryEmit(MainEffect.RetryConnection)
             MainAction.PingClicked -> {
                 val profileId = selectedProfileId.value
                 if (profileId <= 0L) return
