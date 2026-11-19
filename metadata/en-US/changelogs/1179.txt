@@ -1,0 +1,30 @@
+## What's new in 1.6.0
+
+### VPN protection
+
+- Added an optional Kill switch for TUN VPN mode. It is off by default and keeps the established TUN during an Xray or tunnel failure, blocking VPN-routed traffic until retry, profile change or disconnect.
+- The connect screen, notification and Quick Settings tile show the blocked state. Saving the setting restarts an active or blocked session without starting an inactive VPN.
+- Added Android VPN protection guidance and a shortcut to system settings. Always-on VPN and Block connections without VPN remain separate Android policies; excluded apps and LAN bypasses stay outside the in-app Kill switch.
+
+### Connections and history
+
+- Turning Record new connections off now pauses only new admissions. Previously recorded TCP/UDP connections keep updating their byte counts and status until they close, without restarting the proxy or interrupting traffic.
+- Connections opened while recording is off are never added retroactively. The preference still survives app and proxy restarts and remains independent of Save history on this device.
+- Existing retention bounds and the 24-hour expiry are unchanged.
+
+### Subscription cards
+
+- The connection card shows subscription traffic usage and limits, plus provider announcements supplied through response headers.
+- Card content resizes smoothly; the profile-count footer is removed and expanded source-group corners are corrected while scrolling.
+
+### Settings and updates
+
+- Added a versions card with the installed app version, component versions and update checking.
+- Update downloads show real byte progress when the total is known and an indeterminate state otherwise; a completed download becomes an explicit install action.
+- Added an offline What's new dialog with localized release notes bundled for the installed version. The notes require no network access.
+
+### Interface
+
+- The main header now shows the two-tone X mark with the app name instead of a text-only label.
+
+The package ID and Room schema are unchanged. Kill switch requires TUN VPN mode; root/transparent proxy and SOCKS-only mode are not protected. The separately managed root-mode Xray executable is not upgraded by this release.
