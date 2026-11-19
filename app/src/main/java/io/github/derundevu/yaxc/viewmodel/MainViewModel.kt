@@ -179,7 +179,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             socksUsername = socksUsername,
             socksPassword = socksPassword,
             pingAddress = pingAddress,
-            profilesCount = filteredProfiles.size,
             isRunning = runtime.isRunning,
             isBlocked = runtime.isBlocked,
             connectionFailure = failure,

@@ -261,6 +261,7 @@ class HttpHelper private constructor() {
                 downloadBytes = userInfo?.downloadBytes,
                 totalBytes = userInfo?.totalBytes,
                 expireAtEpochSeconds = userInfo?.expireAtEpochSeconds,
+                announce = firstDecodedHeaderValue(normalizedHeaders, "announce"),
             ).takeUnless(SubscriptionMetadata::isEmpty)
         }
 

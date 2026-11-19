@@ -337,6 +337,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 "Subscription-Userinfo" to "upload=2147483648; download=4294967296; total=1099511627776; expire=1893456000",
                 "Support-Url" to "http://127.0.0.1/support",
                 "Profile-Web-Page-Url" to "http://127.0.0.1/account",
+                "Announce" to "base64:" + Base64.getEncoder().encodeToString("План обновлён 🌍".toByteArray()),
             ))
             assertEquals(1, helper().refreshLinks(link.id).refreshed)
             val request = exchange.awaitRequest()
@@ -357,9 +358,41 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             assertEquals(1_893_456_000L, metadata.expireAtEpochSeconds)
             assertEquals("http://127.0.0.1/support", metadata.supportUrl)
             assertEquals("http://127.0.0.1/account", metadata.profileWebPageUrl)
+            assertEquals("План обновлён 🌍", metadata.announce)
             val config = JSONObject(profiles.linkProfiles(link.id).single().config)
             assertEquals(9007199254740993L, config.getJSONObject("future").getLong("counter"))
             assertFalse(config.has("remarks"))
+        }
+    }
+
+    @Test
+    fun announceOnlyMetadataIsPersistedAndSuccessfulRefreshClearsMissingOrBlankAnnouncements() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val replacements = listOf(
+                emptyMap(),
+                mapOf("Announce" to " "),
+                mapOf("Announce" to "base64:IA==", "Support-Url" to "http://127.0.0.1/support"),
+            )
+            replacements.forEach { headers ->
+                val link = source(server.url)
+                server.enqueue(body("profile"), headers = mapOf(
+                    "Announce" to "base64:" + Base64.getEncoder().encodeToString("Тест 🌍".toByteArray()),
+                ))
+                assertEquals(1, helper().refreshLinks(link.id).refreshed)
+                assertEquals("Тест 🌍",
+                    SubscriptionMetadata.fromJsonString(links.find(link.id)!!.subscriptionMetadata)?.announce)
+
+                server.enqueue(body("profile"), headers = headers)
+                assertEquals(1, helper().refreshLinks(link.id).refreshed)
+                val saved = links.find(link.id)!!
+                val metadata = SubscriptionMetadata.fromJsonString(saved.subscriptionMetadata)
+                assertNull(metadata?.announce)
+                if (headers.containsKey("Support-Url")) {
+                    assertEquals("http://127.0.0.1/support", metadata?.supportUrl)
+                } else {
+                    assertNull(saved.subscriptionMetadata)
+                }
+            }
         }
     }
 

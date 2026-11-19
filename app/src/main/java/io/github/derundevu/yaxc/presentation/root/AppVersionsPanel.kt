@@ -1,0 +1,244 @@
+package io.github.derundevu.yaxc.presentation.root
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.NewReleases
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.helper.AppUpdateUiState
+import io.github.derundevu.yaxc.helper.InstalledChangelog
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+@Composable
+internal fun AppVersionsPanel(
+    appVersion: String,
+    xrayVersion: String,
+    tun2socksVersion: String,
+    updateState: AppUpdateUiState,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showChangelog by rememberSaveable { mutableStateOf(false) }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        YaxcGlassPanel(modifier = Modifier.testTag("settings:versions")) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = stringResource(R.string.appName),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(R.string.appInstalledVersion, appVersion),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = YaxcTheme.extendedColors.textMuted,
+                    )
+                }
+                AppUpdateCheckButton(state = updateState, onClick = onCheckUpdate)
+            }
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = { showChangelog = true },
+                modifier = Modifier.fillMaxWidth().testTag("settings:whats-new"),
+            ) {
+                Icon(Icons.Outlined.NewReleases, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                Text(stringResource(R.string.appWhatsNew, appVersion), textAlign = TextAlign.Center)
+            }
+            AppUpdatePanel(
+                state = updateState,
+                onDownload = onDownloadUpdate,
+                onInstall = onInstallUpdate,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = YaxcTheme.extendedColors.cardBorder)
+            Text(
+                text = stringResource(R.string.appComponents),
+                style = MaterialTheme.typography.labelLarge,
+                color = YaxcTheme.extendedColors.textMuted,
+            )
+            Spacer(Modifier.height(12.dp))
+            ComponentVersionRow(stringResource(R.string.xrayLabel), xrayVersion)
+            Spacer(Modifier.height(12.dp))
+            ComponentVersionRow(stringResource(R.string.tun2socksLabel), tun2socksVersion)
+        }
+        Text(
+            text = stringResource(R.string.madeWithPeople),
+            style = MaterialTheme.typography.bodySmall,
+            color = YaxcTheme.extendedColors.textMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    if (showChangelog) {
+        InstalledChangelogDialog(appVersion = appVersion, onDismiss = { showChangelog = false })
+    }
+}
+
+@Composable
+private fun ComponentVersionRow(label: String, version: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = YaxcTheme.extendedColors.textMuted,
+            modifier = Modifier.weight(1f),
+        )
+        Text(text = version, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+private sealed interface ChangelogState {
+    data object Loading : ChangelogState
+    data class Ready(val blocks: List<ChangelogBlock>) : ChangelogState
+    data object Failed : ChangelogState
+}
+
+@Composable
+private fun InstalledChangelogDialog(appVersion: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val locale = LocalConfiguration.current.locales.toLanguageTags()
+    val state by produceState<ChangelogState>(ChangelogState.Loading, context, locale) {
+        value = try {
+            val text = InstalledChangelog.load(context)
+            ChangelogState.Ready(withContext(Dispatchers.Default) { parseChangelog(text) })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            ChangelogState.Failed
+        }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            YaxcGlassPanel(
+                modifier = Modifier.widthIn(max = 560.dp).heightIn(max = maxHeight).testTag("changelog:dialog"),
+                contentPadding = PaddingValues(20.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.appWhatsNew, appVersion),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(16.dp))
+                when (val notes = state) {
+                    ChangelogState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                    ChangelogState.Failed -> Text(
+                        stringResource(R.string.appChangelogUnavailable),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    is ChangelogState.Ready -> LazyColumn(
+                        modifier = Modifier.weight(1f, fill = false).testTag("changelog:content"),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(notes.blocks) { block ->
+                            when (block.kind) {
+                                ChangelogBlockKind.Heading -> Text(
+                                    text = block.text,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                ChangelogBlockKind.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("•", color = MaterialTheme.colorScheme.primary)
+                                    Text(block.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                ChangelogBlockKind.Paragraph -> Text(
+                                    text = block.text,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).testTag("changelog:close")) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        }
+    }
+}
+
+internal enum class ChangelogBlockKind { Heading, Bullet, Paragraph }
+internal data class ChangelogBlock(val kind: ChangelogBlockKind, val text: String)
+
+/** Release notes use a leading #/## title, ### sections, bullets and wrapped paragraphs. */
+internal fun parseChangelog(markdown: String): List<ChangelogBlock> = buildList {
+    val text = StringBuilder()
+    var kind = ChangelogBlockKind.Paragraph
+    var firstContent = true
+    fun flush() {
+        if (text.isNotEmpty()) {
+            add(ChangelogBlock(kind, text.toString()))
+            text.setLength(0)
+        }
+        kind = ChangelogBlockKind.Paragraph
+    }
+    markdown.lineSequence().forEach { raw ->
+        val line = raw.trim()
+        when {
+            line.isEmpty() -> flush()
+            firstContent && (line.startsWith("# ") || line.startsWith("## ")) -> firstContent = false
+            line.startsWith("#") && line.substringBefore(' ').all { it == '#' } && ' ' in line -> {
+                firstContent = false
+                flush()
+                add(ChangelogBlock(ChangelogBlockKind.Heading, line.substringAfter(' ').trim()))
+            }
+            line.startsWith("- ") -> {
+                firstContent = false
+                flush()
+                kind = ChangelogBlockKind.Bullet
+                text.append(line.removePrefix("- "))
+            }
+            else -> {
+                firstContent = false
+                if (text.isNotEmpty()) text.append(' ')
+                text.append(line)
+            }
+        }
+    }
+    flush()
+}

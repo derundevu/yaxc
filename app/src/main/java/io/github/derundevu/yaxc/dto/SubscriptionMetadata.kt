@@ -11,6 +11,7 @@ data class SubscriptionMetadata(
     val downloadBytes: Long? = null,
     val totalBytes: Long? = null,
     val expireAtEpochSeconds: Long? = null,
+    val announce: String? = null,
 ) {
     val usedBytes: Long?
         get() {
@@ -30,7 +31,8 @@ data class SubscriptionMetadata(
             uploadBytes == null &&
             downloadBytes == null &&
             totalBytes == null &&
-            expireAtEpochSeconds == null
+            expireAtEpochSeconds == null &&
+            announce.isNullOrBlank()
     }
 
     fun toJsonString(): String? {
@@ -44,6 +46,7 @@ data class SubscriptionMetadata(
             downloadBytes?.let { put(KEY_DOWNLOAD_BYTES, it) }
             totalBytes?.let { put(KEY_TOTAL_BYTES, it) }
             expireAtEpochSeconds?.let { put(KEY_EXPIRE_AT_EPOCH_SECONDS, it) }
+            announce?.takeIf { it.isNotBlank() }?.let { put(KEY_ANNOUNCE, it) }
         }.toString()
     }
 
@@ -57,6 +60,7 @@ data class SubscriptionMetadata(
         private const val KEY_DOWNLOAD_BYTES = "downloadBytes"
         private const val KEY_TOTAL_BYTES = "totalBytes"
         private const val KEY_EXPIRE_AT_EPOCH_SECONDS = "expireAtEpochSeconds"
+        private const val KEY_ANNOUNCE = "announce"
 
         fun fromJsonString(raw: String?): SubscriptionMetadata? {
             if (raw.isNullOrBlank()) return null
@@ -79,6 +83,7 @@ data class SubscriptionMetadata(
                         .takeIf { json.has(KEY_TOTAL_BYTES) && it >= 0L },
                     expireAtEpochSeconds = json.optLong(KEY_EXPIRE_AT_EPOCH_SECONDS)
                         .takeIf { json.has(KEY_EXPIRE_AT_EPOCH_SECONDS) && it >= 0L },
+                    announce = json.optString(KEY_ANNOUNCE).ifBlank { null },
                 ).takeUnless(SubscriptionMetadata::isEmpty)
             }.getOrNull()
         }

@@ -60,7 +60,7 @@ class MainScreenRoomTest : RoomTestSupport() {
         settings.selectedLink = 101
         settings.selectedProfile = 102
         showMain()
-        await { it.selectedProfileId == 102L && it.profilesCount == 1 }
+        await { it.selectedProfileId == 102L && it.filteredProfiles.size == 1 }
         compose.onNodeWithTag("main:live-routing").assertDoesNotExist()
 
         val group = ProxyGroup(name = "Automatic group", profileIds = listOf(102))
@@ -110,7 +110,7 @@ class MainScreenRoomTest : RoomTestSupport() {
         }
         settings.selectedLink = 101
         showMain()
-        await { it.profilesCount == 1_500 }
+        await { it.filteredProfiles.size == 1_500 }
 
         // The distant row must not be present until its own lazy key is requested. A whole-group
         // item would expose all 1,500 rows and would not implement ScrollToKey for this profile.
@@ -130,7 +130,7 @@ class MainScreenRoomTest : RoomTestSupport() {
             }
         }
         await { state ->
-            state.profilesCount == 1_499 && state.selectedProfileName == "Renamed stable profile"
+            state.filteredProfiles.size == 1_499 && state.selectedProfileName == "Renamed stable profile"
         }
         compose.onNodeWithTag("main:profiles").performScrollToKey("profile:$lastId")
         compose.onNodeWithTag("profile:$lastId").assertIsSelected().assertIsDisplayed()
@@ -150,7 +150,7 @@ class MainScreenRoomTest : RoomTestSupport() {
         compose.onNodeWithTag("profile:$lastId").assertDoesNotExist()
         compose.onNodeWithTag("main:profiles").performScrollToKey("source:202:header")
         compose.onNodeWithTag("source:202").performClick()
-        await { it.selectedTabId == 202L && it.profilesCount == 1 }
+        await { it.selectedTabId == 202L && it.filteredProfiles.size == 1 }
         compose.onNodeWithTag("main:profiles").performScrollToKey("profile:20000")
         compose.onNodeWithTag("profile:20000").assertIsDisplayed().performClick()
         await { it.selectedProfileId == 20_000L && it.selectedSourceId == 202L }

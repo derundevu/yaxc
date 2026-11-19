@@ -7,9 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -26,12 +24,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 
 @Composable
 fun SettingsHomeScreen(
@@ -121,41 +117,15 @@ fun SettingsHomeScreen(
                     )
                 }
                 item {
-                    YaxcGlassPanel {
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            AppUpdateCheckButton(
-                                state = appUpdateState,
-                                onClick = onCheckAppUpdate,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 12.dp, y = (-12).dp),
-                            )
-                            androidx.compose.foundation.layout.Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 42.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                VersionRow(textResource(R.string.appFullName), appVersion)
-                                AppUpdatePanel(
-                                    state = appUpdateState,
-                                    onDownload = onDownloadAppUpdate,
-                                    onInstall = onInstallAppUpdate,
-                                )
-                                VersionRow(textResource(R.string.xrayLabel), xrayVersion, modifier = Modifier.padding(top = 12.dp))
-                                VersionRow(textResource(R.string.tun2socksLabel), tun2socksVersion, modifier = Modifier.padding(top = 10.dp))
-                                Text(
-                                    text = textResource(R.string.madeWithPeople),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = YaxcTheme.extendedColors.textMuted,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 16.dp),
-                                )
-                            }
-                        }
-                    }
+                    AppVersionsPanel(
+                        appVersion = appVersion,
+                        xrayVersion = xrayVersion,
+                        tun2socksVersion = tun2socksVersion,
+                        updateState = appUpdateState,
+                        onCheckUpdate = onCheckAppUpdate,
+                        onDownloadUpdate = onDownloadAppUpdate,
+                        onInstallUpdate = onInstallAppUpdate,
+                    )
                 }
             }
 
@@ -171,32 +141,6 @@ fun SettingsHomeScreen(
     }
 }
 
-@Composable
-private fun VersionRow(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-) {
-    androidx.compose.foundation.layout.Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = YaxcTheme.extendedColors.textMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
 
 @Composable
 private fun textResource(id: Int): String {

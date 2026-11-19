@@ -105,6 +105,53 @@ class SubscriptionResponseMetadataTest {
     }
 
     @Test
+    fun plainAnnouncementIsKeptWithoutOtherMetadata() {
+        val metadata = requireNotNull(
+            HttpHelper.extractSubscriptionMetadata(
+                mapOf("Announce" to listOf("  План обновлён 🌍  ")),
+            ),
+        )
+
+        assertEquals("План обновлён 🌍", metadata.announce)
+    }
+
+    @Test
+    fun prefixedAndUnprefixedBase64AnnouncementsDecodeUtf8() {
+        listOf("base64:0KLQtdGB0YI=", "0KLQtdGB0YI=").forEach { header ->
+            val metadata = requireNotNull(
+                HttpHelper.extractSubscriptionMetadata(
+                    mapOf("announce" to listOf(header)),
+                ),
+            )
+
+            assertEquals("Тест", metadata.announce)
+        }
+    }
+
+    @Test
+    fun missingAndBlankAnnouncementsDoNotCreateMetadata() {
+        assertNull(HttpHelper.extractSubscriptionMetadata(emptyMap()))
+        listOf(" \t ", "\"\"", "base64:IA==").forEach { header ->
+            assertNull(
+                HttpHelper.extractSubscriptionMetadata(
+                    mapOf("announce" to listOf(header)),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun malformedEncodedAnnouncementUsesTheExistingLiteralFallback() {
+        val metadata = requireNotNull(
+            HttpHelper.extractSubscriptionMetadata(
+                mapOf("announce" to listOf("base64:%%%")),
+            ),
+        )
+
+        assertEquals("base64:%%%", metadata.announce)
+    }
+
+    @Test
     fun trafficAndExpiryKeepTheirUnitsAnd64BitPrecision() {
         val metadata = requireNotNull(
             HttpHelper.extractSubscriptionMetadata(

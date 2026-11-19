@@ -42,6 +42,11 @@
     <string name="appUpdateCheckFailed">Failed to check for updates</string>
     <string name="appUpdateInstallUnavailable">Could not open the installer</string>
     <string name="appUpdateCheck">Check for updates</string>
+    <string name="appInstalledVersion">Version %1$s</string>
+    <string name="appWhatsNew">What\'s new in %1$s?</string>
+    <string name="appComponents">Components</string>
+    <string name="appUpdateDownloadSize">%1$s / %2$s</string>
+    <string name="appChangelogUnavailable">Could not read the release notes.</string>
     <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">derundevu/proxide (Xray fork)</string>
     <string name="tun2socksLabel">heiher/hev-socks5-tunnel</string>
@@ -494,7 +499,6 @@
     <string name="mainTabsTitle">Sources</string>
     <string name="mainProfilesTitle">Profiles</string>
     <string name="mainProfilesSubtitle">%1$d profiles available • active: %2$s</string>
-    <string name="mainProfilesCount">%1$d profiles</string>
     <string name="mainBatchPingPending">Batch ping for the whole source is not implemented yet.</string>
     <string name="mainConnectionInfo">Connection Info</string>
     <string name="connectionInfoScreenLead">Current connection endpoints, subscription metadata and local proxy access in one place.</string>
@@ -518,6 +522,7 @@
     <string name="mainSubscriptionToday">Today</string>
     <string name="mainSubscriptionUsedShort">used %1$s</string>
     <string name="mainSubscriptionUsageShort">%1$s / %2$s</string>
+    <string name="mainSubscriptionGigabytes">%1$s GB</string>
     <string name="mainSubscriptionDaysShort">%1$s d left</string>
     <string name="mainSubscriptionDaysFull">%1$d days</string>
     <string name="mainSubscriptionAutoUpdateShort">Provider: %1$d min</string>

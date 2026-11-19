@@ -378,6 +378,12 @@ Keep those credentials private: a direct SOCKS client with the password can choo
 
 ## Subscription updates
 
+The top connection card shows provider-reported subscription usage as **X GB / Y GB** with a slim quota bar,
+plus the provider's announcement (`announce`) when supplied. Usage covers the whole subscription, not just this device,
+and updates when the subscription refreshes. Unlimited plans show **X GB / ∞** without a percentage bar;
+unknown values are not treated as zero usage or an unlimited quota. Exhausted quotas use the theme's error color.
+The card smoothly resizes when switching between a subscription and Live Routing, keeping the groups below it in step.
+
 Automatic refresh is optional. Enable **Settings → Preferences → Auto-refresh subscriptions** and set the global interval.
 To override it for one subscription, edit that source and enter **Refresh interval (minutes)**. Leave the field blank
 to follow the current global setting. The minimum is 15 minutes; provider-supplied intervals are informational, not

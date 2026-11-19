@@ -13,6 +13,9 @@ import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -37,6 +40,8 @@ data class AppUpdateUiState(
     val pendingVersion: String? = null,
     val isDownloading: Boolean = false,
     val isReadyToInstall: Boolean = false,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long? = null,
     val errorMessage: String? = null,
 )
 
@@ -50,6 +55,8 @@ class AppUpdateManager(
         private const val RELEASES_LATEST_URL =
             "https://api.github.com/repos/derundevu/yaxc/releases/latest"
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+        // Both activities can own a manager for the same persisted download.
+        private val downloadMutex = Mutex()
     }
 
     private val downloadManager by lazy { context.getSystemService(DownloadManager::class.java) }
@@ -58,68 +65,81 @@ class AppUpdateManager(
         private set
 
     suspend fun refresh() {
-        syncPendingDownloadState()
-        uiState = uiState.copy(isChecking = true, errorMessage = null)
+        try {
+            syncPendingDownloadState()
+            uiState = uiState.copy(isChecking = true, errorMessage = null)
 
-        val release = try {
-            fetchLatestRelease()
+            val release = try {
+                fetchLatestRelease()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                uiState = uiState.copy(
+                    isChecking = false,
+                    isUpToDate = false,
+                    availableRelease = null,
+                    errorMessage = error.message ?: "Update check failed",
+                )
+                return
+            }
+
+            syncPendingDownloadState()
+            uiState = uiState.copy(
+                isChecking = false,
+                isUpToDate = release == null,
+                availableRelease = release,
+                errorMessage = if (release == null && uiState.errorMessage != null) null else uiState.errorMessage,
+            )
         } catch (cancelled: CancellationException) {
             uiState = uiState.copy(isChecking = false)
             throw cancelled
-        } catch (error: Exception) {
-            uiState = uiState.copy(
-                isChecking = false,
-                isUpToDate = false,
-                availableRelease = null,
-                errorMessage = error.message ?: "Update check failed",
-            )
-            return
         }
-
-        syncPendingDownloadState()
-
-        uiState = uiState.copy(
-            isChecking = false,
-            isUpToDate = release == null,
-            availableRelease = release,
-            errorMessage = if (release == null && uiState.errorMessage != null) null else uiState.errorMessage,
-        )
     }
 
-    fun startDownload(): Boolean {
-        val release = uiState.availableRelease ?: return false
-        syncPendingDownloadState()
+    suspend fun startDownload(): Boolean = downloadMutex.withLock {
+        val release = uiState.availableRelease ?: return@withLock false
+        syncPendingDownloadStateLocked()
         if (settings.appUpdatePendingVersion == release.versionName) {
-            if (uiState.isDownloading || uiState.isReadyToInstall) return true
+            if (uiState.isDownloading || uiState.isReadyToInstall) return@withLock true
         }
 
         clearPendingDownload(removeFromDownloadManager = true)
-        val request = DownloadManager.Request(Uri.parse(release.asset.downloadUrl))
-            .setTitle("yaxc ${release.versionName}")
-            .setDescription(release.asset.name)
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true)
-            .setMimeType(APK_MIME_TYPE)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalFilesDir(
-                context,
-                Environment.DIRECTORY_DOWNLOADS,
-                release.asset.name,
-            )
-
-        val downloadId = downloadManager.enqueue(request)
-        settings.appUpdateDownloadId = downloadId
-        settings.appUpdatePendingVersion = release.versionName
+        // Commit the ID even if the activity stops while enqueue is in flight.
+        withContext(Dispatchers.IO) {
+            val request = DownloadManager.Request(Uri.parse(release.asset.downloadUrl))
+                .setTitle("yaxc ${release.versionName}")
+                .setDescription(release.asset.name)
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
+                .setMimeType(APK_MIME_TYPE)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(
+                    context,
+                    Environment.DIRECTORY_DOWNLOADS,
+                    release.asset.name,
+                )
+            withContext(NonCancellable) {
+                val downloadId = downloadManager.enqueue(request)
+                settings.appUpdateDownloadId = downloadId
+                settings.appUpdatePendingVersion = release.versionName
+            }
+        }
         uiState = uiState.copy(
             pendingVersion = release.versionName,
             isDownloading = true,
             isReadyToInstall = false,
+            downloadedBytes = 0L,
+            totalBytes = null,
             errorMessage = null,
         )
-        return true
+        true
     }
 
-    fun syncPendingDownloadState() {
+    suspend fun syncPendingDownloadState() = downloadMutex.withLock {
+        syncPendingDownloadStateLocked()
+    }
+
+    private suspend fun syncPendingDownloadStateLocked() {
         val pendingVersion = settings.appUpdatePendingVersion.takeIf { it.isNotBlank() }
         val downloadId = settings.appUpdateDownloadId
         if (pendingVersion != null && !isVersionNewer(pendingVersion, BuildConfig.VERSION_NAME)) {
@@ -128,6 +148,8 @@ class AppUpdateManager(
                 pendingVersion = null,
                 isDownloading = false,
                 isReadyToInstall = false,
+                downloadedBytes = 0L,
+                totalBytes = null,
             )
             return
         }
@@ -138,17 +160,21 @@ class AppUpdateManager(
                 pendingVersion = null,
                 isDownloading = false,
                 isReadyToInstall = false,
+                downloadedBytes = 0L,
+                totalBytes = null,
             )
             return
         }
 
-        val downloadState = queryDownloadState(downloadId)
-        when (downloadState) {
+        val download = withContext(Dispatchers.IO) { queryDownloadState(downloadId) }
+        when (download.state) {
             DownloadState.Running -> {
                 uiState = uiState.copy(
                     pendingVersion = pendingVersion,
                     isDownloading = true,
                     isReadyToInstall = false,
+                    downloadedBytes = download.downloadedBytes,
+                    totalBytes = download.totalBytes,
                 )
             }
 
@@ -157,34 +183,40 @@ class AppUpdateManager(
                     pendingVersion = pendingVersion,
                     isDownloading = false,
                     isReadyToInstall = true,
+                    downloadedBytes = download.downloadedBytes,
+                    totalBytes = download.totalBytes,
                 )
             }
 
             DownloadState.Missing,
             DownloadState.Failed,
             -> {
-                clearPendingDownload(removeFromDownloadManager = downloadState == DownloadState.Failed)
+                clearPendingDownload(removeFromDownloadManager = download.state == DownloadState.Failed)
                 uiState = uiState.copy(
                     pendingVersion = null,
                     isDownloading = false,
                     isReadyToInstall = false,
+                    downloadedBytes = 0L,
+                    totalBytes = null,
                 )
             }
         }
     }
 
-    fun handleDownloadComplete(downloadId: Long) {
-        if (downloadId == 0L || downloadId != settings.appUpdateDownloadId) return
-        syncPendingDownloadState()
+    suspend fun handleDownloadComplete(downloadId: Long) = downloadMutex.withLock {
+        if (downloadId == 0L || downloadId != settings.appUpdateDownloadId) return@withLock
+        syncPendingDownloadStateLocked()
     }
 
-    fun installDownloadedUpdate(): Intent? {
-        syncPendingDownloadState()
-        if (!uiState.isReadyToInstall) return null
+    suspend fun installDownloadedUpdate(): Intent? = downloadMutex.withLock {
+        syncPendingDownloadStateLocked()
+        if (!uiState.isReadyToInstall) return@withLock null
         val downloadId = settings.appUpdateDownloadId
-        if (downloadId == 0L) return null
-        val uri = downloadManager.getUriForDownloadedFile(downloadId) ?: return null
-        return Intent(Intent.ACTION_VIEW).apply {
+        if (downloadId == 0L) return@withLock null
+        val uri = withContext(Dispatchers.IO) {
+            downloadManager.getUriForDownloadedFile(downloadId)
+        } ?: return@withLock null
+        Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, APK_MIME_TYPE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -251,14 +283,14 @@ class AppUpdateManager(
         return null
     }
 
-    private fun queryDownloadState(downloadId: Long): DownloadState {
+    private fun queryDownloadState(downloadId: Long): DownloadSnapshot {
         val cursor = downloadManager.query(
             DownloadManager.Query().setFilterById(downloadId)
-        ) ?: return DownloadState.Missing
+        ) ?: return DownloadSnapshot(DownloadState.Missing)
 
         cursor.use {
-            if (!it.moveToFirst()) return DownloadState.Missing
-            return when (it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+            if (!it.moveToFirst()) return DownloadSnapshot(DownloadState.Missing)
+            val state = when (it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
                 DownloadManager.STATUS_PENDING,
                 DownloadManager.STATUS_RUNNING,
                 DownloadManager.STATUS_PAUSED,
@@ -268,13 +300,24 @@ class AppUpdateManager(
                 DownloadManager.STATUS_FAILED -> DownloadState.Failed
                 else -> DownloadState.Missing
             }
+            return DownloadSnapshot(
+                state = state,
+                downloadedBytes = it.getLong(
+                    it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                ).coerceAtLeast(0L),
+                totalBytes = it.getLong(
+                    it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                ).takeIf { total -> total > 0L },
+            )
         }
     }
 
-    private fun clearPendingDownload(removeFromDownloadManager: Boolean = false) {
+    private suspend fun clearPendingDownload(removeFromDownloadManager: Boolean = false) {
         val downloadId = settings.appUpdateDownloadId
         if (removeFromDownloadManager && downloadId != 0L) {
-            runCatching { downloadManager.remove(downloadId) }
+            withContext(Dispatchers.IO) {
+                runCatching { downloadManager.remove(downloadId) }
+            }
         }
         settings.appUpdateDownloadId = 0L
         settings.appUpdatePendingVersion = ""
@@ -289,6 +332,12 @@ class AppUpdateManager(
             else -> null
         }
     }
+
+    private data class DownloadSnapshot(
+        val state: DownloadState,
+        val downloadedBytes: Long = 0L,
+        val totalBytes: Long? = null,
+    )
 
     private enum class DownloadState {
         Running,

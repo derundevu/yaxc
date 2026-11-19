@@ -36,7 +36,6 @@ data class MainUiState(
     val socksUsername: String = "",
     val socksPassword: String = "",
     val pingAddress: String = "",
-    val profilesCount: Int = 0,
     val isRunning: Boolean = false,
     val isBlocked: Boolean = false,
     val connectionFailure: ConnectionFailure? = null,

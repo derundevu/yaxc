@@ -3,11 +3,14 @@ package io.github.derundevu.yaxc.helper
 import android.app.Application
 import android.app.DownloadManager
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.testing.LoopbackHttpServer
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -18,6 +21,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,14 +29,17 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowBuild
 import org.robolectric.shadows.ShadowDownloadManager
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [34])
+@Config(application = Application::class, sdk = [34], shadows = [ProgressDownloadManagerShadow::class])
 class AppUpdateManagerTest : HelperSettingsTest() {
     private val app: Application get() = RuntimeEnvironment.getApplication()
     private val downloads: DownloadManager get() = app.getSystemService(DownloadManager::class.java)
@@ -44,6 +51,12 @@ class AppUpdateManagerTest : HelperSettingsTest() {
         // Real DownloadManager IDs are positive; Robolectric starts its synthetic counter at zero.
         val reserved = downloads.enqueue(DownloadManager.Request(Uri.parse("http://127.0.0.1/unused.apk")))
         downloads.remove(reserved)
+    }
+
+    @After
+    fun resetDownloadHooks() {
+        ProgressDownloadManagerShadow.onOperation = null
+        ProgressDownloadManagerShadow.beforeQueryReturn = null
     }
 
     @Test
@@ -166,13 +179,19 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             manager.startDownload()
             val id = settings.appUpdateDownloadId
             listOf(DownloadManager.STATUS_PENDING, DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PAUSED)
-                .forEach { status ->
-                    request(id).status = status
+                .forEachIndexed { index, status ->
+                    request(id).apply {
+                        this.status = status
+                        bytesSoFar = (index + 1) * 256L
+                        totalSize = 4096L
+                    }
                     val restored = AppUpdateManager(app, Settings(app), server.url)
                     restored.syncPendingDownloadState()
                     assertEquals("999.1.0", restored.uiState.pendingVersion)
                     assertTrue(restored.uiState.isDownloading)
                     assertFalse(restored.uiState.isReadyToInstall)
+                    assertEquals((index + 1) * 256L, restored.uiState.downloadedBytes)
+                    assertEquals(4096L, restored.uiState.totalBytes)
                     assertNull(restored.installDownloadedUpdate())
                     assertEquals(id, settings.appUpdateDownloadId)
                     assertEquals(1, shadowDownloads.requestCount)
@@ -187,6 +206,13 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             repeat(2) { attempt ->
                 manager.startDownload()
                 val id = settings.appUpdateDownloadId
+                request(id).apply {
+                    status = DownloadManager.STATUS_RUNNING
+                    bytesSoFar = 512L
+                    totalSize = 4096L
+                }
+                manager.syncPendingDownloadState()
+                assertEquals(512L, manager.uiState.downloadedBytes)
                 if (attempt == 0) downloads.remove(id) else request(id).status = DownloadManager.STATUS_FAILED
                 manager.syncPendingDownloadState()
                 assertEquals(0L, settings.appUpdateDownloadId)
@@ -194,6 +220,8 @@ class AppUpdateManagerTest : HelperSettingsTest() {
                 assertNull(manager.uiState.pendingVersion)
                 assertFalse(manager.uiState.isDownloading)
                 assertFalse(manager.uiState.isReadyToInstall)
+                assertEquals(0L, manager.uiState.downloadedBytes)
+                assertNull(manager.uiState.totalBytes)
                 assertNull(manager.installDownloadedUpdate())
                 assertNull(shadowDownloads.getRequest(id))
             }
@@ -207,6 +235,10 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             manager.startDownload()
             val id = settings.appUpdateDownloadId
             request(id).status = DownloadManager.STATUS_RUNNING
+            request(id).apply {
+                bytesSoFar = 4096L
+                totalSize = 4096L
+            }
             manager.syncPendingDownloadState()
             request(id).status = DownloadManager.STATUS_SUCCESSFUL
             manager.handleDownloadComplete(id + 100)
@@ -215,6 +247,8 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             manager.handleDownloadComplete(id)
             assertFalse(manager.uiState.isDownloading)
             assertTrue(manager.uiState.isReadyToInstall)
+            assertEquals(4096L, manager.uiState.downloadedBytes)
+            assertEquals(4096L, manager.uiState.totalBytes)
             val recreated = AppUpdateManager(app, Settings(app), server.url)
             recreated.syncPendingDownloadState()
             val install = requireNotNull(recreated.installDownloadedUpdate())
@@ -234,6 +268,10 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             val manager = availableManager(server)
             manager.startDownload()
             val oldId = settings.appUpdateDownloadId
+            request(oldId).apply {
+                bytesSoFar = 4096L
+                totalSize = 4096L
+            }
             request(oldId).status = DownloadManager.STATUS_SUCCESSFUL
             manager.handleDownloadComplete(oldId)
             val oldUri = manager.installDownloadedUpdate()!!.data
@@ -250,6 +288,8 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             assertNull(shadowDownloads.getRequest(oldId))
             assertTrue(request(newId).uri.toString().endsWith("yaxc-999.2.0-arm64-v8a.apk"))
             assertFalse(manager.uiState.isReadyToInstall)
+            assertEquals(0L, manager.uiState.downloadedBytes)
+            assertNull(manager.uiState.totalBytes)
             assertNull(manager.installDownloadedUpdate())
         }
     }
@@ -260,6 +300,12 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             val manager = availableManager(server)
             manager.startDownload()
             val id = settings.appUpdateDownloadId
+            request(id).apply {
+                status = DownloadManager.STATUS_RUNNING
+                bytesSoFar = 512L
+                totalSize = 4096L
+            }
+            manager.syncPendingDownloadState()
             request(id).status = DownloadManager.STATUS_SUCCESSFUL
             settings.appUpdatePendingVersion = BuildConfig.VERSION_NAME
             manager.syncPendingDownloadState()
@@ -267,10 +313,136 @@ class AppUpdateManagerTest : HelperSettingsTest() {
             assertEquals("", settings.appUpdatePendingVersion)
             assertNull(shadowDownloads.getRequest(id))
             assertNull(manager.installDownloadedUpdate())
+            assertEquals(0L, manager.uiState.downloadedBytes)
+            assertNull(manager.uiState.totalBytes)
             settings.appUpdatePendingVersion = "999.1"
             manager.syncPendingDownloadState()
             assertEquals("", settings.appUpdatePendingVersion)
             assertNull(manager.uiState.pendingVersion)
+        }
+    }
+
+    @Test
+    fun unknownOrNonpositiveTotalsDoNotRetainAnEarlierKnownSize() = runBlocking {
+        LoopbackHttpServer().use { server ->
+            val manager = availableManager(server)
+            manager.startDownload()
+            val request = request(settings.appUpdateDownloadId)
+            request.status = DownloadManager.STATUS_RUNNING
+            request.bytesSoFar = 512L
+            request.totalSize = 4096L
+            manager.syncPendingDownloadState()
+            assertEquals(4096L, manager.uiState.totalBytes)
+            listOf(-1L, 0L).forEach { total ->
+                request.totalSize = total
+                manager.syncPendingDownloadState()
+                assertEquals(512L, manager.uiState.downloadedBytes)
+                assertNull(manager.uiState.totalBytes)
+            }
+            request.bytesSoFar = -1L
+            manager.syncPendingDownloadState()
+            assertEquals(0L, manager.uiState.downloadedBytes)
+        }
+    }
+
+    @Test
+    fun concurrentStartsAcrossManagersEnqueueOnlyOnceAndUseBackgroundDownloadOperations() = runBlocking {
+        LoopbackHttpServer().use { server ->
+            val first = availableManager(server)
+            val second = availableManager(server)
+            val callerThread = Thread.currentThread()
+            ProgressDownloadManagerShadow.onOperation = {
+                assertNotEquals(callerThread, Thread.currentThread())
+            }
+            listOf(first, second).map { manager ->
+                async(start = CoroutineStart.UNDISPATCHED) { manager.startDownload() }
+            }.awaitAll().forEach { assertTrue(it) }
+            assertEquals(1, shadowDownloads.requestCount)
+            val id = settings.appUpdateDownloadId
+            request(id).status = DownloadManager.STATUS_SUCCESSFUL
+            assertNotNull(first.installDownloadedUpdate())
+            settings.appUpdatePendingVersion = BuildConfig.VERSION_NAME
+            first.syncPendingDownloadState()
+            assertEquals(0, shadowDownloads.requestCount)
+        }
+    }
+
+    @Test
+    fun inFlightPollCannotOverwriteAReplacementDownloadsProgress() = runBlocking {
+        LoopbackHttpServer().use { server ->
+            val manager = availableManager(server)
+            manager.startDownload()
+            val oldId = settings.appUpdateDownloadId
+            request(oldId).apply {
+                status = DownloadManager.STATUS_RUNNING
+                bytesSoFar = 1024L
+                totalSize = 4096L
+            }
+            server.enqueue(release(server, "999.2.0", "yaxc-999.2.0-arm64-v8a.apk"))
+            manager.refresh()
+            val entered = CountDownLatch(1)
+            val allowQuery = CountDownLatch(1)
+            val firstQuery = AtomicBoolean(true)
+            ProgressDownloadManagerShadow.beforeQueryReturn = {
+                if (firstQuery.compareAndSet(true, false)) {
+                    entered.countDown()
+                    check(allowQuery.await(5, TimeUnit.SECONDS))
+                }
+            }
+            val poll = launch(start = CoroutineStart.UNDISPATCHED) {
+                manager.syncPendingDownloadState()
+            }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                val replacement = async(start = CoroutineStart.UNDISPATCHED) { manager.startDownload() }
+                assertFalse(replacement.isCompleted)
+                assertEquals(oldId, settings.appUpdateDownloadId)
+                allowQuery.countDown()
+                assertTrue(replacement.await())
+                poll.join()
+                assertNotEquals(oldId, settings.appUpdateDownloadId)
+                assertEquals("999.2.0", manager.uiState.pendingVersion)
+                assertEquals(0L, manager.uiState.downloadedBytes)
+                assertNull(manager.uiState.totalBytes)
+                assertEquals(1, shadowDownloads.requestCount)
+            } finally {
+                allowQuery.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun cancellationDuringEnqueueRetainsItsIdForRestorationWithoutDuplicateDownload() = runBlocking {
+        LoopbackHttpServer().use { server ->
+            val manager = availableManager(server)
+            val entered = CountDownLatch(1)
+            val allowEnqueue = CountDownLatch(1)
+            val firstOperation = AtomicBoolean(true)
+            ProgressDownloadManagerShadow.onOperation = {
+                if (firstOperation.compareAndSet(true, false)) {
+                    entered.countDown()
+                    check(allowEnqueue.await(5, TimeUnit.SECONDS))
+                }
+            }
+            val start = launch(start = CoroutineStart.UNDISPATCHED) { manager.startDownload() }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                start.cancel()
+            } finally {
+                allowEnqueue.countDown()
+            }
+            start.join()
+            assertTrue(start.isCancelled)
+            val id = settings.appUpdateDownloadId
+            assertTrue(id != 0L)
+            request(id).status = DownloadManager.STATUS_PENDING
+            val restored = AppUpdateManager(app, Settings(app), server.url)
+            restored.syncPendingDownloadState()
+            assertTrue(restored.uiState.isDownloading)
+            assertEquals("999.1.0", restored.uiState.pendingVersion)
+            assertTrue(manager.startDownload())
+            assertEquals(id, settings.appUpdateDownloadId)
+            assertEquals(1, shadowDownloads.requestCount)
         }
     }
 
@@ -319,4 +491,35 @@ class AppUpdateManagerTest : HelperSettingsTest() {
                     put(JSONObject().put("name", name).put("browser_download_url", "${server.url}/$name"))
                 }
             }).toString().toByteArray()
+}
+
+@Implements(DownloadManager::class)
+class ProgressDownloadManagerShadow : ShadowDownloadManager() {
+    companion object {
+        @Volatile var onOperation: (() -> Unit)? = null
+        @Volatile var beforeQueryReturn: (() -> Unit)? = null
+    }
+
+    @Implementation
+    override fun query(query: DownloadManager.Query): Cursor? {
+        onOperation?.invoke()
+        val cursor = super.query(query)
+        beforeQueryReturn?.invoke()
+        return cursor
+    }
+
+    @Implementation
+    override fun enqueue(request: DownloadManager.Request): Long {
+        onOperation?.invoke()
+        val id = super.enqueue(request)
+        // Android exposes newly enqueued downloads as pending, not status 0.
+        Shadow.extract<ShadowDownloadManager.ShadowRequest>(getRequest(id)).status = DownloadManager.STATUS_PENDING
+        return id
+    }
+
+    @Implementation
+    override fun remove(vararg ids: Long): Int {
+        onOperation?.invoke()
+        return super.remove(*ids)
+    }
 }

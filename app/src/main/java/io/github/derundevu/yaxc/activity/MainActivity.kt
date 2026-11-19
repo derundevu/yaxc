@@ -53,6 +53,7 @@ import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
     private val settings by lazy { Settings(applicationContext) }
     private val appUpdateManager by lazy { AppUpdateManager(applicationContext, settings) }
+    private var appUpdateScope: CoroutineScope? = null
     private val transparentProxyHelper by lazy { TransparentProxyHelper(this, settings) }
     private val mainViewModel: MainViewModel by viewModels()
     private val connectionAnalyticsViewModel: ConnectionAnalyticsViewModel by viewModels()
@@ -131,7 +133,7 @@ class MainActivity : AppCompatActivity() {
     private val appUpdateDownloadReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val downloadId = intent?.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, 0L) ?: 0L
-            appUpdateManager.handleDownloadComplete(downloadId)
+            appUpdateScope?.launch { appUpdateManager.handleDownloadComplete(downloadId) }
         }
     }
 
@@ -170,7 +172,6 @@ class MainActivity : AppCompatActivity() {
                     pingState = uiState.pingState,
                     profiles = uiState.filteredProfiles,
                     selectedProfileId = uiState.selectedProfileId,
-                    profilesCount = uiState.profilesCount,
                     activeBatchPingSourceId = uiState.activeBatchPingSourceId,
                     batchPingCompleted = uiState.batchPingCompleted,
                     batchPingTotal = uiState.batchPingTotal,
@@ -200,14 +201,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
-            appUpdateManager.refresh()
-        }
-
-        lifecycleScope.launch {
+            var initialUpdateCheckComplete = false
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (isActive) {
-                    appUpdateManager.syncPendingDownloadState()
-                    delay(APP_UPDATE_POLL_INTERVAL_MS)
+                appUpdateScope = this
+                try {
+                    launch {
+                        if (!initialUpdateCheckComplete) {
+                            appUpdateManager.refresh()
+                            initialUpdateCheckComplete = true
+                        }
+                    }
+                    while (isActive) {
+                        appUpdateManager.syncPendingDownloadState()
+                        delay(APP_UPDATE_POLL_INTERVAL_MS)
+                    }
+                } finally {
+                    appUpdateScope = null
                 }
             }
         }
@@ -220,7 +229,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        appUpdateManager.syncPendingDownloadState()
         lifecycleScope.launch {
             if (settings.transparentProxy) transparentProxyHelper.install()
         }
@@ -261,17 +269,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun downloadAppUpdate() {
-        appUpdateManager.startDownload()
+        appUpdateScope?.launch { appUpdateManager.startDownload() }
     }
 
     private fun checkAppUpdate() {
-        lifecycleScope.launch {
+        appUpdateScope?.launch {
             appUpdateManager.refresh()
         }
     }
 
     private fun installAppUpdate() {
-        appUpdateManager.installDownloadedUpdate()?.let(::startInstallerIntent)
+        appUpdateScope?.launch {
+            appUpdateManager.installDownloadedUpdate()?.let(::startInstallerIntent)
+        }
     }
 
     private fun startInstallerIntent(intent: Intent) {

@@ -1,10 +1,57 @@
 import java.util.zip.ZipFile
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.google.ksp)
+}
+
+@CacheableTask
+abstract class GenerateInstalledChangelogAssets : DefaultTask() {
+    @get:Input
+    abstract val versionCode: Property<Int>
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val englishNotes: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val russianNotes: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val notes = listOf("en" to englishNotes.get().asFile, "ru" to russianNotes.get().asFile)
+            .map { (language, source) ->
+                language to source.readText(Charsets.UTF_8).also {
+                    if (it.isBlank()) throw GradleException("Installed changelog is empty: $source")
+                }
+            }
+        val output = outputDirectory.get().asFile
+        output.deleteRecursively()
+        val currentNotes = output.resolve("changelog/${versionCode.get()}")
+        currentNotes.mkdirs()
+        notes.forEach { (language, content) ->
+            currentNotes.resolve("$language.md").writeText(content, Charsets.UTF_8)
+        }
+    }
+}
+
+val appVersionCode = file("versionCode.txt").readText().trim().toInt()
+val generateInstalledChangelogAssets by tasks.registering(GenerateInstalledChangelogAssets::class) {
+    group = "build"
+    description = "Bundles the current build's English and Russian release notes."
+    versionCode.set(appVersionCode)
+    englishNotes.set(rootProject.layout.projectDirectory.file("metadata/en-US/changelogs/$appVersionCode.txt"))
+    russianNotes.set(rootProject.layout.projectDirectory.file("metadata/ru-RU/changelogs/$appVersionCode.txt"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/assets/installedChangelog"))
 }
 
 val abiTarget: String by project
@@ -64,7 +111,7 @@ android {
         applicationId = "io.github.derundevu.yaxc"
         minSdk = 26
         targetSdk = 36
-        versionCode = file("versionCode.txt").readText().trim().toInt()
+        versionCode = appVersionCode
         versionName = "1.5.6"
         testInstrumentationRunner = "io.github.derundevu.yaxc.testing.RegressionTestRunner"
     }
@@ -147,6 +194,12 @@ androidComponents {
     beforeVariants { variant ->
         variant.hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]?.enable =
             variant.buildType == "debug"
+    }
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            generateInstalledChangelogAssets,
+            GenerateInstalledChangelogAssets::outputDirectory,
+        )
     }
 }
 

@@ -24,6 +24,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKin
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.root.RootDestination
 import io.github.derundevu.yaxc.presentation.root.SettingsHomeScreen
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -33,11 +34,12 @@ class SettingsHomeActivity : AppCompatActivity() {
     private val feedback = YaxcFeedbackState()
     private val settings by lazy { Settings(applicationContext) }
     private val appUpdateManager by lazy { AppUpdateManager(applicationContext, settings) }
+    private var appUpdateScope: CoroutineScope? = null
 
     private val appUpdateDownloadReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val downloadId = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, 0L) ?: 0L
-            appUpdateManager.handleDownloadComplete(downloadId)
+            appUpdateScope?.launch { appUpdateManager.handleDownloadComplete(downloadId) }
         }
     }
 
@@ -70,21 +72,25 @@ class SettingsHomeActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
-            appUpdateManager.refresh()
-        }
-        lifecycleScope.launch {
+            var initialUpdateCheckComplete = false
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (isActive) {
-                    appUpdateManager.syncPendingDownloadState()
-                    delay(APP_UPDATE_POLL_INTERVAL_MS)
+                appUpdateScope = this
+                try {
+                    launch {
+                        if (!initialUpdateCheckComplete) {
+                            appUpdateManager.refresh()
+                            initialUpdateCheckComplete = true
+                        }
+                    }
+                    while (isActive) {
+                        appUpdateManager.syncPendingDownloadState()
+                        delay(APP_UPDATE_POLL_INTERVAL_MS)
+                    }
+                } finally {
+                    appUpdateScope = null
                 }
             }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        appUpdateManager.syncPendingDownloadState()
     }
 
     override fun onStart() {
@@ -113,17 +119,19 @@ class SettingsHomeActivity : AppCompatActivity() {
     }
 
     private fun downloadAppUpdate() {
-        appUpdateManager.startDownload()
+        appUpdateScope?.launch { appUpdateManager.startDownload() }
     }
 
     private fun checkAppUpdate() {
-        lifecycleScope.launch {
+        appUpdateScope?.launch {
             appUpdateManager.refresh()
         }
     }
 
     private fun installAppUpdate() {
-        appUpdateManager.installDownloadedUpdate()?.let(::startInstallerIntent)
+        appUpdateScope?.launch {
+            appUpdateManager.installDownloadedUpdate()?.let(::startInstallerIntent)
+        }
     }
 
     private fun startInstallerIntent(intent: Intent) {

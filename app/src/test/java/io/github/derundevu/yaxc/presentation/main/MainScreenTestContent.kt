@@ -36,7 +36,6 @@ internal fun MainScreenTestContent(
         pingState = state.pingState,
         profiles = state.filteredProfiles,
         selectedProfileId = state.selectedProfileId,
-        profilesCount = state.profilesCount,
         activeBatchPingSourceId = state.activeBatchPingSourceId,
         batchPingCompleted = state.batchPingCompleted,
         batchPingTotal = state.batchPingTotal,

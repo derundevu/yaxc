@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -18,6 +19,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -85,6 +87,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -113,9 +116,11 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -123,6 +128,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
@@ -137,6 +143,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.DialogProperties
@@ -165,7 +172,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbac
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
-import io.github.derundevu.yaxc.presentation.root.AppUpdateCheckButton
+import io.github.derundevu.yaxc.presentation.root.AppVersionsPanel
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsScreen
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsState
 import io.github.derundevu.yaxc.presentation.connectionanalytics.ConnectionAnalyticsQuery
@@ -173,7 +180,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import io.github.derundevu.yaxc.presentation.root.AppUpdatePanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -182,6 +188,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -218,7 +225,6 @@ fun MainScreen(
     pingState: MainPingState,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
-    profilesCount: Int,
     activeBatchPingSourceId: Long?,
     batchPingCompleted: Int,
     batchPingTotal: Int,
@@ -339,7 +345,6 @@ fun MainScreen(
                                     pingState = pingState,
                                     profiles = profiles,
                                     selectedProfileId = selectedProfileId,
-                                    profilesCount = profilesCount,
                                     activeBatchPingSourceId = activeBatchPingSourceId,
                                     batchPingCompleted = batchPingCompleted,
                                     batchPingTotal = batchPingTotal,
@@ -600,8 +605,8 @@ private fun draggedTargetIndex(
 private fun sourceHeaderKey(sourceId: Long): String = "source:$sourceId:header"
 
 /**
- * Only the surface occupies a viewport-sized layer; its outline reaches the source's
- * offscreen edges. The actual profile content remains separate keyed lazy items.
+ * The surface occupies only the source's visible bounds. Its virtual outline keeps
+ * offscreen corners outside the viewport; profile content stays in keyed lazy items.
  */
 @Composable
 private fun ExpandedSourceBackground(
@@ -632,18 +637,27 @@ private fun ExpandedSourceBackground(
     val sourceTop = anchor.offset + layout.beforeContentPadding - anchorWithinSource
     val sourceBottom = sourceTop + measuredHeaderHeight + bodyCount * measuredStride + bottomPaddingPx
     val viewportHeight = layout.viewportSize.height.toFloat()
-    val shape = SourceViewportShape(
-        shape = YaxcTheme.shapes.extraLarge,
-        top = if (measuredHeaderHeight == 0 && anchor.index > headerIndex) {
-            -viewportHeight
-        } else {
-            sourceTop.toFloat().coerceAtLeast(-viewportHeight)
-        },
-        bottom = sourceBottom.coerceAtMost(viewportHeight * 2f),
-    )
+    val visibleTop = sourceTop.coerceIn(0, layout.viewportSize.height)
+    val visibleHeight = sourceBottom.coerceAtMost(viewportHeight) - visibleTop
+    if (visibleHeight <= 0f) return
+    val shape = if (sourceTop >= 0 && sourceBottom <= viewportHeight) {
+        YaxcTheme.shapes.extraLarge
+    } else {
+        SourceViewportShape(
+            shape = YaxcTheme.shapes.extraLarge,
+            top = if (measuredHeaderHeight == 0 && anchor.index > headerIndex) {
+                -viewportHeight
+            } else {
+                (sourceTop - visibleTop).toFloat().coerceAtLeast(-viewportHeight)
+            },
+            bottom = (sourceBottom - visibleTop).coerceAtMost(viewportHeight * 2f),
+        )
+    }
     YaxcGlassPanel(
         modifier = Modifier
-            .fillMaxSize()
+            .offset { IntOffset(0, visibleTop) }
+            .fillMaxWidth()
+            .height(with(LocalDensity.current) { visibleHeight.toDp() })
             .padding(horizontal = horizontalPadding),
         shape = shape,
         contentPadding = PaddingValues(0.dp),
@@ -705,7 +719,6 @@ private fun ConnectContent(
     pingState: MainPingState,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
-    profilesCount: Int,
     activeBatchPingSourceId: Long?,
     batchPingCompleted: Int,
     batchPingTotal: Int,
@@ -733,6 +746,7 @@ private fun ConnectContent(
     var headerContentHeightPx by remember(density) { mutableIntStateOf(0) }
     var profileStridePx by remember(density) { mutableIntStateOf(0) }
     var emptyBodyHeightPx by remember(density) { mutableIntStateOf(0) }
+    var connectionCardResizing by remember { mutableStateOf(false) }
     val collapsedSourceHeightPx = headerContentHeightPx +
         with(density) { (panelTopPadding + panelBottomPadding).roundToPx() }
     val tabIds = remember(tabs) { tabs.map { it.id } }
@@ -858,6 +872,7 @@ private fun ConnectContent(
                     },
                     onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
                     onReconnect = { onAction(MainAction.ReconnectVpnClicked) },
+                    onResizingChanged = { connectionCardResizing = it },
                 )
                 Spacer(Modifier.height(spacing.md))
             }
@@ -881,7 +896,8 @@ private fun ConnectContent(
                     val placementModifier = if (isDragging) Modifier else Modifier.animateItem(
                         fadeInSpec = null,
                         fadeOutSpec = null,
-                        placementSpec = spring(dampingRatio = 0.86f, stiffness = 520f),
+                        // The card already moves the list through intermediate layouts.
+                        placementSpec = if (connectionCardResizing) null else spring(dampingRatio = 0.86f, stiffness = 520f),
                     )
                     val dragModifier = Modifier.pointerInput(source.id) {
                         detectDragGesturesAfterLongPress(
@@ -1022,13 +1038,6 @@ private fun ConnectContent(
                     EmptySourcesCard()
                     Spacer(Modifier.height(spacing.md))
                 }
-            }
-            item(key = "profile_count") {
-                Text(
-                    text = textResource(R.string.mainProfilesCount, profilesCount),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = YaxcTheme.extendedColors.textMuted,
-                )
             }
         }
     }
@@ -1198,52 +1207,15 @@ private fun SettingsContent(
             )
         }
         item {
-            YaxcGlassPanel {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    AppUpdateCheckButton(
-                        state = appUpdateState,
-                        onClick = onCheckAppUpdate,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 12.dp, y = (-12).dp),
-                    )
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 42.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        VersionRow(
-                            textResource(R.string.appFullName),
-                            appVersion,
-                        )
-                        AppUpdatePanel(
-                            state = appUpdateState,
-                            onDownload = onDownloadAppUpdate,
-                            onInstall = onInstallAppUpdate,
-                        )
-                        VersionRow(
-                            textResource(R.string.xrayLabel),
-                            xrayVersion,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                        VersionRow(
-                            textResource(R.string.tun2socksLabel),
-                            tun2socksVersion,
-                            modifier = Modifier.padding(top = 10.dp),
-                        )
-                        Text(
-                            text = textResource(R.string.madeWithPeople),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = YaxcTheme.extendedColors.textMuted,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 16.dp),
-                        )
-                    }
-                }
-            }
+            AppVersionsPanel(
+                appVersion = appVersion,
+                xrayVersion = xrayVersion,
+                tun2socksVersion = tun2socksVersion,
+                updateState = appUpdateState,
+                onCheckUpdate = onCheckAppUpdate,
+                onDownloadUpdate = onDownloadAppUpdate,
+                onInstallUpdate = onInstallAppUpdate,
+            )
         }
     }
 }
@@ -1262,10 +1234,15 @@ private fun ConnectionTopCard(
     onOpenConnectionAnalytics: () -> Unit,
     onOpenConnectionInfo: () -> Unit,
     onReconnect: () -> Unit,
+    onResizingChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    var contentHeightPx by remember { mutableIntStateOf(0) }
+    DisposableEffect(Unit) {
+        onDispose { onResizingChanged(false) }
+    }
     val analyticsDescription = stringResource(R.string.connectionAnalyticsOpen)
     val subscriptionSummary = subscriptionCardSummary(
         metadata = selectedSourceMetadata,
@@ -1298,82 +1275,152 @@ private fun ConnectionTopCard(
         borderColor = MaterialTheme.colorScheme.primary.copy(alpha = if (isRunning) 0.24f else 0.16f),
         shadowElevation = shadowElevation,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
+        Column(
+            modifier = Modifier.fillMaxWidth().animateContentSize(
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 520f),
+                finishedListener = { _, _ -> onResizingChanged(false) },
+            ).onSizeChanged {
+                if (contentHeightPx != 0 && contentHeightPx != it.height) onResizingChanged(true)
+                contentHeightPx = it.height
+            },
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                Text(
-                    text = selectedSourceName,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Text(
-                        text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = YaxcTheme.extendedColors.textMuted,
+                        text = selectedSourceName,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
                     )
-                }
 
-                if (isBlocked) {
-                    Text(
-                        text = textResource(R.string.killSwitchBlocked),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.testTag("main:kill-switch-blocked"),
-                    )
-                    TextButton(onClick = onReconnect) {
-                        Text(textResource(R.string.connectionRetry))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = selectedProfileName.ifBlank { textResource(R.string.mainNoSelectedProfile) },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = YaxcTheme.extendedColors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    if (isBlocked) {
+                        Text(
+                            text = textResource(R.string.killSwitchBlocked),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.testTag("main:kill-switch-blocked"),
+                        )
+                        TextButton(onClick = onReconnect) {
+                            Text(textResource(R.string.connectionRetry))
+                        }
+                    }
+
+                    if (!subscriptionSummary.isNullOrBlank()) {
+                        Text(
+                            text = subscriptionSummary,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = YaxcTheme.extendedColors.textMuted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .height(20.dp)
+                            .widthIn(min = 44.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        PingStateBadge(pingState = pingState)
                     }
                 }
 
-                if (!subscriptionSummary.isNullOrBlank()) {
+                ActionBubble(
+                    icon = Icons.Outlined.Speed,
+                    onClick = onPingCurrent,
+                    contentDescription = textResource(R.string.mainQuickActionPing),
+                    modifier = Modifier.testTag("main:connection-ping"),
+                )
+                ActionBubble(
+                    icon = Icons.Outlined.Info,
+                    onClick = onOpenConnectionInfo,
+                    contentDescription = textResource(R.string.mainConnectionInfo),
+                )
+            }
+            selectedSourceMetadata?.let { metadata ->
+                SubscriptionTraffic(metadata)
+                metadata.announce?.takeIf { it.isNotBlank() }?.let { announce ->
                     Text(
-                        text = subscriptionSummary,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        text = announce,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .testTag("main:subscription-announce"),
                     )
                 }
-
-                Box(
-                    modifier = Modifier
-                        .height(20.dp)
-                        .widthIn(min = 44.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    PingStateBadge(pingState = pingState)
-                }
             }
+        }
+    }
+}
 
-            ActionBubble(
-                icon = Icons.Outlined.Speed,
-                onClick = onPingCurrent,
-                contentDescription = textResource(R.string.mainQuickActionPing),
-                modifier = Modifier.testTag("main:connection-ping"),
-            )
-            ActionBubble(
-                icon = Icons.Outlined.Info,
-                onClick = onOpenConnectionInfo,
-                contentDescription = textResource(R.string.mainConnectionInfo),
+@Composable
+private fun SubscriptionTraffic(metadata: SubscriptionMetadata) {
+    val usedBytes = metadata.usedBytes
+    val totalBytes = metadata.totalBytes
+    if (usedBytes == null && totalBytes == null) return
+
+    val usedLabel = usedBytes?.let { formatTrafficGigabytes(it) } ?: textResource(R.string.noValue)
+    val limitLabel = when (totalBytes) {
+        null -> textResource(R.string.noValue)
+        0L -> textResource(R.string.mainSubscriptionUnlimitedSymbol)
+        else -> formatTrafficGigabytes(totalBytes)
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.mainSubscriptionUsageShort, usedLabel, limitLabel),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.testTag("main:subscription-traffic"),
+        )
+        if (usedBytes != null && totalBytes != null && totalBytes > 0L) {
+            LinearProgressIndicator(
+                progress = { (usedBytes.toDouble() / totalBytes).coerceIn(0.0, 1.0).toFloat() },
+                modifier = Modifier.fillMaxWidth().height(6.dp).testTag("main:subscription-traffic-progress"),
+                color = if (usedBytes >= totalBytes) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                strokeCap = StrokeCap.Round,
+                gapSize = 0.dp,
+                drawStopIndicator = {},
             )
         }
     }
+}
+
+@Composable
+private fun formatTrafficGigabytes(bytes: Long): String {
+    val locale = Locale.getDefault()
+    val value = remember(bytes, locale) {
+        NumberFormat.getNumberInstance(locale).apply {
+            maximumFractionDigits = 2
+        }.format(bytes / 1_073_741_824.0)
+    }
+    return stringResource(R.string.mainSubscriptionGigabytes, value)
 }
 
 @Composable
@@ -1384,7 +1431,6 @@ private fun subscriptionCardSummary(
     if (metadata == null && lastRefreshedAt == null) return null
     val parts = buildList {
         metadata?.let { value ->
-            formatTrafficSummaryShort(value)?.let(::add)
             formatDaysLeftShort(value.expireAtEpochSeconds)?.let(::add)
             value.updateIntervalMinutes?.let { interval ->
                 add(formatAutoUpdateShort(interval))
@@ -1395,23 +1441,6 @@ private fun subscriptionCardSummary(
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" • ")
 }
 
-@Composable
-private fun formatTrafficSummaryShort(metadata: SubscriptionMetadata): String? {
-    val usedBytes = metadata.usedBytes
-    val totalBytes = metadata.totalBytes
-    if (usedBytes == null && totalBytes == null) return null
-
-    val usedLabel = formatBytesCompact(usedBytes ?: 0L)
-    val limitLabel = totalBytes
-        ?.takeIf { it > 0L }
-        ?.let(::formatBytesCompact)
-        ?: textResource(R.string.mainSubscriptionUnlimitedSymbol)
-    return stringResource(
-        R.string.mainSubscriptionUsageShort,
-        usedLabel,
-        limitLabel,
-    )
-}
 
 @Composable
 private fun formatDaysLeftShort(expireAtEpochSeconds: Long?): String? {
@@ -1448,22 +1477,6 @@ private fun formatLastRefreshShort(lastRefreshedAt: Long?): String {
     return stringResource(R.string.mainSubscriptionLastRefreshShort, label)
 }
 
-private fun formatBytesCompact(bytes: Long): String {
-    val units = arrayOf("B", "KB", "MB", "GB", "TB", "PB")
-    val locale = Locale.getDefault()
-    var value = bytes.toDouble().coerceAtLeast(0.0)
-    var unitIndex = 0
-    while (value >= 1024.0 && unitIndex < units.lastIndex) {
-        value /= 1024.0
-        unitIndex += 1
-    }
-    val formatted = when {
-        value >= 100 || unitIndex == 0 -> value.toLong().toString()
-        value >= 10 -> String.format(locale, "%.1f", value)
-        else -> String.format(locale, "%.2f", value)
-    }
-    return "$formatted ${units[unitIndex]}"
-}
 
 @Composable
 private fun FloatingConnectButton(
@@ -1641,16 +1654,7 @@ private fun MainTopChrome(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        MainFloatingSurface(
-            shape = YaxcTheme.shapes.pill,
-            contentPadding = YaxcTheme.paddings.regular,
-        ) {
-            Text(
-                text = textResource(R.string.appName),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+        MainBrandPill()
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -1709,6 +1713,41 @@ private fun MainTopChrome(
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MainBrandPill(modifier: Modifier = Modifier) {
+    MainFloatingSurface(
+        modifier = modifier,
+        shape = YaxcTheme.shapes.pill,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.height(32.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(modifier = Modifier.size(18.dp)) {
+                Image(
+                    painter = painterResource(R.drawable.ic_brand_x_stroke),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                )
+                Image(
+                    painter = painterResource(R.drawable.ic_brand_x_accent),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.tertiary),
+                )
+            }
+            Text(
+                text = textResource(R.string.appName),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
     }
 }
@@ -2381,34 +2420,6 @@ private fun ActionBubble(
     }
 }
 
-@Composable
-private fun VersionRow(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = YaxcTheme.extendedColors.textMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
 
 private fun copyProfileJson(
     context: Context,

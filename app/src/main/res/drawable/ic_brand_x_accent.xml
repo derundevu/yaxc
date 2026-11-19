@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Split from ic_launcher_foreground.xml so each X diagonal can be tinted independently. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48.36dp"
+    android:height="44.64dp"
+    android:viewportWidth="48.36"
+    android:viewportHeight="44.64">
+    <path android:fillColor="#FFFFFF" android:pathData="M34.41,0 L48.36,0 L13.95,44.64 L0,44.64 Z" />
+</vector>
