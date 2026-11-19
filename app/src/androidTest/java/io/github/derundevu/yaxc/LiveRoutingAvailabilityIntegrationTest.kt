@@ -135,10 +135,11 @@ class LiveRoutingAvailabilityIntegrationTest {
         db = YaxcDatabase.ref(context)
         previousConfig = db.configDao().get()
         configCaptured = true
+        // "direct" is a shared Live Routing role, so the literal control target needs its own tag.
         val fixtureConfig = Config(
             outboundsMode = Config.Mode.Replace,
             outbounds = "[${outbound("fallback-sentinel", fallback)},${outbound("proxy", ordinary)}," +
-                "${outbound("ordinary-sentinel", ordinary)},${outbound("direct", direct)}," +
+                "${outbound("ordinary-sentinel", ordinary)},${outbound("direct-sentinel", direct)}," +
                 """{"tag":"block","protocol":"blackhole"}]""",
             routingMode = Config.Mode.Replace,
             routing = """{"domainStrategy":"AsIs","rules":[
@@ -146,7 +147,7 @@ class LiveRoutingAvailabilityIntegrationTest {
                 {"domain":["full:core-health.invalid"],"outboundTag":"proxy"},
                 {"domain":["full:ordinary-control.invalid"],"outboundTag":"ordinary-sentinel"},
                 {"domain":["full:fallback-control.invalid"],"outboundTag":"fallback-sentinel"},
-                {"domain":["full:direct-control.invalid"],"outboundTag":"direct"}
+                {"domain":["full:direct-control.invalid"],"outboundTag":"direct-sentinel"}
             ]}""",
         )
         configChanged = true

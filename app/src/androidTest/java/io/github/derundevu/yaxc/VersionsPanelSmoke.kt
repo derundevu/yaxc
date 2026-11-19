@@ -50,6 +50,7 @@ class VersionsPanelSmoke {
         check(context.packageName == "io.github.derundevu.yaxc.regression")
         check(!TProxyService.isActive())
         val settings = Settings(context)
+        val version = BuildConfig.VERSION_NAME
         val oldTheme = settings.themeStyle
         val oldLanguage = settings.languageTag
         val oldRefresh = settings.refreshLinksOnOpen
@@ -71,6 +72,9 @@ class VersionsPanelSmoke {
                     compose.waitUntil(15_000) { !manager.uiState.isChecking }
                     endpoint(manager, server.url)
                     withContext(Dispatchers.Main) { manager.refresh() }
+                    compose.waitUntil(15_000) {
+                        compose.onAllNodes(androidx.compose.ui.test.hasText("Настройки")).fetchSemanticsNodes().isNotEmpty()
+                    }
                     compose.onNodeWithText("Настройки").performClick()
                     compose.onNodeWithTag("settings:versions").performScrollTo().assertIsDisplayed()
                     capture(activity, "versions-panel-ru")
@@ -84,7 +88,7 @@ class VersionsPanelSmoke {
                         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"))
                     }
                     compose.waitUntil(15_000) {
-                        compose.onAllNodes(androidx.compose.ui.test.hasText("What's new in 1.5.6?")).fetchSemanticsNodes().isNotEmpty()
+                        compose.onAllNodes(androidx.compose.ui.test.hasText("What's new in $version?")).fetchSemanticsNodes().isNotEmpty()
                     }
                     compose.onNodeWithTag("settings:whats-new").performScrollTo().performClick()
                     compose.waitUntil(10_000) {
@@ -96,12 +100,12 @@ class VersionsPanelSmoke {
                         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("ru"))
                     }
                     compose.waitUntil(15_000) {
-                        compose.onAllNodes(androidx.compose.ui.test.hasText("Что нового в 1.5.6?")).fetchSemanticsNodes().isNotEmpty()
+                        compose.onAllNodes(androidx.compose.ui.test.hasText("Что нового в $version?")).fetchSemanticsNodes().isNotEmpty()
                     }
                     manager = updater(activity)
                     compose.waitUntil(15_000) { !manager.uiState.isChecking }
                     endpoint(manager, server.url)
-                    server.prepare("1.5.7", chunked = false)
+                    server.prepare("1.6.1", chunked = false)
                     withContext(Dispatchers.Main) { manager.refresh() }
                     compose.onNodeWithTag("updates:download").performScrollTo().performClick()
                     compose.waitUntil(25_000) { manager.uiState.downloadedBytes > 0L && manager.uiState.totalBytes == apk.length() }
@@ -130,7 +134,7 @@ class VersionsPanelSmoke {
                     capture(activity, "versions-update-ready")
                     assertEquals("content", withContext(Dispatchers.Main) { manager.installDownloadedUpdate() }?.data?.scheme)
                     endpoint(manager, server.url)
-                    server.prepare("1.5.8", chunked = true)
+                    server.prepare("1.6.2", chunked = true)
                     withContext(Dispatchers.Main) {
                         manager.refresh()
                         check(manager.startDownload())
@@ -147,8 +151,12 @@ class VersionsPanelSmoke {
             }
         } finally {
             withContext(Dispatchers.IO) { ids.forEach { downloads.remove(it) } }
-            settings.appUpdateDownloadId = 0L
-            settings.appUpdatePendingVersion = ""
+            // The instrumentation process is killed immediately after; apply() can lose this reset.
+            val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            check(preferences.edit()
+                .putLong("appUpdateDownloadId", 0L)
+                .putString("appUpdatePendingVersion", "")
+                .commit())
             settings.refreshLinksOnOpen = oldRefresh
             settings.languageTag = oldLanguage
             settings.themeStyle = oldTheme

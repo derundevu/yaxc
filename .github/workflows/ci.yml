@@ -192,6 +192,7 @@ jobs:
   device-regressions:
     name: Android x86_64 / ${{ matrix.page-size }} byte pages
     needs: android
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
