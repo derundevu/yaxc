@@ -89,6 +89,46 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Robolectric downloads this fixture at test runtime, outside Gradle's dependency cache.
+      # Keep the artifact pinned to the Robolectric version and @Config(sdk = [34]).
+      - name: Cache Robolectric Android SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7
+          key: robolectric-android-all-14-robolectric-10818077-i7-v1
+
+      - name: Prefetch Robolectric Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="14-robolectric-10818077-i7"
+          base="https://repo.maven.apache.org/maven2/org/robolectric/android-all-instrumented/${version}/android-all-instrumented-${version}"
+          dir="$HOME/.m2/repository/org/robolectric/android-all-instrumented/${version}"
+          jar="$dir/android-all-instrumented-${version}.jar"
+          pom="$dir/android-all-instrumented-${version}.pom"
+          jar_sha="$jar.sha512"
+          pom_sha="$pom.sha512"
+          if [[ -s "$jar" && -s "$jar_sha" && -s "$pom" && -s "$pom_sha" ]] &&
+            [[ "$(sha512sum "$jar" | awk '{print $1}')" == "$(tr -d '[:space:]' < "$jar_sha")" ]] &&
+            [[ "$(sha512sum "$pom" | awk '{print $1}')" == "$(tr -d '[:space:]' < "$pom_sha")" ]]; then
+            exit 0
+          fi
+          temp="$(mktemp -d)"
+          trap 'rm -rf "$temp"' EXIT
+          for suffix in .pom .pom.sha512 .jar .jar.sha512; do
+            curl --fail --location --silent --show-error \
+              --retry 10 --retry-all-errors --retry-delay 3 \
+              --output "$temp/android-all-instrumented-${version}${suffix}" \
+              "${base}${suffix}"
+          done
+          for artifact in pom jar; do
+            expected="$(tr -d '[:space:]' < "$temp/android-all-instrumented-${version}.${artifact}.sha512")"
+            actual="$(sha512sum "$temp/android-all-instrumented-${version}.${artifact}" | awk '{print $1}')"
+            [[ "$actual" == "$expected" ]]
+          done
+          mkdir -p "$dir"
+          mv "$temp"/android-all-instrumented-"${version}"* "$dir"/
+
       - name: Prepare Xray router test geodata
         working-directory: XrayCore/Xray-core
         run: |

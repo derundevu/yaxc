@@ -131,6 +131,10 @@ android {
         unitTests.isIncludeAndroidResources = true
         // Robolectric requires these JDK internals when running on Java 17+.
         unitTests.all {
+            it.systemProperty(
+                "robolectric.dependency.repo.url",
+                "https://repo.maven.apache.org/maven2",
+            )
             it.jvmArgs(
                 "--add-opens=java.base/java.lang=ALL-UNNAMED",
                 "--add-opens=java.base/java.util=ALL-UNNAMED",
