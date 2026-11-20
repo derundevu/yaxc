@@ -157,11 +157,62 @@ class ConfigHelper(
             rules.put(runtimeDirectPrivateRule(outbounds))
         }
 
-        routing.put("rules", rules)
+        val ordered = JSONArray()
+        // proxy/naive resolves its proxy endpoint through Xray DNS, so routing its DNS through the same
+        // outbound recurses (query -> proxy -> endpoint lookup -> query). Answer app DNS with the resolver
+        // module, and let the resolver's own upstream sockets (DoH/fallback) leave directly.
+        for (rule in naiveDnsRules(outbounds)) ordered.put(rule)
+        for (index in 0 until rules.length()) ordered.put(rules.get(index))
+
+        routing.put("rules", ordered)
         if (routing.optString("domainStrategy").isBlank()) {
             routing.put("domainStrategy", "IPIfNonMatch")
         }
         return routing
+    }
+
+    private fun naiveDnsRules(outbounds: JSONArray): List<JSONObject> {
+        if (!hasNaiveOutbound(outbounds)) return emptyList()
+        val rules = mutableListOf<JSONObject>()
+        // App DNS from the tun reaches the resolver module, which answers over DoH first.
+        rules += JSONObject()
+            .put("inboundTag", JSONArray().put("socks"))
+            .put("port", 53)
+            .put("outboundTag", resolveRoutingOutboundTag("dns-out", outbounds))
+        // The module's own upstream sockets carry no inbound tag: send them out directly. Plain fallback
+        // resolvers are matched here as well, which is the documented last-resort path.
+        val addresses = JSONArray()
+        for (address in naiveResolverAddresses()) addresses.put(address)
+        if (addresses.length() > 0) {
+            rules += JSONObject()
+                .put("ip", addresses)
+                .put("outboundTag", resolveRoutingOutboundTag("direct", outbounds))
+        }
+        return rules
+    }
+
+    /** Resolver addresses the core dials itself: plain IP servers and the host of DoH/DoT URLs. */
+    private fun naiveResolverAddresses(): List<String> {
+        val servers = JsonHelper.getObject(base, "dns").optJSONArray("servers") ?: return emptyList()
+        val addresses = LinkedHashSet<String>()
+        for (index in 0 until servers.length()) {
+            val value = servers.optString(index).trim()
+            val host = runCatching { java.net.URI(value).host }.getOrNull()
+            if (host != null) {
+                if (isIpLiteral(host)) addresses.add(host)
+            } else if (isIpLiteral(value)) {
+                addresses.add(value)
+            }
+        }
+        return addresses.toList()
+    }
+
+    private fun hasNaiveOutbound(outbounds: JSONArray): Boolean {
+        for (index in 0 until outbounds.length()) {
+            val protocol = outbounds.optJSONObject(index)?.optString("protocol")?.trim()
+            if (protocol.equals("naive", ignoreCase = true)) return true
+        }
+        return false
     }
 
     private fun removeManagedAntifilterRules(source: JSONArray): JSONArray {
@@ -231,7 +282,7 @@ class ConfigHelper(
         // Empty profiles use the managed direct outbound as their default forwarding destination.
         ensure("direct", "freedom")
         ensure("block", "blackhole")
-        if (settings.transparentProxy) ensure("dns-out", "dns")
+        if (settings.transparentProxy || hasNaiveOutbound(outbounds)) ensure("dns-out", "dns")
         return outbounds
     }
 
@@ -376,12 +427,14 @@ class ConfigHelper(
 
     companion object {
         internal fun effectiveDns(settings: Settings, profile: JSONObject, global: String, mode: Config.Mode): JSONObject {
-            val dns = when (mode) {
-                Config.Mode.Replace -> return JsonHelper.makeObject(global)
-                Config.Mode.Merge -> JsonHelper.mergeObjects(profile, JsonHelper.makeObject(global))
-                Config.Mode.Disable -> profile
+            // Replace is an explicit user DNS list: neither managed servers nor the encrypted resolver are added.
+            if (mode == Config.Mode.Replace) return JsonHelper.makeObject(global)
+            val dns = if (mode == Config.Mode.Merge) {
+                JsonHelper.mergeObjects(profile, JsonHelper.makeObject(global))
+            } else {
+                profile
             }
-            val servers = dns.optJSONArray("servers") ?: JSONArray().also { dns.put("servers", it) }
+            val servers = dns.optJSONArray("servers") ?: JSONArray()
             val addresses = HashSet<String>()
             for (index in 0 until servers.length()) {
                 (servers.opt(index) as? String)?.let(addresses::add)
@@ -389,7 +442,34 @@ class ConfigHelper(
             for (address in managedDnsServers(settings)) {
                 if (addresses.add(address)) servers.put(address)
             }
+            // Xray queries servers in order: keep the encrypted resolver first and the configured plain
+            // servers as the last-resort fallback that still works when DoH is unreachable.
+            val ordered = JSONArray()
+            encryptedDnsResolver(settings.encryptedDns)?.let(ordered::put)
+            for (index in 0 until servers.length()) {
+                if (ordered.length() == 0 || servers.optString(index) != ordered.optString(0)) {
+                    ordered.put(servers.get(index))
+                }
+            }
+            dns.put("servers", ordered)
             return dns
+        }
+
+        /** Only IP literals: a named DoH host would need the same bootstrap DNS it replaces. */
+        internal fun encryptedDnsResolver(value: String): String? {
+            val trimmed = value.trim()
+            if (trimmed.isEmpty()) return null
+            val uri = runCatching { java.net.URI(trimmed) }.getOrNull() ?: return null
+            val scheme = uri.scheme?.lowercase() ?: return null
+            if (scheme != "https" && scheme != "tls") return null
+            val host = uri.host ?: return null
+            if (!isIpLiteral(host)) return null
+            return trimmed
+        }
+
+        internal fun isIpLiteral(value: String): Boolean {
+            if (value.isEmpty() || value.contains('/')) return false
+            return value.contains(':') || Regex("""\d{1,3}(\.\d{1,3}){3}""").matches(value)
         }
 
         private fun managedDnsServers(settings: Settings): List<String> = buildList {

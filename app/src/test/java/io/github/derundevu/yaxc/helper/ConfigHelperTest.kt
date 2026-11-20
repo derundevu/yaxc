@@ -157,6 +157,69 @@ class ConfigHelperTest : HelperSettingsTest() {
     }
 
     @Test
+    fun encryptedResolverLeadsTheNaiveDnsListAndItsHostResolvesDirectly() {
+        settings.encryptedDns = "https://1.1.1.1/dns-query"
+        val profile = JSONObject(
+            """
+            {
+              "outbounds": [{"protocol":"naive","tag":"naive-egress","settings":{"address":"proxy.example.org","port":443}}],
+              "routing": {"rules":[{"ip":["192.0.2.53"],"port":53,"outboundTag":"naive-egress"}]}
+            }
+            """.trimIndent(),
+        )
+
+        val generated = generate(profile = profile)
+
+        assertEquals(
+            listOf("https://1.1.1.1/dns-query", "192.0.2.53", "198.51.100.53"),
+            generated.getJSONObject("dns").getJSONArray("servers").stringValues(),
+        )
+        val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
+        assertEquals("dns-out", rules.first().getString("outboundTag"))
+        assertEquals(listOf("1.1.1.1", "192.0.2.53", "198.51.100.53"), rules[1].getJSONArray("ip").stringValues())
+        assertEquals("direct", rules[1].getString("outboundTag"))
+    }
+
+    @Test
+    fun naiveProxyResolvesDnsDirectlyAheadOfProxyRules() {
+        val profile = JSONObject(
+            """
+            {
+              "outbounds": [
+                {
+                  "protocol":"naive", "tag":"naive-egress",
+                  "settings":{"address":"proxy.example.org","port":443,"user":"u","pass":"p",
+                              "quic":false,"udpOverTcp":true,"headers":{}},
+                  "streamSettings":{"network":"raw","security":"tls","tlsSettings":{}}
+                }
+              ],
+              "routing": {"rules":[{"ip":["192.0.2.53","198.51.100.53"],"port":53,"outboundTag":"naive-egress"}]}
+            }
+            """.trimIndent(),
+        )
+
+        val generated = generate(profile = profile)
+        val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
+        val protocols = generated.getJSONArray("outbounds").objectValues()
+            .associate { it.getString("tag") to it.getString("protocol") }
+        assertEquals("dns", protocols.getValue("dns-out"))
+
+        val resolverDns = rules.first()
+        assertEquals("dns-out", resolverDns.getString("outboundTag"))
+        assertEquals(53, resolverDns.getInt("port"))
+        assertEquals(listOf("socks"), resolverDns.getJSONArray("inboundTag").stringValues())
+
+        val direct = rules[1]
+        assertEquals("direct", direct.getString("outboundTag"))
+        assertEquals(listOf("192.0.2.53", "198.51.100.53"), direct.getJSONArray("ip").stringValues())
+
+        assertEquals("naive-egress", rules[2].getString("outboundTag"))
+        val proxyDnsRules = rules.filter { it.optInt("port") == 53 }.drop(1)
+        assertTrue(proxyDnsRules.isNotEmpty())
+        assertTrue(proxyDnsRules.all { it.getString("outboundTag") == "naive-egress" })
+    }
+
+    @Test
     fun runtimeSocksListenerOverridesProfileAndGlobalListenersUsingTrimmedCredentials() {
         settings.socksAddress = "127.0.0.2"
         settings.socksPort = "22123"

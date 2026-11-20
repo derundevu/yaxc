@@ -41,6 +41,19 @@ each `libgojni.so`; no separately loaded `libcronet.so` is required on Android. 
 These archives carry `R_AARCH64_PLT32` (`0x13a`) and `R_AARCH64_GOTPCREL32` (`0x13b`) relocations, so the Android
 link needs LLD 19 or newer (NDK r28+); NDK r27 fails with `unknown relocation (315)`. The core script resolves and
 exports the NDK accordingly instead of letting gomobile pick an older installed one.
+Imported Naive profiles enable `udpOverTcp` (sing UoT v2) by default: without it the core rejects every UDP
+destination (`naive: UDP requires udpOverTcp and a server supporting sing UoT v2`), which breaks DNS so nothing
+resolves through a Naive profile. A server without UoT v2 only loses UDP, as before; a sing-box `udp_over_tcp`
+with `enabled: false` or a version other than 2 is preserved/rejected accordingly.
+`proxy/naive` resolves its proxy endpoint through Xray DNS, so routing the resolver through that same
+outbound recurses (query → proxy → endpoint lookup → query). Naive configs therefore prepend two rules: app DNS
+arriving on the `socks` inbound goes to a managed `dns` outbound (`dns-out`), and the resolver hosts the core dials
+itself go `direct`. The endpoint name is still resolved by Xray DNS, which answers through those resolvers.
+Settings → Advanced → DNS keeps an `encryptedDns` value, default `https://1.1.1.1/dns-query`: it is placed first in
+`dns.servers`, so app DNS is answered over DoH while the configured plain servers remain a last-resort fallback
+that leaves directly. The DoH/DoT host must be an IP literal — a named resolver would need the same bootstrap it
+replaces. Residual exposure: when DoH is unreachable or has no answer for the requested record type, the fallback
+query to the plain servers is unencrypted; `DNS Mode: Replace` is respected verbatim and bypasses all of this.
 Naive-enabled APKs are GPL-3.0-or-later combined works. First-party MIT and original MPL notices remain;
 license texts and source notices are bundled in `assets/licenses/` and accessible from Settings.
 `NaiveProxy.txt` and `Chromium.txt` reproduce `LICENSE` and `src/LICENSE` from

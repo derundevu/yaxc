@@ -830,7 +830,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
         assertEquals("naive", naive.getString("protocol"))
         assertEquals("bbr", naive.getJSONObject("settings").getString("quicCongestionControl"))
         assertEquals("test:pass+word", naive.getJSONObject("settings").getString("pass"))
-        assertFalse(naive.getJSONObject("settings").getBoolean("udpOverTcp"))
+        assertTrue(naive.getJSONObject("settings").getBoolean("udpOverTcp"))
         assertEquals("tls.example.org", naive.getJSONObject("streamSettings").getJSONObject("tlsSettings").getString("serverName"))
         val vless = JSONObject(parsed.profiles[1].config).getJSONArray("outbounds").getJSONObject(0)
         assertEquals("reality", vless.getJSONObject("streamSettings").getString("security"))
@@ -927,7 +927,22 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     }
 
     @Test
-    fun singBoxUdpOverTcpRequiresAndPreservesExplicitOptIn() = runBlocking {
+    fun lineSourceSurvivesRawEmojiFragmentsAndUnusableLines() = runBlocking {
+        val body = listOf(
+            "naive+https://test-user:test-pass@proxy.example.org#Naive-h2 ♾",
+            "naive+quic://test-user:test-pass@proxy.example.org:8443#Naive-h3 \uD83D\uDE80",
+            "anytls://00000000-0000-4000-8000-000000000003@proxy.example.org:9443#AnyTLS ♾",
+        ).joinToString("\n")
+
+        val parsed = helper().parseProfiles(Link(), body)
+
+        assertEquals(setOf("Naive-h2 ♾", "Naive-h3 \uD83D\uDE80"), parsed.profiles.map { it.name }.toSet())
+        assertEquals(setOf("anytls"), parsed.skippedProfiles.map { it.protocol }.toSet())
+        assertTrue(expectFailure { helper().parseProfiles(Link(), "vless://not-a-valid-uri") } is IllegalArgumentException)
+    }
+
+    @Test
+    fun singBoxUdpOverTcpDefaultsOnAndHonorsExplicitOptOut() = runBlocking {
         val outbound = JSONObject("""{"type":"naive","server":"proxy.example.org","server_port":443,
             "username":"test-user","password":"test-pass","quic":true,"tls":{"enabled":true},
             "udp_over_tcp":{"enabled":true,"version":2}}""")
@@ -935,6 +950,14 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
         val settings = JSONObject(parsed.profiles.single().config).getJSONArray("outbounds")
             .getJSONObject(0).getJSONObject("settings")
         assertTrue(settings.getBoolean("udpOverTcp"))
+        outbound.remove("udp_over_tcp")
+        val defaulted = helper().parseProfiles(Link(), JSONObject().put("outbounds", JSONArray().put(outbound)).toString())
+        assertTrue(JSONObject(defaulted.profiles.single().config).getJSONArray("outbounds")
+            .getJSONObject(0).getJSONObject("settings").getBoolean("udpOverTcp"))
+        outbound.put("udp_over_tcp", JSONObject().put("enabled", false))
+        val disabled = helper().parseProfiles(Link(), JSONObject().put("outbounds", JSONArray().put(outbound)).toString())
+        assertFalse(JSONObject(disabled.profiles.single().config).getJSONArray("outbounds")
+            .getJSONObject(0).getJSONObject("settings").getBoolean("udpOverTcp"))
         outbound.put("udp_over_tcp", JSONObject("""{"enabled":true,"version":1}"""))
         val unsupported = helper().parseProfiles(Link(), JSONObject().put("outbounds", JSONArray().put(outbound)).toString())
         assertTrue(unsupported.profiles.isEmpty())

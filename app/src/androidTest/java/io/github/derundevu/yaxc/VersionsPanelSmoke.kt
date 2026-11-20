@@ -105,7 +105,7 @@ class VersionsPanelSmoke {
                     manager = updater(activity)
                     compose.waitUntil(15_000) { !manager.uiState.isChecking }
                     endpoint(manager, server.url)
-                    server.prepare("1.6.1", chunked = false)
+                    server.prepare("1.6.2", chunked = false)
                     withContext(Dispatchers.Main) { manager.refresh() }
                     compose.onNodeWithTag("updates:download").performScrollTo().performClick()
                     compose.waitUntil(25_000) { manager.uiState.downloadedBytes > 0L && manager.uiState.totalBytes == apk.length() }
@@ -134,7 +134,7 @@ class VersionsPanelSmoke {
                     capture(activity, "versions-update-ready")
                     assertEquals("content", withContext(Dispatchers.Main) { manager.installDownloadedUpdate() }?.data?.scheme)
                     endpoint(manager, server.url)
-                    server.prepare("1.6.2", chunked = true)
+                    server.prepare("1.6.3", chunked = true)
                     withContext(Dispatchers.Main) {
                         manager.refresh()
                         check(manager.startDownload())

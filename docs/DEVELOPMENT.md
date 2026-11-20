@@ -96,7 +96,7 @@ per ABI. Gradle retains ABI splits and adds a universal output whenever `abiTarg
 The all-ABI debug build produces `app-universal-debug.apk` plus the four `app-<ABI>-debug.apk` files in
 `app/build/outputs/apk/debug/`. A single-ABI build produces only its split APK, such as
 `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`; explicitly select that ABI when building native artifacts for one device.
-Every APK uses the same `app/versionCode.txt` value, currently **1179**, without architecture offsets.
+Every APK uses the same `app/versionCode.txt` value, currently **1180**, without architecture offsets.
 `build_do_not_push.sh` is machine-specific and may install a stale APK after a build failure; do not use it as the build entry point.
 
 ### Install and verify
@@ -307,8 +307,8 @@ Required-check branch rules must be configured separately on GitHub; CI alone do
 in `app/build.gradle.kts`. Its five-row matrix builds four signed ABI APKs and a complete universal APK;
 the universal row builds all native ABIs but stages only `app-universal-release.apk`. A GitHub Release is published
 only after all five builds succeed. Notes come from `metadata/en-US/changelogs/<versionCode>.txt`, using the shared code directly.
-The prepared candidate is **1.6.0 / versionCode 1179**, with notes in
-[`metadata/en-US/changelogs/1179.txt`](../metadata/en-US/changelogs/1179.txt). Local unsigned APKs are packaging
+The prepared candidate is **1.6.1 / versionCode 1180**, with notes in
+[`metadata/en-US/changelogs/1180.txt`](../metadata/en-US/changelogs/1180.txt). Local unsigned APKs are packaging
 checks, not production-signed release assets; publication still requires the configured release signing secrets.
 The release workflow does not run or wait for the CI workflow. Tag only the exact parent revision whose clean-checkout
 CI has passed with all modified fork commits published and pinned; pushing a release tag starts publication directly.

@@ -34,7 +34,8 @@ class LinkHelper(
     private var remark: String = defaultRemark()
 
     init {
-        val link = link.trim().removePrefix("\uFEFF").trim()
+        // Panels commonly keep spaces and emoji in the fragment; java.net.URI rejects those raw characters.
+        val link = escapeFragment(link.trim().removePrefix("\uFEFF").trim())
         val shareScheme = link.substringBefore("://", "").lowercase()
         if (shareScheme in setOf("vless", "naive+https", "naive+quic")) {
             requireNotNull(runCatching { URI(link) }.getOrNull()) { "Malformed share URI" }
@@ -84,6 +85,31 @@ class LinkHelper(
             val name = uri.rawFragment?.let(ProxyImportHelper::decode) ?: ""
             return name.ifEmpty { default }
         }
+
+        /** Percent-encodes fragment characters that java.net.URI rejects, preserving existing escapes. */
+        internal fun escapeFragment(value: String): String {
+            val hash = value.indexOf('#')
+            if (hash < 0) return value
+            val fragment = value.substring(hash + 1)
+            val encoded = StringBuilder(fragment.length + 16)
+            var index = 0
+            while (index < fragment.length) {
+                val codePoint = fragment.codePointAt(index)
+                val width = Character.charCount(codePoint)
+                val char = codePoint.toChar()
+                when {
+                    codePoint == '%'.code -> encoded.append(char)
+                    codePoint < 0x80 && (char.isLetterOrDigit() || char in "-._~!$&'()*+,;=:@/?") ->
+                        encoded.append(char)
+                    else -> String(fragment.toCharArray(), index, width).toByteArray(StandardCharsets.UTF_8)
+                        .forEach { byte -> encoded.append('%').append(HEX[(byte.toInt() shr 4) and 0xF]).append(HEX[byte.toInt() and 0xF]) }
+                }
+                index += width
+            }
+            return value.substring(0, hash + 1) + encoded
+        }
+
+        private const val HEX = "0123456789ABCDEF"
 
         fun tryDecodeBase64(value: String): String {
             return runCatching {

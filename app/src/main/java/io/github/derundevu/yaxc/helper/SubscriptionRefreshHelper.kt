@@ -467,12 +467,13 @@ class SubscriptionRefreshHelper(
         value.lineSequence().map(::normalizeBody).filter(String::isNotEmpty).forEachIndexed { index, line ->
             currentCoroutineContext().ensureActive()
             check(line.contains("://") || line.startsWith("{")) { "Invalid profile at line ${index + 1}" }
-            val uri = runCatching { java.net.URI(line) }.getOrNull()
+            val resolved = LinkHelper.escapeFragment(line)
+            val uri = runCatching { java.net.URI(resolved) }.getOrNull()
             val protocol = uri?.scheme?.lowercase() ?: line.substringBefore("://").lowercase()
             check(protocol.matches(Regex("[a-z][a-z0-9+.-]*"))) { "Invalid share scheme at line ${index + 1}" }
             val label = uri?.let { LinkHelper.remark(it) }?.takeIf(String::isNotBlank) ?: "$protocol ${index + 1}"
             try {
-                val helper = LinkHelper(settings, line)
+                val helper = LinkHelper(settings, resolved)
                 check(helper.isValid()) { "Invalid profile at line ${index + 1}" }
                 profiles.add(Profile(linkId = link.id, name = helper.remark(), config = helper.json()))
             } catch (_: UnsupportedProfileException) {

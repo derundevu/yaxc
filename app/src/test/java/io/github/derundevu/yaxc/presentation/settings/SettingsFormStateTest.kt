@@ -80,7 +80,11 @@ class SettingsFormStateTest {
         val form = SettingsFormState.from(Settings(application)).copy(killSwitch = true)
         val saved = with(SettingsFormState.Saver) { saverScope.save(form) }!! as List<*>
 
-        assertEquals(true, saved.last())
-        assertEquals(form.copy(killSwitch = false), SettingsFormState.Saver.restore(saved.dropLast(1)))
+        // One trailing field was added after killSwitch, so pre-killSwitch saves are two slots shorter.
+        assertEquals(true, saved[saved.size - 2])
+        assertEquals(
+            form.copy(killSwitch = false, encryptedDns = ""),
+            SettingsFormState.Saver.restore(saved.dropLast(2)),
+        )
     }
 }

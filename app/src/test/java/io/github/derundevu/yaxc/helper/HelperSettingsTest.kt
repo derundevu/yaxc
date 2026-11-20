@@ -33,6 +33,8 @@ abstract class HelperSettingsTest {
             secondaryDns = "198.51.100.53"
             primaryDnsV6 = "2001:db8::53"
             secondaryDnsV6 = "2001:db8::54"
+            // Encrypted resolver is opt-in for these fixtures; the dedicated test enables it.
+            encryptedDns = ""
             enableIpV6 = false
             transparentProxy = false
             tproxyHotspot = false

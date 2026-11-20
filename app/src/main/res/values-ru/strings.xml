@@ -652,6 +652,7 @@
     <string name="secondaryDns">Резервный DNS (v4)</string>
     <string name="primaryDnsV6">Основной DNS (v6)</string>
     <string name="secondaryDnsV6">Резервный DNS (v6)</string>
+    <string name="encryptedDns">Шифрованный DNS (DoH/DoT, только IP)</string>
     <string name="tunName">Имя TUN</string>
     <string name="tunMtu">MTU TUN</string>
     <string name="tunAddress">Адрес TUN (IPv4)</string>

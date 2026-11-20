@@ -656,6 +656,7 @@
     <string name="secondaryDns">Secondary DNS (v4)</string>
     <string name="primaryDnsV6">Primary DNS (v6)</string>
     <string name="secondaryDnsV6">Secondary DNS (v6)</string>
+    <string name="encryptedDns">Encrypted DNS (DoH/DoT, IP only)</string>
     <string name="tunName">Tun Name</string>
     <string name="tunMtu">Tun Mtu</string>
     <string name="tunAddress">Tun Address (IPv4)</string>

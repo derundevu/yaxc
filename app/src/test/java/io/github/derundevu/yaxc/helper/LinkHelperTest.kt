@@ -212,11 +212,23 @@ class LinkHelperTest : HelperSettingsTest() {
         assertEquals("test+user", options.getString("user"))
         assertEquals("test:pass+word", options.getString("pass"))
         assertFalse(options.getBoolean("quic"))
-        assertFalse(options.getBoolean("udpOverTcp"))
+        assertTrue(options.getBoolean("udpOverTcp"))
         val stream = outbound.getJSONObject("streamSettings")
         assertEquals("raw", stream.getString("network"))
         assertEquals("proxy.example.org", stream.getJSONObject("tlsSettings").getString("serverName"))
         assertTrue(stream.getJSONObject("sockopt").getBoolean("tcpFastOpen"))
+    }
+
+    @Test
+    fun rawSpaceAndEmojiInFragmentStillImportAndKeepTheRemark() {
+        val helper = LinkHelper(settings, "naive+https://test-user:test-pass@proxy.example.org#Naive-h2 ♾")
+        assertTrue(helper.isValid())
+        assertEquals("Naive-h2 ♾", helper.remark())
+        val outbound = JSONObject(helper.json()).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("naive", outbound.getString("protocol"))
+        assertEquals("proxy.example.org", outbound.getJSONObject("settings").getString("address"))
+        assertTrue(outbound.getJSONObject("settings").getBoolean("udpOverTcp"))
+        assertTrue(LinkHelper.escapeFragment("vless://id@host:443#a b").endsWith("#a%20b"))
     }
 
     @Test
@@ -226,7 +238,7 @@ class LinkHelperTest : HelperSettingsTest() {
         val outbound = JSONObject(helper.json()).getJSONArray("outbounds").getJSONObject(0)
         assertEquals(8443, outbound.getJSONObject("settings").getInt("port"))
         assertTrue(outbound.getJSONObject("settings").getBoolean("quic"))
-        assertFalse(outbound.getJSONObject("settings").getBoolean("udpOverTcp"))
+        assertTrue(outbound.getJSONObject("settings").getBoolean("udpOverTcp"))
     }
 
     @Test

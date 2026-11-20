@@ -22,6 +22,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKin
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.settings.SettingsFormState
 import io.github.derundevu.yaxc.presentation.settings.SettingsScreen
+import io.github.derundevu.yaxc.helper.ConfigHelper
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshScheduler
 import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.service.TProxyService
@@ -123,6 +124,7 @@ class SettingsActivity : AppCompatActivity() {
         val oldSocksPassword = settings.socksPassword
         val oldPrimaryDns = settings.primaryDns
         val oldSecondaryDns = settings.secondaryDns
+        val oldEncryptedDns = settings.encryptedDns.trim()
         val oldBypassLan = settings.bypassLan
         val oldEnableIpV6 = settings.enableIpV6
         val oldPrimaryDnsV6 = settings.primaryDnsV6
@@ -163,6 +165,7 @@ class SettingsActivity : AppCompatActivity() {
         val newSecondaryDns = formState.secondaryDns.trim()
         val newPrimaryDnsV6 = formState.primaryDnsV6.trim()
         val newSecondaryDnsV6 = formState.secondaryDnsV6.trim()
+        val newEncryptedDns = formState.encryptedDns.trim()
         val newTunName = formState.tunName.trim()
         val newTunAddress = formState.tunAddress.trim()
         val newTunAddressV6 = formState.tunAddressV6.trim()
@@ -189,6 +192,9 @@ class SettingsActivity : AppCompatActivity() {
         if (!isValidIpv6Address(newSecondaryDnsV6)) {
             return showInvalidIpAddress(R.string.secondaryDnsV6)
         }
+        if (newEncryptedDns.isNotEmpty() && ConfigHelper.encryptedDnsResolver(newEncryptedDns) == null) {
+            return showInvalidIpAddress(R.string.encryptedDns)
+        }
 
         val vpnSettingsChanged = oldSocksAddress != newSocksAddress ||
                 oldSocksPort != newSocksPort ||
@@ -196,6 +202,8 @@ class SettingsActivity : AppCompatActivity() {
                 oldSocksPassword != newSocksPassword ||
                 oldPrimaryDns != newPrimaryDns ||
                 oldSecondaryDns != newSecondaryDns ||
+                oldEncryptedDns != newEncryptedDns ||
+                oldEncryptedDns != newEncryptedDns ||
                 oldBypassLan != formState.bypassLan ||
                 oldEnableIpV6 != formState.enableIpV6 ||
                 oldPrimaryDnsV6 != newPrimaryDnsV6 ||
@@ -246,6 +254,8 @@ class SettingsActivity : AppCompatActivity() {
             settings.secondaryDns = newSecondaryDns
             settings.primaryDnsV6 = newPrimaryDnsV6
             settings.secondaryDnsV6 = newSecondaryDnsV6
+            settings.encryptedDns = newEncryptedDns
+            settings.encryptedDns = newEncryptedDns
             settings.tunName = newTunName
             settings.tunMtu = tunMtu
             settings.tunAddress = newTunAddress

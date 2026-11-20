@@ -87,6 +87,7 @@ class Settings(private val context: Context) {
         private const val DEFAULT_PING_ADDRESS =
             "https://connectivitycheck.gstatic.com/generate_204"
         private const val DEFAULT_PING_TYPE = "get"
+        private const val DEFAULT_ENCRYPTED_DNS = "https://1.1.1.1/dns-query"
         private const val SYSTEM_LANGUAGE_TAG = "system"
         private const val PREVIOUS_DEFAULT_GEO_IP_ADDRESS =
             "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"
@@ -409,6 +410,9 @@ class Settings(private val context: Context) {
     var secondaryDnsV6: String
         get() = sharedPreferences.getString("secondaryDnsV6", "2606:4700:4700::1001")!!
         set(value) = sharedPreferences.edit { putString("secondaryDnsV6", value) }
+    var encryptedDns: String
+        get() = sharedPreferences.getString("encryptedDns", DEFAULT_ENCRYPTED_DNS)!!
+        set(value) = sharedPreferences.edit { putString("encryptedDns", value) }
     var tunName: String
         get() = sharedPreferences.getString("tunName", "tun0")!!
         set(value) = sharedPreferences.edit { putString("tunName", value) }

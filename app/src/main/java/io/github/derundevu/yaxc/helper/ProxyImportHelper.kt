@@ -40,7 +40,7 @@ internal object ProxyImportHelper {
         query["padding"]?.let { if (!booleanOption(it)) unsupported("Disabling Naive padding is unsupported") }
         val tfo = query["tfo"]?.let(::booleanOption)
         if (quic && tfo == true) unsupported("TCP Fast Open is unavailable for Naive QUIC")
-        return naive(address, port, user, pass, quic, false, query["sni"]).apply {
+        return naive(address, port, user, pass, quic, true, query["sni"]).apply {
             if (tfo != null && !quic) getJSONObject("streamSettings")
                 .put("sockopt", JSONObject().put("tcpFastOpen", tfo))
         }
@@ -117,7 +117,7 @@ internal object ProxyImportHelper {
     }
 
     private fun udpOverTcp(source: JSONObject): Boolean {
-        if (!source.has("udp_over_tcp")) return false
+        if (!source.has("udp_over_tcp")) return true
         val option = source.get("udp_over_tcp")
         if (option is Boolean) return option
         require(option is JSONObject) { "Invalid UDP-over-TCP option" }

@@ -86,6 +86,7 @@ data class SettingsFormState(
     val secondaryDns: String,
     val primaryDnsV6: String,
     val secondaryDnsV6: String,
+    val encryptedDns: String,
     val tunName: String,
     val tunMtu: String,
     val tunAddress: String,
@@ -150,6 +151,7 @@ data class SettingsFormState(
                     it.xHwid,
                     it.liveRoutingHealthInterval,
                     it.killSwitch,
+                    it.encryptedDns,
                 )
             },
             restore = { values ->
@@ -175,6 +177,7 @@ data class SettingsFormState(
                     secondaryDns = values.getOrNull(17) as? String ?: "",
                     primaryDnsV6 = values.getOrNull(18) as? String ?: "",
                     secondaryDnsV6 = values.getOrNull(19) as? String ?: "",
+                    encryptedDns = values.getOrNull(40) as? String ?: "",
                     tunName = values.getOrNull(20) as? String ?: "",
                     tunMtu = values.getOrNull(21) as? String ?: "",
                     tunAddress = values.getOrNull(22) as? String ?: "",
@@ -221,6 +224,7 @@ data class SettingsFormState(
             secondaryDns = settings.secondaryDns,
             primaryDnsV6 = settings.primaryDnsV6,
             secondaryDnsV6 = settings.secondaryDnsV6,
+            encryptedDns = settings.encryptedDns,
             tunName = settings.tunName,
             tunMtu = settings.tunMtu.toString(),
             tunAddress = settings.tunAddress,
@@ -878,6 +882,12 @@ private fun AdvancedSettingsTab(
                 label = textResource(R.string.secondaryDnsV6),
                 value = formState.secondaryDnsV6,
                 onValueChange = { onFormStateChange(formState.copy(secondaryDnsV6 = it)) },
+            )
+            SettingsDivider()
+            SettingsTextField(
+                label = textResource(R.string.encryptedDns),
+                value = formState.encryptedDns,
+                onValueChange = { onFormStateChange(formState.copy(encryptedDns = it)) },
             )
             SettingsDivider()
             YaxcSettingsRow(

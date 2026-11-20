@@ -1,0 +1,15 @@
+## What's new in 1.6.1
+
+### Naive
+
+- Naive profiles now carry UDP through the server (sing-box UoT v2) by default, so DNS and other UDP traffic work over a Naive outbound; a sing-box source that disables the option keeps it as written.
+- Fixed Naive profiles failing to connect or ping: resolving the proxy endpoint no longer depends on a DNS query routed through that same proxy.
+
+### DNS
+
+- Added an encrypted DNS resolver (DoH/DoT) in Advanced settings, defaulting to https://1.1.1.1/dns-query. It is queried first; the configured primary and secondary servers remain available as a fallback.
+- App DNS in TUN VPN mode is answered by the core resolver, so Naive profiles no longer send plaintext resolver queries from the device. The fallback is used only when the encrypted resolver is unreachable or has no answer for the requested record type.
+
+### Subscriptions
+
+- Subscriptions whose node names contain raw spaces or emoji now import instead of failing the whole source. A single malformed entry still fails the source rather than silently dropping nodes.
