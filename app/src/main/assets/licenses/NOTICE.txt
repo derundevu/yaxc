@@ -8,6 +8,8 @@ to the extent permitted by applicable law. See GPL-3.0.txt for the full terms.
 The first-party source remains available under the MIT license (MIT.txt).
 Original Xray source notices and MPL-2.0 terms remain in place (MPL-2.0.txt).
 cronet-go and its native modules: GPL-3.0-or-later (Cronet.txt).
+The NaiveProxy fork and Chromium carry separate BSD notices reproduced from
+the pinned source as NaiveProxy.txt (LICENSE) and Chromium.txt (src/LICENSE).
 
 Corresponding source, including build scripts and pinned dependencies:
 https://github.com/derundevu/yaxc
