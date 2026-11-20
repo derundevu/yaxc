@@ -30,6 +30,10 @@ VPN DNS advertisement or the managed port-53 routing rules.
 ## Build
 
 Use JDK 21, Android SDK platform 36/build-tools 36.0.0, and NDK 28.2.13676358.
+NDK 28 is not interchangeable with older releases: the pinned Cronet archives use `R_AARCH64_PLT32` and
+`R_AARCH64_GOTPCREL32` relocations, which LLD 19 (NDK r28) resolves and LLD 18 (NDK r27) rejects with
+`unknown relocation (315)`. `buildXrayCore.sh` selects `ANDROID_NDK_HOME` or the newest `$ANDROID_HOME/ndk`
+revision, exports it for gomobile, and stops before the build when that NDK ships an older LLD.
 Set `JAVA_HOME` and `ANDROID_HOME` to existing installations. The selected core candidate uses **Go 1.27.3**
 (`GOTOOLCHAIN=go1.27.3`); gomobile/gobind are pinned through `XrayCore/go.mod` and installed from that locked
 module graph. XrayHelper selects the same Go patch. Use the Gradle wrapper.

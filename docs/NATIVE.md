@@ -38,6 +38,9 @@ native archives to `c10c03c318db`, through the locked module graph.
 `buildXrayCore.sh` enables `with_naive_outbound` and statically links the matching Android Cronet archive into
 each `libgojni.so`; no separately loaded `libcronet.so` is required on Android. Host regressions use
 `with_naive_outbound,with_purego` and the pinned Linux shared library instead.
+These archives carry `R_AARCH64_PLT32` (`0x13a`) and `R_AARCH64_GOTPCREL32` (`0x13b`) relocations, so the Android
+link needs LLD 19 or newer (NDK r28+); NDK r27 fails with `unknown relocation (315)`. The core script resolves and
+exports the NDK accordingly instead of letting gomobile pick an older installed one.
 Naive-enabled APKs are GPL-3.0-or-later combined works. First-party MIT and original MPL notices remain;
 license texts and source notices are bundled in `assets/licenses/` and accessible from Settings.
 `NaiveProxy.txt` and `Chromium.txt` reproduce `LICENSE` and `src/LICENSE` from
