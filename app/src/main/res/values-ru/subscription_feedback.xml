@@ -7,6 +7,17 @@
     <string name="subscriptionRefreshAdded">Добавлены</string>
     <string name="subscriptionRefreshRemoved">Удалены</string>
     <string name="subscriptionRefreshModified">Изменены</string>
+    <string name="subscriptionSourceSavedWithSkipped">Источник сохранён с пропущенными записями</string>
+    <string name="subscriptionSkippedTitle">Пропущенные записи подписки</string>
+    <string name="subscriptionRefreshWithSkipped">Поддерживаемые профили обработаны, но некоторые записи пропущены.</string>
+    <string name="subscriptionSkippedExplanation">Эти записи не импортированы, поскольку их протокол или настройки не поддерживаются:</string>
+    <string name="subscriptionSkippedEntry">%1$s · %2$s</string>
+    <string name="profileImportTitle">Импорт профилей</string>
+    <string name="profileImportFailed">Не удалось импортировать пригодные профили. Существующие профили не изменены.</string>
+    <string name="subscriptionAddressSchemeRequired">Укажите корректный HTTP- или HTTPS-адрес.</string>
+    <string name="subscriptionHttpWarningTitle">Использовать незашифрованную HTTP-подписку?</string>
+    <string name="subscriptionHttpWarningMessage">HTTP не шифрует запросы и ответы подписки. Другие участники сети могут прочитать или изменить подписку, учётные данные прокси и заголовки запроса. По возможности используйте HTTPS.\n\nПродолжить с этим HTTP-адресом? Его сохранение также разрешит дальнейшие обновления по HTTP.</string>
+    <string name="subscriptionHttpConfirm">Использовать HTTP</string>
     <plurals name="subscriptionRefreshAllFailed">
         <item quantity="one">Не удалось обновить %1$d источник. Повторите попытку или измените его настройки.</item>
         <item quantity="few">Не удалось обновить %1$d источника. Повторите попытку или измените настройки источников.</item>

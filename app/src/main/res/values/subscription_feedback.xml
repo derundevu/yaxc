@@ -7,6 +7,17 @@
     <string name="subscriptionRefreshAdded">Added</string>
     <string name="subscriptionRefreshRemoved">Removed</string>
     <string name="subscriptionRefreshModified">Modified</string>
+    <string name="subscriptionSourceSavedWithSkipped">Source saved with skipped entries</string>
+    <string name="subscriptionSkippedTitle">Skipped subscription entries</string>
+    <string name="subscriptionRefreshWithSkipped">Supported profiles were processed, but some entries were skipped.</string>
+    <string name="subscriptionSkippedExplanation">These entries were not imported because their protocol or settings are unsupported:</string>
+    <string name="subscriptionSkippedEntry">%1$s · %2$s</string>
+    <string name="profileImportTitle">Profile import</string>
+    <string name="profileImportFailed">Could not import usable profiles. Existing profiles have not been changed.</string>
+    <string name="subscriptionAddressSchemeRequired">Use a valid HTTP or HTTPS address.</string>
+    <string name="subscriptionHttpWarningTitle">Use an unencrypted HTTP subscription?</string>
+    <string name="subscriptionHttpWarningMessage">HTTP does not encrypt subscription requests or responses. Other people on the network may read or alter your subscription, proxy credentials and request headers. Prefer HTTPS whenever possible.\n\nContinue with this HTTP address? Saving it also allows future refreshes over HTTP.</string>
+    <string name="subscriptionHttpConfirm">Use HTTP</string>
     <plurals name="subscriptionRefreshAllFailed">
         <item quantity="one">Could not refresh %1$d source. Try again or edit its settings.</item>
         <item quantity="other">Could not refresh any of %1$d sources. Try again or edit the source settings.</item>

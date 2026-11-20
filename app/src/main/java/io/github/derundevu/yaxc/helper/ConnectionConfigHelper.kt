@@ -41,7 +41,7 @@ object ConnectionConfigHelper {
     fun routeKind(outbound: JSONObject): String = when (outbound.optString("protocol").lowercase()) {
         "blackhole", "block" -> "block"
         "freedom", "direct" -> "direct"
-        "http", "socks", "shadowsocks", "vless", "vmess", "trojan", "hysteria", "masque", "wireguard" -> "proxy"
+        "http", "socks", "shadowsocks", "vless", "vmess", "trojan", "hysteria", "masque", "naive", "wireguard" -> "proxy"
         else -> "unknown"
     }
 

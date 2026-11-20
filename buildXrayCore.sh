@@ -51,8 +51,9 @@ build_android() {
   rm -f "$DEST/XrayCore*"
   # Both tools are already installed from the locked module graph above.
   # gomobile init would reinstall gobind@latest; bind needs no OpenAL setup.
+  # Android links the pinned Cronet archive statically; with_purego is for host smoke runs.
   # Match upstream Android builds: anet requires access to net.zoneCache.
-  gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "$targets" -ldflags="-buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" -trimpath
+  gomobile bind -o "$DEST/XrayCore.aar" -androidapi 26 -target "$targets" -tags=with_naive_outbound -ldflags="-buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" -trimpath
 }
 
 refresh_dependencies() {

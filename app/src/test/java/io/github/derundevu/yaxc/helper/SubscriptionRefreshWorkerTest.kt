@@ -58,6 +58,23 @@ class SubscriptionRefreshWorkerTest : RoomTestSupport() {
     }
 
     @Test
+    fun completedPartialImportQueuesSkippedEntriesForTheNextForegroundReport() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            settings.refreshLinksOnOpen = true
+            val link = Link(address = server.url, name = "Synthetic source")
+            link.id = database.linkDao().insertAtEnd(link)
+            server.enqueue("naive+https://test-user:test-pass@proxy.example.org:443#Supported\nanytls://test-pass@proxy.example.org:443#Unsupported")
+            assertEquals(ListenableWorker.Result.success(), worker().doWork())
+            assertEquals(1, database.profileDao().linkProfiles(link.id).size)
+            val warning = settings.pendingSubscriptionWarnings().single()
+            assertEquals(link.id, warning.sourceId)
+            assertEquals("Unsupported", warning.skippedProfiles.single().name)
+            assertEquals("anytls", warning.skippedProfiles.single().protocol)
+            assertEquals(listOf(warning), io.github.derundevu.yaxc.Settings(app).pendingSubscriptionWarnings())
+        }
+    }
+
+    @Test
     fun workerUsesEachLocalOverrideOrGlobalIntervalWithoutFollowingServerMetadata() = runBlocking {
         SubscriptionHttpServer().use { server ->
             settings.refreshLinksOnOpen = true

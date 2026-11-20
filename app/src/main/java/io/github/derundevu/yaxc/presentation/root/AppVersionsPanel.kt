@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -60,6 +61,7 @@ internal fun AppVersionsPanel(
     modifier: Modifier = Modifier,
 ) {
     var showChangelog by rememberSaveable { mutableStateOf(false) }
+    var showLicenses by rememberSaveable { mutableStateOf(false) }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         YaxcGlassPanel(modifier = Modifier.testTag("settings:versions")) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -101,6 +103,12 @@ internal fun AppVersionsPanel(
             ComponentVersionRow(stringResource(R.string.xrayLabel), xrayVersion)
             Spacer(Modifier.height(12.dp))
             ComponentVersionRow(stringResource(R.string.tun2socksLabel), tun2socksVersion)
+            TextButton(
+                onClick = { showLicenses = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("settings:licenses"),
+            ) {
+                Text(stringResource(R.string.appOpenSourceLicenses))
+            }
         }
         Text(
             text = stringResource(R.string.madeWithPeople),
@@ -112,6 +120,9 @@ internal fun AppVersionsPanel(
     }
     if (showChangelog) {
         InstalledChangelogDialog(appVersion = appVersion, onDismiss = { showChangelog = false })
+    }
+    if (showLicenses) {
+        OpenSourceLicensesDialog(onDismiss = { showLicenses = false })
     }
 }
 
@@ -195,6 +206,74 @@ private fun InstalledChangelogDialog(appVersion: String, onDismiss: () -> Unit) 
                 }
                 Spacer(Modifier.height(12.dp))
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).testTag("changelog:close")) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        }
+    }
+}
+
+private data class LicenseDocument(val name: String, val paragraphs: List<String>)
+
+private sealed interface LicensesState {
+    data object Loading : LicensesState
+    data class Ready(val documents: List<LicenseDocument>) : LicensesState
+    data object Failed : LicensesState
+}
+
+@Composable
+private fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val state by produceState<LicensesState>(LicensesState.Loading, context) {
+        value = try {
+            LicensesState.Ready(withContext(Dispatchers.IO) {
+                listOf("NOTICE.txt", "NaiveProxy.txt", "Chromium.txt", "Cronet.txt", "GPL-3.0.txt", "MPL-2.0.txt", "MIT.txt").map { name ->
+                    val text = context.assets.open("licenses/$name").bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    LicenseDocument(name, text.split(Regex("\\r?\\n\\s*\\r?\\n")).filter { it.isNotBlank() })
+                }
+            })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            LicensesState.Failed
+        }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            YaxcGlassPanel(
+                modifier = Modifier.widthIn(max = 560.dp).heightIn(max = maxHeight).testTag("licenses:dialog"),
+                contentPadding = PaddingValues(20.dp),
+            ) {
+                Text(stringResource(R.string.appOpenSourceLicenses), style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(16.dp))
+                when (val licenses = state) {
+                    LicensesState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                    LicensesState.Failed -> Text(
+                        stringResource(R.string.appLicensesUnavailable), color = MaterialTheme.colorScheme.error,
+                    )
+                    is LicensesState.Ready -> LazyColumn(
+                        modifier = Modifier.weight(1f, fill = false).testTag("licenses:content"),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        licenses.documents.forEach { document ->
+                            item(key = document.name) {
+                                Text(document.name, style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+                            items(count = document.paragraphs.size, key = { "${document.name}:$it" }) { index ->
+                                SelectionContainer {
+                                    Text(document.paragraphs[index], style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).testTag("licenses:close")) {
                     Text(stringResource(R.string.close))
                 }
             }

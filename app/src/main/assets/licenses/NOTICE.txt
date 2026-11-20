@@ -1,0 +1,26 @@
+yaxc: open-source licenses and corresponding source
+
+This build includes the Naive outbound using Chromium/Cronet through cronet-go.
+The combined Naive-enabled application is distributed under GPL-3.0-or-later.
+You may redistribute and modify it under those terms. There is NO WARRANTY,
+to the extent permitted by applicable law. See GPL-3.0.txt for the full terms.
+
+The first-party source remains available under the MIT license (MIT.txt).
+Original Xray source notices and MPL-2.0 terms remain in place (MPL-2.0.txt).
+cronet-go and its native modules: GPL-3.0-or-later (Cronet.txt).
+
+Corresponding source, including build scripts and pinned dependencies:
+https://github.com/derundevu/yaxc
+https://github.com/derundevu/proxide
+https://github.com/SagerNet/cronet-go/tree/0d28acc44093
+https://github.com/SagerNet/naiveproxy/tree/72a06c9fca0e2d228588c7f3074bf7efff3ff686
+
+Use the source revision accompanying the application release and initialize its
+recursive submodules. XrayCore/go.mod and go.sum pin the Go bindings and native
+Cronet archives. Native Cronet module revision: c10c03c318db.
+
+Local integration changes dated 2026-11-20 add Naive subscription handling,
+Android static Cronet builds and explicit QUIC congestion-control configuration.
+A distributor must provide the complete corresponding source for the actual
+binary, including any changes to submodules, alongside its download. A source
+URL alone does not replace that obligation if those changes are unpublished.

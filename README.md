@@ -6,7 +6,7 @@
   <p>
     <a href="https://github.com/derundevu/yaxc/releases/latest"><img src="https://img.shields.io/github/v/release/derundevu/yaxc?label=release&amp;color=7cf4c4" alt="Latest release"></a>
     <img src="https://img.shields.io/badge/Android-8.0%2B-7cf4c4" alt="Requires Android 8.0 or newer">
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7cf4c4" alt="MIT license"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/source-MIT-7cf4c4" alt="MIT source license"></a>
   </p>
   <p>
     <a href="https://github.com/derundevu/yaxc/releases"><strong>Download APK</strong></a>
@@ -29,6 +29,7 @@ The standard Android VPN mode does **not** require root.
 - Import subscriptions and profile share links from the clipboard or a QR code.
 - Keep multiple sources organized alongside your manually created profiles.
 - Refresh subscriptions manually or automatically; see traffic usage and expiry when your provider supplies them.
+- Use Naive over HTTPS/HTTP2 or QUIC/HTTP3 via supported share links and sing-box JSON subscriptions. Mixed sources explicitly report unsupported entries.
 - Check a single profile or compare a group with batch latency checks. Choose HTTP GET, HTTP HEAD or TCP checks.
 - Single-profile checks do not cancel a running batch. Checks share five workers; duplicate requests are combined and the single-check queue is capped at ten profiles.
 
@@ -166,8 +167,9 @@ If Android reports a signing conflict, do not uninstall just to bypass it: unins
 ## Getting started
 
 1. **Install yaxc** using the APK for your device.
-2. **Add your configuration.** Copy an HTTPS subscription URL or a supported profile share link, then use **From Clipboard**
-   on the Connect screen. You can also use **Scan QR code**, or create a manual group and a JSON profile.
+2. **Add your configuration.** Copy a subscription URL or a supported profile share link, then use **From Clipboard**
+   on the Connect screen. HTTP subscriptions require an explicit warning confirmation; prefer HTTPS because plain HTTP exposes subscription contents and credentials.
+   You can also use **Scan QR code**, or create a manual group and a JSON profile.
 3. **Prepare routing resources.** Open **Settings → Assets** and download `geoip.dat` and `geosite.dat` for the default
    routing rules. Configurations without geodata references do not need these files.
 4. **Choose a profile.** Open its group, select a server and optionally run a latency check.
@@ -197,6 +199,17 @@ For protection when the process dies or the device restarts, use **Android VPN p
 and enable both **Always-on VPN** and **Block connections without VPN** for yaxc. Always-on alone is not a traffic block.
 Android lockdown is separate from the yaxc preference and can prevent excluded apps and LAN bypasses from connecting.
 Disconnecting yaxc does not disable that system policy.
+
+### Xray DNS
+
+Open **Settings → Preferences → Advanced → DNS → Xray DNS**. In the **DNS** tab, **Effective DNS** previews
+what the selected profile or Live Routing will pass to Xray on the next connection if you save the draft.
+**Replace** uses only this DNS JSON; **Merge** keeps the profile servers first, then the global servers and
+any missing DNS IPs from Preferences. **Disable** ignores the global JSON, not DNS itself.
+If no servers are configured in Replace, Xray uses system DNS by default.
+
+This controls Xray's resolver, not the DNS addresses advertised to Android apps by the VPN. Adding a DoH server
+here does not turn every app's DNS traffic into DoH.
 
 ### Core Routing
 
@@ -420,9 +433,12 @@ Availability, speed and server-side privacy depend on that provider and your net
 
 ### Which configuration formats can I use?
 
-Use Xray JSON configurations or supported profile share links, including VLESS. You can also open a local JSON file with yaxc.
-Subscription sources can provide raw JSON or supported share-link lists, including base64-encoded subscriptions.
-A feature supported by Xray-core is not necessarily available through every share-link format.
+Use Xray JSON configurations or supported profile share links, including VLESS and Naive (`naive+https`, `naive+quic`).
+Supported Naive/VLESS nodes in sing-box JSON are converted to individual Xray profiles, including Naive extra HTTP headers.
+This is not general sing-box support.
+You can also open a local JSON file with yaxc. Unsupported entries and options are reported explicitly.
+Naive UDP destinations require an explicitly configured, server-supported UDP-over-TCP v2 option; HTTP3 alone is not UDP proxy support.
+Some native options cannot be represented in a share URI; use JSON export to retain them.
 
 ### Why does the connection ask for GeoIP or GeoSite?
 
@@ -464,4 +480,7 @@ Build instructions, native dependency details and verification workflows live in
 yaxc is an independently maintained fork of [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray),
 powered by [Xray-core](https://github.com/XTLS/Xray-core) and [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel).
 
-The app is licensed under [MIT](LICENSE). Bundled third-party components retain their respective licenses.
+First-party source is licensed under [MIT](LICENSE); bundled components retain their original notices.
+Naive-enabled APKs include GPL-3.0-or-later Cronet components and are distributed as GPLv3 combined works,
+without warranty. See **Settings → Open-source licenses** for the license texts and corresponding-source information.
+Distributors must make the complete source matching each binary available, including native submodules and build scripts.

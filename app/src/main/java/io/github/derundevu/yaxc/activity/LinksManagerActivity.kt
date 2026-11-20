@@ -85,13 +85,10 @@ class LinksManagerActivity : AppCompatActivity() {
         setContent {
             YaxcAppTheme {
                 val refreshResult = state.refreshResult
-                if (refreshResult != null) {
+                if (refreshResult != null && !isForm) {
                     SubscriptionRefreshDialog(
                         result = refreshResult,
-                        onClose = {
-                            setResult(RESULT_OK)
-                            finish()
-                        },
+                        onClose = { lifecycleScope.launch { state.acknowledgeReport() } },
                     )
                 } else if (!isForm && state.busy) {
                     YaxcProgressDialog(
@@ -105,10 +102,12 @@ class LinksManagerActivity : AppCompatActivity() {
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 state.outcome.filterNotNull().collect { outcome ->
-                    outcome.feedback?.let { feedback ->
+                    if (outcome.completed) {
                         setResult(RESULT_OK, Intent().apply {
-                            putExtra(FEEDBACK_MESSAGE, feedback.message)
-                            putExtra(FEEDBACK_KIND, feedback.kind.name)
+                            outcome.feedback?.let { feedback ->
+                                putExtra(FEEDBACK_MESSAGE, feedback.message)
+                                putExtra(FEEDBACK_KIND, feedback.kind.name)
+                            }
                         })
                     }
                     finish()
@@ -126,7 +125,7 @@ class LinksManagerActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean(OPERATION_PENDING, state.busy || state.outcome.value != null)
+        outState.putBoolean(OPERATION_PENDING, state.busy || state.refreshResult != null || state.outcome.value != null)
         super.onSaveInstanceState(outState)
     }
 }

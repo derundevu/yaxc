@@ -14,7 +14,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A real, bounded HTTP peer: held exchanges make request/application races deterministic. */
-internal class SubscriptionHttpServer : Closeable {
+internal class SubscriptionHttpServer(
+    private val listener: ServerSocket = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1")),
+    private val scheme: String = "http",
+) : Closeable {
     data class Request(val path: String, val headers: Map<String, String>)
 
     class Exchange internal constructor(
@@ -29,14 +32,13 @@ internal class SubscriptionHttpServer : Closeable {
         fun release() = gate.countDown()
     }
 
-    private val listener = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
     private val executor = Executors.newCachedThreadPool { task ->
         Thread(task, "subscription-loopback").apply { isDaemon = true }
     }
     private val responses = LinkedBlockingQueue<Exchange>()
     private val sockets = Collections.synchronizedSet(mutableSetOf<Socket>())
     val requestCount = AtomicInteger()
-    val url: String get() = "http://127.0.0.1:${listener.localPort}/subscription"
+    val url: String get() = "$scheme://127.0.0.1:${listener.localPort}/subscription"
 
     init {
         executor.execute {

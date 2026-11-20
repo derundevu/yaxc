@@ -3,6 +3,8 @@ package io.github.derundevu.yaxc
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper.SkippedProfile
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper.SourceWarning
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -234,5 +236,34 @@ class SettingsUpgradeTest {
             assertEquals(chosen.coerceAtLeast(minimum), preferences.getInt("refreshLinksInterval", -1))
             assertEquals(chosen.coerceAtLeast(minimum), Settings(application).refreshLinksIntervalMinutes)
         }
+    }
+
+    @Test
+    fun skippedReportsSurviveReopenAndCleanRefreshUntilExplicitAcknowledgement() {
+        val warning = SourceWarning(7, "Synthetic source", listOf(
+            SkippedProfile("Unsupported one", "anytls"), SkippedProfile("Unsupported two", "tuic"),
+        ))
+        Settings(application).recordSubscriptionWarnings(listOf(warning))
+        val reopened = Settings(application)
+        assertEquals(listOf(warning), reopened.pendingSubscriptionWarnings())
+        reopened.recordSubscriptionWarnings(emptyList())
+        assertEquals(listOf(warning), Settings(application).pendingSubscriptionWarnings())
+        reopened.acknowledgeSubscriptionWarnings(listOf(warning))
+        assertTrue(Settings(application).pendingSubscriptionWarnings().isEmpty())
+    }
+
+    @Test
+    fun acknowledgingSnapshotDoesNotRemoveNewerOrOtherSourceWarnings() {
+        val old = SourceWarning(7, "Synthetic source", listOf(SkippedProfile("First", "tuic")))
+        val other = SourceWarning(8, "Other source", listOf(SkippedProfile("Other", "anytls")))
+        val newer = old.copy(skippedProfiles = listOf(SkippedProfile("Changed", "http2")))
+        val foreground = Settings(application)
+        foreground.recordSubscriptionWarnings(listOf(old))
+        val shown = foreground.pendingSubscriptionWarnings()
+        Settings(application).recordSubscriptionWarnings(listOf(newer, other))
+        foreground.acknowledgeSubscriptionWarnings(shown)
+        assertEquals(listOf(newer, other), Settings(application).pendingSubscriptionWarnings())
+        foreground.acknowledgeSubscriptionWarnings(listOf(other))
+        assertEquals(listOf(newer), foreground.pendingSubscriptionWarnings())
     }
 }

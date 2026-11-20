@@ -6,18 +6,28 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
+import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.Yaxc
 import io.github.derundevu.yaxc.database.Config
+import io.github.derundevu.yaxc.database.YaxcDatabase
+import io.github.derundevu.yaxc.helper.ConfigHelper
+import io.github.derundevu.yaxc.helper.JsonHelper
+import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.presentation.configs.ConfigSection
+import io.github.derundevu.yaxc.presentation.configs.DnsPreview
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorTools
 import io.github.derundevu.yaxc.presentation.editor.JsonRoot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class ConfigsEditorViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = getApplication<Yaxc>().configRepository
+    private val settings = Settings(application)
     val documents = ConfigSection.entries.associateWith {
         JsonEditorState(
             initialText = if (it.isArray) "[]" else "{}",
@@ -54,6 +64,34 @@ class ConfigsEditorViewModel(application: Application) : AndroidViewModel(applic
 
     fun selectMode(mode: Config.Mode) {
         modes = modes + (selectedSection to mode)
+    }
+
+    internal suspend fun previewDns(): DnsPreview? {
+        val text = documents.getValue(ConfigSection.Dns).text
+        val mode = modes.getValue(ConfigSection.Dns)
+        val selected = settings.selectedProfile
+        val app = getApplication<Yaxc>()
+        return withContext(Dispatchers.IO) {
+            if (mode != Config.Mode.Disable && JsonEditorTools.validate(text, JsonRoot.Object) != null) {
+                throw IllegalArgumentException("Invalid DNS JSON")
+            }
+            val live = selected == LiveRoutingHelper.CONNECTION_PROFILE_ID
+            val profile = if (live) null else {
+                if (selected <= 0) return@withContext null
+                val database = YaxcDatabase.ref(app)
+                database.withTransaction {
+                    val profiles = database.profileDao()
+                    if (profiles.indexOf(selected) != null) profiles.find(selected) else null
+                } ?: return@withContext null
+            }
+            val profileDns = if (profile == null || mode == Config.Mode.Replace) JSONObject()
+            else JsonHelper.getObject(JsonHelper.makeObject(profile.config), "dns")
+            val dns = ConfigHelper.effectiveDns(settings, profileDns, text, mode)
+            val connection = if (profile == null) app.getString(R.string.liveRouting)
+            else profile.name.ifBlank { "#${profile.id}" }
+            val noUpstreams = !dns.has("servers") || dns.optJSONArray("servers")?.length() == 0
+            DnsPreview(connection, dns.toString(2), noUpstreams)
+        }
     }
 
     suspend fun save(): Boolean {

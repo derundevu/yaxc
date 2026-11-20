@@ -398,6 +398,31 @@ class LiveRoutingHelperTest : HelperSettingsTest() {
             built.getJSONObject("routing").getJSONArray("balancers").getJSONObject(0).getJSONArray("selector").stringValues())
         assertEquals(sourceConfig, one.config)
     }
+    @Test
+    fun naiveRoutesAsProxyAndRetainsItsSettingsInOrdinaryAndLiveGraphs() {
+        listOf(false, true).forEach { quic ->
+            val source = profile(1, outbounds = """[{"tag":"naive-exit","protocol":"naive",
+                "settings":{"address":"proxy.example.org","port":443,"user":"test-user","pass":"test-pass",
+                    "quic":$quic,"udpOverTcp":false,"headers":{"X-Test":"literal"}},
+                "streamSettings":{"network":"raw","security":"tls","tlsSettings":{"serverName":"proxy.example.org"}}}]""")
+            val original = source.config
+            val outbound = JSONObject(original).getJSONArray("outbounds").getJSONObject(0)
+            val ordinary = JSONObject(ConnectionConfigHelper.ordinary(original, source, emptyMap(), "test-user", "test-pass"))
+            assertEquals("proxy", ordinary.getJSONObject(ConnectionConfigHelper.PROFILE_METADATA_KEY)
+                .getJSONObject("naive-exit").getString("route"))
+            val plan = LiveRoutingPlan(listOf(group()), listOf(rule()))
+            val built = compile(plan, mapOf(1L to source))
+            val cloned = built.getJSONArray("outbounds").objectValues().single { it.optString("protocol") == "naive" }
+            assertJsonEquals(outbound.getJSONObject("settings"), cloned.getJSONObject("settings"))
+            assertJsonEquals(outbound.getJSONObject("streamSettings"), cloned.getJSONObject("streamSettings"))
+            assertEquals(cloned.getString("tag"),
+                built.getJSONObject("routing").getJSONArray("rules").getJSONObject(0).getString("outboundTag"))
+            assertEquals("proxy", built.getJSONObject(ConnectionConfigHelper.PROFILE_METADATA_KEY)
+                .getJSONObject(cloned.getString("tag")).getString("route"))
+            assertEquals(original, source.config)
+        }
+    }
+
 
 
     @Test

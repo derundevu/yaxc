@@ -67,7 +67,7 @@ class ConfigHelperTest : HelperSettingsTest() {
         val global = GlobalConfig(
             log = """{"error":"replacement-error.log"}""",
             logMode = GlobalConfig.Mode.Replace,
-            dns = """{"hosts":{"replacement.internal":"203.0.113.10"},"queryStrategy":"UseIP"}""",
+            dns = """{"hosts":{"replacement.internal":"203.0.113.10"},"queryStrategy":"UseIP","servers":["https://1.1.1.1/dns-query"]}""",
             dnsMode = GlobalConfig.Mode.Replace,
             outbounds = """[
                 {"protocol":"socks","tag":"replacement-egress","settings":{"servers":[{"address":"127.0.0.1","port":19082}]}}
@@ -88,7 +88,7 @@ class ConfigHelperTest : HelperSettingsTest() {
         val dns = generated.getJSONObject("dns")
         assertFalse(dns.has("futureDns"))
         assertEquals(setOf("replacement.internal"), dns.getJSONObject("hosts").keys().asSequence().toSet())
-        assertEquals(listOf("192.0.2.53", "198.51.100.53"), dns.getJSONArray("servers").stringValues())
+        assertEquals(listOf("https://1.1.1.1/dns-query"), dns.getJSONArray("servers").stringValues())
         val outbounds = generated.getJSONArray("outbounds").objectValues()
         assertEquals(listOf("replacement-egress", "direct", "block"), outbounds.map { it.getString("tag") })
         val rules = generated.getJSONObject("routing").getJSONArray("rules").objectValues()
@@ -98,6 +98,23 @@ class ConfigHelperTest : HelperSettingsTest() {
         assertEquals("replacement-egress", rules.single { it.optInt("port") == 53 }.getString("outboundTag"))
         assertEquals("socks", generated.getJSONArray("inbounds").getJSONObject(0).getString("protocol"))
         assertTrue(generated.getJSONObject("futureRoot").getBoolean("preserved"))
+    }
+
+    @Test
+    fun emptyDnsReplaceRemainsEmptyForLiveRouting() {
+        val global = GlobalConfig(dns = "{}", dnsMode = GlobalConfig.Mode.Replace)
+        val generated = JSONObject(ConfigHelper(settings, global, "{}", ConfigHelper.Target.LiveRoutingBase).toString())
+        assertJsonEquals(JSONObject(), generated.getJSONObject("dns"))
+    }
+
+    @Test
+    fun dnsMergePreservesServerPrecedenceWithoutAddingDuplicateManagedAddresses() {
+        val profile = baseProfile().apply {
+            getJSONObject("dns").put("servers", JSONArray().put("192.0.2.53"))
+        }
+        val global = GlobalConfig(dns = """{"servers":["https://1.1.1.1/dns-query"]}""", dnsMode = GlobalConfig.Mode.Merge)
+        assertEquals(listOf("192.0.2.53", "https://1.1.1.1/dns-query", "198.51.100.53"),
+            generate(global, profile).getJSONObject("dns").getJSONArray("servers").stringValues())
     }
 
     @Test

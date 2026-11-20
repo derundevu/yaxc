@@ -8,6 +8,7 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -19,6 +20,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKin
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
+import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import io.github.derundevu.yaxc.viewmodel.ProfileEditorViewModel
 import io.github.derundevu.yaxc.viewmodel.ProfileSaveResult
 import kotlinx.coroutines.launch
@@ -30,6 +32,7 @@ class ProfileActivity : AppCompatActivity() {
         private const val PROFILE_NAME = "name"
         private const val PROFILE_CONFIG = "config"
         private const val PROFILE_LINK_ID = "link_id"
+        private const val FILE_IMPORT_PENDING = "file_import_pending"
 
         fun getIntent(
             context: Context,
@@ -57,6 +60,11 @@ class ProfileActivity : AppCompatActivity() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }
+        if (savedInstanceState?.getBoolean(FILE_IMPORT_PENDING) == true && !draft.initialized) {
+            // Never append a file batch again after its transaction may have committed.
+            finish()
+            return
+        }
         val id = intent.getLongExtra(PROFILE_ID, 0L)
         draft.initialize(
             id = id,
@@ -68,6 +76,21 @@ class ProfileActivity : AppCompatActivity() {
 
         setContent {
             YaxcAppTheme(feedback = feedback) {
+                LaunchedEffect(draft.importReportAcknowledged) {
+                    if (draft.importReportAcknowledged) finish()
+                }
+                val report = draft.importReport
+                if (report != null) {
+                    SubscriptionRefreshDialog(
+                        result = report,
+                        titleRes = R.string.profileImportTitle,
+                        onClose = {
+                            lifecycleScope.launch {
+                                draft.acknowledgeImportReport()
+                            }
+                        },
+                    )
+                } else {
                 ProfileScreen(
                     title = getString(if (id == 0L) R.string.newProfile else R.string.editProfile),
                     name = draft.name,
@@ -95,9 +118,15 @@ class ProfileActivity : AppCompatActivity() {
                         kind = FeedbackKind.Error,
                     )
                 }
+                }
             }
         }
     }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(FILE_IMPORT_PENDING, draft.fileImportPending)
+        super.onSaveInstanceState(outState)
+    }
+
 
     private fun save(check: Boolean = true) {
         if (draft.isLoading || draft.isSaving) return

@@ -28,12 +28,16 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 fun SubscriptionRefreshDialog(
     result: SubscriptionRefreshHelper.RefreshResult,
     onClose: () -> Unit,
+    titleRes: Int = R.string.subscriptionRefreshResultTitle,
+    warningsOnly: Boolean = false,
 ) {
     val changedSources = remember(result) {
         result.changes.filter { it.added.isNotEmpty() || it.removed.isNotEmpty() || it.modified.isNotEmpty() }
     }
     val summary = when {
+        warningsOnly -> null
         result.attempted == 0 -> stringResource(R.string.feedbackRefreshEmpty)
+        titleRes == R.string.profileImportTitle && result.failed > 0 -> stringResource(R.string.profileImportFailed)
         result.refreshed == 0 -> pluralStringResource(
             R.plurals.subscriptionRefreshAllFailed, result.failed, result.failed,
         )
@@ -41,6 +45,7 @@ fun SubscriptionRefreshDialog(
             R.plurals.feedbackRefreshPartial, result.attempted,
             result.refreshed, result.attempted, result.failed,
         )
+        result.warnings.isNotEmpty() -> stringResource(R.string.subscriptionRefreshWithSkipped)
         changedSources.isNotEmpty() && result.attempted > 1 -> pluralStringResource(
             R.plurals.feedbackRefreshSummary, result.attempted, result.refreshed, result.attempted,
         )
@@ -52,7 +57,7 @@ fun SubscriptionRefreshDialog(
 
     AlertDialog(
         onDismissRequest = {},
-        title = { Text(stringResource(R.string.subscriptionRefreshResultTitle)) },
+        title = { Text(stringResource(titleRes)) },
         text = {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
@@ -67,7 +72,7 @@ fun SubscriptionRefreshDialog(
                         )
                     }
                 }
-                if (changedSources.isEmpty() && result.refreshed > 0) {
+                if (!warningsOnly && changedSources.isEmpty() && result.refreshed > 0 && result.warnings.isEmpty()) {
                     item(key = "unchanged") {
                         Box(
                             modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
@@ -80,6 +85,34 @@ fun SubscriptionRefreshDialog(
                                 ),
                                 style = MaterialTheme.typography.titleMedium,
                                 textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                }
+                if (result.warnings.isNotEmpty()) {
+                    item(key = "skipped-explanation") {
+                        Text(
+                            text = stringResource(R.string.subscriptionSkippedExplanation),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    result.warnings.forEach { source ->
+                        item(key = "warning-source:${source.sourceId}") {
+                            Text(
+                                text = source.sourceName.ifBlank { stringResource(R.string.newSource) },
+                                modifier = Modifier.padding(top = YaxcTheme.spacing.sm),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+                        items(
+                            count = source.skippedProfiles.size,
+                            key = { "warning:${source.sourceId}:$it" },
+                        ) { index ->
+                            val profile = source.skippedProfiles[index]
+                            Text(
+                                text = stringResource(R.string.subscriptionSkippedEntry, profile.name, profile.protocol),
+                                modifier = Modifier.padding(start = YaxcTheme.spacing.sm),
+                                style = MaterialTheme.typography.bodyMedium,
                             )
                         }
                     }

@@ -28,6 +28,14 @@ class SubscriptionRefreshHelper(
     private val context: Context,
     private val settings: Settings = Settings(context.applicationContext),
 ) {
+    data class SkippedProfile(val name: String, val protocol: String)
+
+    data class SourceWarning(
+        val sourceId: Long,
+        val sourceName: String,
+        val skippedProfiles: List<SkippedProfile>,
+    )
+
     data class ParsedLinkSource(
         val type: Link.Type,
         val profiles: List<Profile>,
@@ -35,6 +43,7 @@ class SubscriptionRefreshHelper(
         val metadata: SubscriptionMetadata? = null,
         internal val sourceSnapshot: Link? = null,
         internal val requestToken: Any? = null,
+        val skippedProfiles: List<SkippedProfile> = emptyList(),
     )
 
     data class SourceChanges(
@@ -50,6 +59,7 @@ class SubscriptionRefreshHelper(
         val refreshed: Int,
         val failed: Int,
         val changes: List<SourceChanges> = emptyList(),
+        val warnings: List<SourceWarning> = emptyList(),
     )
 
     companion object {
@@ -97,18 +107,15 @@ class SubscriptionRefreshHelper(
                         overrideXHwid = source.xHwid,
                     ),
                 )
-                val detected = detectProfiles(source, normalizeBody(response.body))
+                val detected = parseProfiles(source, response.body)
+                if (detected.profiles.isEmpty()) releaseRequest(source.id, token)
                 val metadata = HttpHelper.extractSubscriptionMetadata(response.headers)
-                ParsedLinkSource(
-                    type = detected.first,
-                    profiles = detected.second,
+                detected.copy(
                     title = metadata?.profileTitle ?: HttpHelper.extractSubscriptionTitle(response.headers),
                     metadata = metadata,
                     sourceSnapshot = source,
-                    requestToken = token,
-                ).also {
-                    check(it.profiles.isNotEmpty()) { "No profiles detected" }
-                }
+                    requestToken = token.takeIf { detected.profiles.isNotEmpty() },
+                )
             }
         } catch (error: Throwable) {
             releaseRequest(source.id, token)
@@ -179,6 +186,13 @@ class SubscriptionRefreshHelper(
                     link.name = saved.name
                     link.subscriptionMetadata = saved.subscriptionMetadata
                     link.lastRefreshedAt = saved.lastRefreshedAt
+                    if (parsed.skippedProfiles.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            settings.recordSubscriptionWarnings(listOf(SourceWarning(
+                                saved.id, saved.name, parsed.skippedProfiles,
+                            )))
+                        }
+                    }
                     if (notifyRuntime) reconcileRuntime()
                 }
                 changes
@@ -206,12 +220,20 @@ class SubscriptionRefreshHelper(
         var refreshed = 0
         var failed = 0
         val changes = if (collectChanges) mutableListOf<SourceChanges>() else null
+        val warnings = mutableListOf<SourceWarning>()
         var applyAttempted = false
         try {
             links.forEach { link ->
                 currentCoroutineContext().ensureActive()
                 try {
                     val parsed = resolveProfiles(link)
+                    if (parsed.skippedProfiles.isNotEmpty()) {
+                        val warning = SourceWarning(link.id, parsed.title?.takeIf(String::isNotBlank) ?: link.name,
+                            parsed.skippedProfiles)
+                        warnings.add(warning)
+                        if (parsed.profiles.isEmpty()) settings.recordSubscriptionWarnings(listOf(warning))
+                    }
+                    check(parsed.profiles.isNotEmpty()) { "No supported profiles detected" }
                     // A cancellation can arrive after Room commits but before the caller resumes.
                     // Reconcile committed state once for the batch, including partial cancellation.
                     applyAttempted = true
@@ -235,6 +257,7 @@ class SubscriptionRefreshHelper(
             refreshed = refreshed,
             failed = failed,
             changes = changes ?: emptyList(),
+            warnings = warnings,
         )
     }
 
@@ -364,7 +387,31 @@ class SubscriptionRefreshHelper(
 
     private fun normalizeBody(value: String): String = value.trim().removePrefix("\uFEFF").trim()
 
-    private fun jsonProfiles(link: Link, value: String): List<Profile>? {
+    private data class DetectedProfiles(
+        val profiles: List<Profile>,
+        val skipped: List<SkippedProfile> = emptyList(),
+    )
+
+    /** Parses clipboard content through exactly the same importer as downloaded sources. */
+    suspend fun parseProfiles(link: Link, value: String): ParsedLinkSource = withContext(Dispatchers.IO) {
+        val body = normalizeBody(value)
+        val directJson = jsonProfiles(link, body)
+        val detected: DetectedProfiles
+        val type: Link.Type
+        if (directJson != null) {
+            detected = directJson
+            type = Link.Type.Json
+        } else {
+            // Android's permissive decoder can turn a valid plain URI into binary garbage.
+            val candidate = if (body.contains("://")) body else normalizeBody(LinkHelper.tryDecodeBase64(body))
+            detected = jsonProfiles(link, candidate) ?: lineProfiles(link, candidate)
+            type = Link.Type.Subscription
+        }
+        check(detected.profiles.isNotEmpty() || detected.skipped.isNotEmpty()) { "No profiles detected" }
+        ParsedLinkSource(type, detected.profiles, skippedProfiles = detected.skipped)
+    }
+
+    private suspend fun jsonProfiles(link: Link, value: String): DetectedProfiles? {
         if (!value.startsWith("[") && !value.startsWith("{")) return null
         val tokener = JSONTokener(value)
         val root = tokener.nextValue()
@@ -374,36 +421,65 @@ class SubscriptionRefreshHelper(
             is JSONObject -> JSONArray().put(root)
             else -> error("Expected a JSON profile or array")
         }
-        return (0 until configs.length()).map { index ->
-            val configuration = configs.optJSONObject(index)
-                ?: error("Invalid profile at index $index")
+        val profiles = mutableListOf<Profile>()
+        val skipped = mutableListOf<SkippedProfile>()
+        for (index in 0 until configs.length()) {
+            currentCoroutineContext().ensureActive()
+            val configuration = configs.optJSONObject(index) ?: error("Invalid profile at index $index")
             val outbounds = configuration.optJSONArray("outbounds")
             check(outbounds != null && outbounds.length() > 0) { "No outbounds at index $index" }
             check((0 until outbounds.length()).all { outbounds.optJSONObject(it) != null }) {
                 "Invalid outbound at index $index"
             }
-            val label = configuration.optString("remarks")
-                .ifBlank { configuration.optString("remark") }
-                .trim()
-                .ifBlank { context.getString(R.string.newProfile) }
-            configuration.remove("remarks")
-            configuration.remove("remark")
-            Profile(linkId = link.id, name = label, config = configuration.toString(2))
-        }.reversed()
+            if (ProxyImportHelper.isSingBox(configuration)) {
+                for (outboundIndex in 0 until outbounds.length()) {
+                    currentCoroutineContext().ensureActive()
+                    val source = outbounds.getJSONObject(outboundIndex)
+                    val protocol = source.opt("type") as? String
+                    check(!protocol.isNullOrBlank()) { "Missing sing-box outbound type" }
+                    val label = source.optString("tag").trim().ifBlank { "$protocol ${outboundIndex + 1}" }
+                    try {
+                        val outbound = ProxyImportHelper.singBoxOutbound(source)
+                        val helper = LinkHelper(settings, "", outbound, label)
+                        profiles.add(Profile(linkId = link.id, name = label, config = helper.json()))
+                    } catch (_: UnsupportedProfileException) {
+                        skipped.add(SkippedProfile(label, protocol))
+                    }
+                }
+            } else {
+                check((0 until outbounds.length()).all {
+                    outbounds.getJSONObject(it).optString("protocol").isNotBlank()
+                }) { "Missing Xray outbound protocol" }
+                val label = configuration.optString("remarks")
+                    .ifBlank { configuration.optString("remark") }.trim()
+                    .ifBlank { context.getString(R.string.newProfile) }
+                configuration.remove("remarks")
+                configuration.remove("remark")
+                profiles.add(Profile(linkId = link.id, name = label, config = configuration.toString(2)))
+            }
+        }
+        return DetectedProfiles(profiles.reversed(), skipped)
     }
 
-    private fun detectProfiles(link: Link, value: String): Pair<Link.Type, List<Profile>> {
-        jsonProfiles(link, value)?.let { return Link.Type.Json to it }
-        val candidate = normalizeBody(LinkHelper.tryDecodeBase64(value))
-        jsonProfiles(link, candidate)?.let { return Link.Type.Subscription to it }
-        val lines = candidate.lineSequence().map(::normalizeBody).filter(String::isNotEmpty).toList()
-        val profiles = lines.mapIndexed { index, line ->
+    private suspend fun lineProfiles(link: Link, value: String): DetectedProfiles {
+        val profiles = mutableListOf<Profile>()
+        val skipped = mutableListOf<SkippedProfile>()
+        value.lineSequence().map(::normalizeBody).filter(String::isNotEmpty).forEachIndexed { index, line ->
+            currentCoroutineContext().ensureActive()
             check(line.contains("://") || line.startsWith("{")) { "Invalid profile at line ${index + 1}" }
-            val helper = LinkHelper(settings, line)
-            check(helper.isValid()) { "Invalid profile at line ${index + 1}" }
-            Profile(linkId = link.id, name = helper.remark(), config = helper.json())
-        }.reversed()
-        return Link.Type.Subscription to profiles
+            val uri = runCatching { java.net.URI(line) }.getOrNull()
+            val protocol = uri?.scheme?.lowercase() ?: line.substringBefore("://").lowercase()
+            check(protocol.matches(Regex("[a-z][a-z0-9+.-]*"))) { "Invalid share scheme at line ${index + 1}" }
+            val label = uri?.let { LinkHelper.remark(it) }?.takeIf(String::isNotBlank) ?: "$protocol ${index + 1}"
+            try {
+                val helper = LinkHelper(settings, line)
+                check(helper.isValid()) { "Invalid profile at line ${index + 1}" }
+                profiles.add(Profile(linkId = link.id, name = helper.remark(), config = helper.json()))
+            } catch (_: UnsupportedProfileException) {
+                skipped.add(SkippedProfile(label, protocol))
+            }
+        }
+        return DetectedProfiles(profiles.reversed(), skipped)
     }
 
     private suspend fun manageProfiles(

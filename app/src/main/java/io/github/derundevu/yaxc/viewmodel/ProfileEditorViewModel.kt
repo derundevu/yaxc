@@ -16,10 +16,13 @@ import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.helper.ConfigHelper
 import io.github.derundevu.yaxc.helper.XrayValidationHelper
+import io.github.derundevu.yaxc.helper.InlineProfileImportHelper
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import io.github.derundevu.yaxc.presentation.profile.ProfileSourceOption
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,18 +51,61 @@ class ProfileEditorViewModel internal constructor(
         private set
     var isSaving by mutableStateOf(false)
         private set
-    private var initialized = false
+    var initialized = false
+        private set
+    var fileImportPending = false
+        private set
+    var importReport by mutableStateOf<SubscriptionRefreshHelper.RefreshResult?>(null)
+        private set
+    var importReportAcknowledged by mutableStateOf(false)
+        private set
     private lateinit var profile: Profile
     private lateinit var config: Config
 
     fun initialize(id: Long, name: String, text: String, sourceId: Long?, file: Uri?) {
         if (initialized) return
         initialized = true
+        fileImportPending = file != null
         viewModelScope.launch {
+            val fileContents = file?.let { withContext(Dispatchers.IO) { readFile(it) } }
+            var importedFileProfile: Profile? = null
+            if (file != null) {
+                val parsed = try {
+                    SubscriptionRefreshHelper(app, settings).parseProfiles(Link(), checkNotNull(fileContents))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                if (parsed != null) {
+                    if (parsed.profiles.size == 1 && parsed.skippedProfiles.isEmpty()) {
+                        importedFileProfile = parsed.profiles.single()
+                    } else {
+                        importReport = if (parsed.profiles.isEmpty()) {
+                            SubscriptionRefreshHelper.RefreshResult(1, 0, 1,
+                                warnings = listOf(SubscriptionRefreshHelper.SourceWarning(
+                                    0, app.getString(R.string.profileImportTitle), parsed.skippedProfiles,
+                                )))
+                        } else {
+                            try {
+                                InlineProfileImportHelper.append(app, settings, parsed, sourceId)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                SubscriptionRefreshHelper.RefreshResult(1, 0, 1)
+                            }
+                        }
+                        return@launch
+                    }
+                }
+            }
+            fileImportPending = false
+            val fileProfile = importedFileProfile
             val loaded = withContext(Dispatchers.IO) {
                 val config = app.configRepository.get()
                 val profile = when {
-                    file != null -> Profile(linkId = sourceId, config = readFile(file))
+                    fileProfile != null -> fileProfile.copy(linkId = sourceId)
+                    file != null -> Profile(linkId = sourceId, config = checkNotNull(fileContents))
                     id == 0L -> Profile(name = name, config = text, linkId = sourceId)
                     else -> app.profileRepository.find(id)
                 }
@@ -103,6 +149,14 @@ class ProfileEditorViewModel internal constructor(
             isLoading = false
         }
     }
+    suspend fun acknowledgeImportReport() = withContext(NonCancellable) {
+        val report = importReport ?: return@withContext
+        withContext(Dispatchers.IO) {
+            settings.acknowledgeSubscriptionWarnings(report.warnings)
+        }
+        importReportAcknowledged = true
+    }
+
 
     /** A save is successful only after the captured draft has been persisted. */
     suspend fun save(check: Boolean): ProfileSaveResult {

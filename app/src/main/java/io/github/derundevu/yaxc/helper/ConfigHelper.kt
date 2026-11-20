@@ -18,7 +18,6 @@ class ConfigHelper(
 
     init {
         process("log", config.log, config.logMode)
-        process("dns", config.dns, config.dnsMode)
         process("inbounds", config.inbounds, config.inboundsMode)
         process("outbounds", config.outbounds, config.outboundsMode)
         applyManagedRuntimeConfig(config)
@@ -71,7 +70,7 @@ class ConfigHelper(
         base.put("log", JsonHelper.mergeObjects(JsonHelper.getObject(base, "log"), runtimeLog()))
         val outbounds = ensureManagedOutbounds(JsonHelper.getArray(base, "outbounds"))
         base.put("outbounds", outbounds)
-        base.put("dns", mergeRuntimeDns(JsonHelper.getObject(base, "dns")))
+        base.put("dns", effectiveDns(settings, JsonHelper.getObject(base, "dns"), config.dns, config.dnsMode))
         base.put("inbounds", runtimeInbounds())
         base.put("routing", mergeRuntimeRouting(combineRouting(config, outbounds), outbounds))
     }
@@ -87,30 +86,6 @@ class ConfigHelper(
 
     private fun runtimeLog(): JSONObject {
         return JSONObject().put("loglevel", "warning")
-    }
-
-    private fun managedDnsServers(): JSONArray {
-        return JSONArray()
-            .put(settings.primaryDns)
-            .put(settings.secondaryDns)
-            .apply {
-                if (settings.enableIpV6) {
-                    put(settings.primaryDnsV6)
-                    put(settings.secondaryDnsV6)
-                }
-            }
-    }
-
-    private fun runtimeDns(): JSONObject {
-        return JSONObject().put("servers", managedDnsServers())
-    }
-
-    private fun mergeRuntimeDns(currentDns: JSONObject): JSONObject {
-        return if (currentDns.length() == 0) {
-            runtimeDns()
-        } else {
-            JsonHelper.mergeObjects(currentDns, runtimeDns())
-        }
     }
 
     private fun runtimeInbounds(): JSONArray {
@@ -225,7 +200,7 @@ class ConfigHelper(
                 .put("outboundTag", resolveRoutingOutboundTag("dns-out", outbounds))
         } else {
             JSONObject()
-                .put("ip", managedDnsServers())
+                .put("ip", JSONArray(managedDnsServers(settings)))
                 .put("port", 53)
                 .put("outboundTag", resolveRoutingOutboundTag("proxy", outbounds))
         }
@@ -397,5 +372,33 @@ class ConfigHelper(
             "fc00::/7",
             "fe80::/10",
         )
+    }
+
+    companion object {
+        internal fun effectiveDns(settings: Settings, profile: JSONObject, global: String, mode: Config.Mode): JSONObject {
+            val dns = when (mode) {
+                Config.Mode.Replace -> return JsonHelper.makeObject(global)
+                Config.Mode.Merge -> JsonHelper.mergeObjects(profile, JsonHelper.makeObject(global))
+                Config.Mode.Disable -> profile
+            }
+            val servers = dns.optJSONArray("servers") ?: JSONArray().also { dns.put("servers", it) }
+            val addresses = HashSet<String>()
+            for (index in 0 until servers.length()) {
+                (servers.opt(index) as? String)?.let(addresses::add)
+            }
+            for (address in managedDnsServers(settings)) {
+                if (addresses.add(address)) servers.put(address)
+            }
+            return dns
+        }
+
+        private fun managedDnsServers(settings: Settings): List<String> = buildList {
+            add(settings.primaryDns)
+            add(settings.secondaryDns)
+            if (settings.enableIpV6) {
+                add(settings.primaryDnsV6)
+                add(settings.secondaryDnsV6)
+            }
+        }
     }
 }

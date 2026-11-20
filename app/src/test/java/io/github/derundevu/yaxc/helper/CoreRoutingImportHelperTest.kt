@@ -105,6 +105,28 @@ class CoreRoutingImportHelperTest {
         assertEquals("proxy", JSONObject(result.routing).getJSONArray("rules").getJSONObject(0).getString("outboundTag"))
     }
 
+    @Test fun naiveRulesMapToProxyButRemainAmbiguousAlongsideAnotherProxy() {
+        val config = JSONObject("""{"outbounds":[{"tag":"naive-exit","protocol":"naive",
+            "settings":{"address":"proxy.example.org","port":443,"user":"test-user","pass":"test-pass","quic":false}}],
+            "routing":{"rules":[{"domain":["full:example.test"],"outboundTag":"naive-exit"}]}}""")
+        val supported = preview(config.toString())
+        assertNull(supported.rules.single().problem)
+        assertEquals("proxy", supported.rules.single().outbound!!.suggestedTarget)
+        val imported = CoreRoutingImportHelper.importIntoDraft(
+            supported, "{}", setOf(0), emptyMap(), emptyMap(), "socks", false, false)
+        val rule = JSONObject(imported.routing).getJSONArray("rules").getJSONObject(0)
+        assertEquals("proxy", rule.getString("outboundTag"))
+        assertEquals("full:example.test", rule.getJSONArray("domain").getString(0))
+        config.getJSONArray("outbounds").put(JSONObject("""{"tag":"another","protocol":"vless"}"""))
+        val ambiguous = preview(config.toString())
+        assertNull(ambiguous.rules.single().problem)
+        assertNull(ambiguous.rules.single().outbound!!.suggestedTarget)
+        assertThrows(IllegalArgumentException::class.java) {
+            CoreRoutingImportHelper.importIntoDraft(
+                ambiguous, "{}", setOf(0), emptyMap(), emptyMap(), "socks", false, false)
+        }
+    }
+
     @Test fun masqueMapsToProxyWhileUnsupportedProtocolsCannotBeMappedAround() {
         fun profile(protocol: String) = """{"outbounds":[{"tag":"source-exit","protocol":"$protocol"}],
             "routing":{"rules":[{"domain":["full:example.test"],"outboundTag":"source-exit"}]}}"""

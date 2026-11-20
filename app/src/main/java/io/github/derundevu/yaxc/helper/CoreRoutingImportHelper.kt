@@ -21,7 +21,7 @@ data class CoreRoutingImportPreview(
 data class CoreRoutingImportResult(val routing: String, val added: Int, val skipped: Int)
 
 object CoreRoutingImportHelper {
-    private val proxyProtocols = setOf("vless", "vmess", "trojan", "shadowsocks", "socks", "http", "wireguard", "hysteria", "masque")
+    private val proxyProtocols = setOf("vless", "vmess", "trojan", "shadowsocks", "socks", "http", "wireguard", "hysteria", "masque", "naive")
 
     fun preview(profile: CoreRoutingImportProfile): CoreRoutingImportPreview {
         val config = JSONObject(profile.config)

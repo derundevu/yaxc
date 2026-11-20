@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class LinksManagerViewModel(application: Application) : AndroidViewModel(application) {
-    class Outcome(val feedback: FeedbackMessage? = null)
+    class Outcome(val feedback: FeedbackMessage? = null, val completed: Boolean = feedback != null)
 
     private val app = getApplication<Yaxc>()
     private val settings = Settings(app)
@@ -44,6 +44,14 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
         private set
     var refreshResult by mutableStateOf<SubscriptionRefreshHelper.RefreshResult?>(null)
         private set
+    private var reportCompletesOperation = true
+
+    suspend fun acknowledgeReport() = withContext(NonCancellable) {
+        val report = refreshResult ?: return@withContext
+        withContext(Dispatchers.IO) { settings.acknowledgeSubscriptionWarnings(report.warnings) }
+        refreshResult = null
+        if (reportCompletesOperation) _outcome.value = Outcome(completed = true)
+    }
     private val _outcome = MutableStateFlow<Outcome?>(null)
     val outcome: StateFlow<Outcome?> = _outcome.asStateFlow()
 
@@ -87,6 +95,15 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
                 formError = R.string.subscriptionSourceLoadFailed
                 return@runOperation null
             }
+            if (parsed != null && parsed.profiles.isEmpty()) {
+                formError = R.string.subscriptionSourceLoadFailed
+                reportCompletesOperation = false
+                refreshResult = SubscriptionRefreshHelper.RefreshResult(
+                    attempted = 1, refreshed = 0, failed = 1,
+                    warnings = listOf(sourceWarning(link, parsed)),
+                )
+                return@runOperation null
+            }
 
             // Resolving can be canceled; once persistence starts, finish it and report its result.
             canCancel = false
@@ -106,14 +123,23 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
                 } else {
                     helper.saveResolvedLink(link, checkNotNull(parsed))
                 }
-                feedback(R.string.feedbackSourceSaved, FeedbackKind.Success)
+                if (parsed.skippedProfiles.isNotEmpty()) {
+                    val warnings = listOf(sourceWarning(link, parsed))
+                    reportCompletesOperation = true
+                    refreshResult = SubscriptionRefreshHelper.RefreshResult(1, 1, 0, warnings = warnings)
+                    null
+                } else {
+                    feedback(R.string.feedbackSourceSaved, FeedbackKind.Success)
+                }
             }
         }
     }
 
     fun refresh(linkId: Long?) {
         runOperation(cancelable = true) {
-            refreshResult = helper.refreshLinks(linkId)
+            val result = helper.refreshLinks(linkId)
+            reportCompletesOperation = true
+            refreshResult = result
             null
         }
     }
@@ -165,6 +191,11 @@ class LinksManagerViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+
+    private fun sourceWarning(link: Link, parsed: SubscriptionRefreshHelper.ParsedLinkSource) =
+        SubscriptionRefreshHelper.SourceWarning(
+            link.id, link.name, parsed.skippedProfiles,
+        )
 
     private fun feedback(message: Int, kind: FeedbackKind) = FeedbackMessage(app.getString(message), kind)
 }

@@ -714,6 +714,28 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     }
 
     @Test
+    fun cancellationAfterPartialSourceCommitKeepsItsSkippedReportDurable() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val first = source(server.url, "partial")
+            val second = source(server.url, "cancelled")
+            server.enqueue("${vless("supported")}\nanytls://test-pass@proxy.example.org#Unavailable")
+            val held = server.enqueue(body("must not apply"), held = true)
+            val pending = async(Dispatchers.IO) { helper().refreshLinks() }
+            held.awaitRequest()
+            val warning = SubscriptionRefreshHelper.SourceWarning(first.id, first.name,
+                listOf(SubscriptionRefreshHelper.SkippedProfile("Unavailable", "anytls")))
+            assertEquals(listOf(warning), settings.pendingSubscriptionWarnings())
+            pending.cancel(CancellationException("synthetic cancellation"))
+            held.release()
+            assertTrue(expectFailure { pending.await() } is CancellationException)
+            pending.join()
+            assertEquals("supported", profiles.linkProfiles(first.id).single().name)
+            assertTrue(profiles.linkProfiles(second.id).isEmpty())
+            assertEquals(listOf(warning), settings.pendingSubscriptionWarnings())
+        }
+    }
+
+    @Test
     fun rawBase64AndWhitespaceVlessBatchesPreserveUnicodeAndAllMembers() = runBlocking {
         SubscriptionHttpServer().use { server ->
             val responses = listOf(
@@ -741,6 +763,182 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 assertEquals(if (index == 0) Link.Type.Json else Link.Type.Subscription, links.find(link.id)!!.type)
             }
         }
+    }
+
+    @Test
+    fun mixedNaiveSubscriptionsReportEveryUnsupportedRecordWithoutNativeFallback() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = source(server.url)
+            val mixed = """
+                http2://test-user:test-pass@proxy.example.org:443
+                naive+https://test-user:test%3Apass%2Bword@proxy.example.org?padding=1&tfo=0#HTTPS
+                naive+quic://test-user:test-pass@proxy.example.org?padding=1&tfo=0#HTTP3
+                ${vless("VLESS")}
+                anytls://test-pass@proxy.example.org#Unsupported%20TLS
+                tuic://test-user:test-pass@proxy.example.org#Unsupported%20QUIC
+                naive+https://test-user:test-pass@proxy.example.org?padding=0#Custom%20padding
+            """.trimIndent()
+            server.enqueue(Base64.getEncoder().encodeToString(mixed.toByteArray()))
+            val parsed = helper().resolveProfiles(link)
+            assertEquals(listOf("VLESS", "HTTP3", "HTTPS"), parsed.profiles.map { it.name })
+            assertEquals(listOf(
+                SubscriptionRefreshHelper.SkippedProfile("http2 1", "http2"),
+                SubscriptionRefreshHelper.SkippedProfile("Unsupported TLS", "anytls"),
+                SubscriptionRefreshHelper.SkippedProfile("Unsupported QUIC", "tuic"),
+                SubscriptionRefreshHelper.SkippedProfile("Custom padding", "naive+https"),
+            ), parsed.skippedProfiles)
+            helper().saveResolvedLink(link, parsed)
+            val before = profiles.linkProfiles(link.id)
+            server.enqueue(mixed)
+            val refreshed = helper().refreshLinks(link.id)
+            assertEquals(1, refreshed.refreshed)
+            assertEquals(parsed.skippedProfiles, refreshed.warnings.single().skippedProfiles)
+            assertTrue(refreshed.changes.all { it.added.isEmpty() && it.removed.isEmpty() && it.modified.isEmpty() })
+            assertEquals(before, profiles.linkProfiles(link.id))
+            server.enqueue(mixed)
+            assertEquals(parsed.skippedProfiles,
+                helper().refreshDueLinks(System.currentTimeMillis() + 86_400_000L).warnings.single().skippedProfiles)
+        }
+    }
+
+    @Test
+    fun singBoxJsonConvertsNaiveBbrAndVlessIntoIndependentUsableProfiles() = runBlocking {
+        val value = """
+            {"inbounds":[],"route":{"final":"select"},"outbounds":[
+              {"type":"selector","tag":"select","outbounds":["HTTP3","VLESS"]},
+              {"type":"urltest","tag":"test","outbounds":["HTTP3","VLESS"]},
+              {"type":"direct","tag":"direct"},
+              {"type":"naive","tag":"HTTP3","server":"proxy.example.org","server_port":8443,
+               "username":"test-user","password":"test:pass+word","quic":true,
+               "quic_congestion_control":"bbr","tls":{"enabled":true,"server_name":"tls.example.org"}},
+              {"type":"vless","tag":"VLESS","server":"proxy.example.org","server_port":443,
+               "uuid":"00000000-0000-4000-8000-000000000001","flow":"xtls-rprx-vision",
+               "tls":{"enabled":true,"server_name":"tls.example.org",
+                 "utls":{"enabled":true,"fingerprint":"chrome"},
+                 "reality":{"enabled":true,"public_key":"synthetic-key","short_id":"0123abcd"}}},
+              {"type":"anytls","tag":"Unsupported TLS"},
+              {"type":"tuic","tag":"Unsupported QUIC"},
+              {"type":"vless","tag":"WebSocket","server":"proxy.example.org","server_port":443,
+               "uuid":"00000000-0000-4000-8000-000000000002","tls":{"enabled":true},
+               "transport":{"type":"ws","path":"/socket?token=a+b","headers":{"Host":"front.example.org"}}}
+            ]}
+        """.trimIndent()
+        val parsed = helper().parseProfiles(Link(), value)
+        assertEquals(listOf("WebSocket", "VLESS", "HTTP3"), parsed.profiles.map { it.name })
+        assertEquals(listOf("selector", "urltest", "direct", "anytls", "tuic"), parsed.skippedProfiles.map { it.protocol })
+        val naive = JSONObject(parsed.profiles.last().config).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("naive", naive.getString("protocol"))
+        assertEquals("bbr", naive.getJSONObject("settings").getString("quicCongestionControl"))
+        assertEquals("test:pass+word", naive.getJSONObject("settings").getString("pass"))
+        assertFalse(naive.getJSONObject("settings").getBoolean("udpOverTcp"))
+        assertEquals("tls.example.org", naive.getJSONObject("streamSettings").getJSONObject("tlsSettings").getString("serverName"))
+        val vless = JSONObject(parsed.profiles[1].config).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("reality", vless.getJSONObject("streamSettings").getString("security"))
+        assertEquals("synthetic-key", vless.getJSONObject("streamSettings").getJSONObject("realitySettings").getString("publicKey"))
+        val websocket = JSONObject(parsed.profiles.first().config).getJSONArray("outbounds").getJSONObject(0)
+            .getJSONObject("streamSettings").getJSONObject("wsSettings")
+        assertEquals("/socket?token=a+b", websocket.getString("path"))
+        assertEquals("front.example.org", websocket.getJSONObject("headers").getString("Host"))
+        assertFalse(JSONObject(parsed.profiles.last().config).has("route"))
+    }
+
+    @Test
+    fun subscriptionRefreshImportsSingBoxNaiveExtraHeadersWithSingBoxValueSemantics() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = source(server.url)
+            server.enqueue("""
+                {"outbounds":[{"type":"naive","tag":"Naive","server":"proxy.example.org","server_port":443,
+                  "username":"test-user","password":"test-pass","tls":{"enabled":true},"extra_headers":{
+                    "X-API-Key":"synthetic-value","X-Test-Order":["first","second"],
+                    "X-Test-Empty-String":"","X-Test-Empty-List":[],"X-Test-Null":null
+                  }}]}
+            """.trimIndent())
+            val result = helper().refreshLinks(link.id)
+            assertEquals(1, result.refreshed)
+            assertTrue(result.warnings.isEmpty())
+            val headers = JSONObject(profiles.linkProfiles(link.id).single().config)
+                .getJSONArray("outbounds").getJSONObject(0).getJSONObject("settings").getJSONObject("headers")
+            assertEquals(mapOf("X-API-Key" to "synthetic-value", "X-Test-Order" to "first", "X-Test-Empty-String" to ""),
+                headers.keys().asSequence().associateWith(headers::getString))
+        }
+    }
+
+    @Test
+    fun unsupportedSingBoxOptionsAreReportedButMalformedSupportedEntriesAbortImport() = runBlocking {
+        val base = JSONObject("""{"type":"naive","tag":"Naive","server":"proxy.example.org","server_port":443,
+            "username":"test-user","password":"test-pass","tls":{"enabled":true}}""")
+        val overrides = listOf(
+            JSONObject(base.toString()).put("tls", JSONObject("""{"enabled":true,"insecure":true}""")),
+            JSONObject(base.toString()).put("tls", JSONObject("""{"enabled":true,"alpn":["h2"]}""")),
+            JSONObject(base.toString()).put("tls", JSONObject("""{"enabled":true,"utls":{"enabled":true}}""")),
+            JSONObject(base.toString()).put("quic", true).put("quic_congestion_control", "unknown"),
+            JSONObject(base.toString()).put("transport", JSONObject("""{"type":"ws"}""")),
+            JSONObject(base.toString()).put("extra_headers", JSONObject("""{"Host":"other.example.org"}""")),
+            JSONObject(base.toString()).put("extra_headers", JSONObject("""{"X-Test":"one","x-test":"two"}""")),
+            JSONObject(base.toString()).put("headers", JSONObject("""{"X-Test":"one"}"""))
+                .put("extra_headers", JSONObject("""{"X-Test":"two"}""")),
+        )
+        for (unsupported in overrides) {
+            val parsed = helper().parseProfiles(Link(), JSONObject().put("outbounds",
+                JSONArray().put(base).put(unsupported)).toString())
+            assertEquals(1, parsed.profiles.size)
+            assertEquals(listOf(SubscriptionRefreshHelper.SkippedProfile("Naive", "naive")), parsed.skippedProfiles)
+        }
+        val malformed = JSONObject(base.toString()).put("server_port", "invalid")
+        val error = expectFailure { helper().parseProfiles(Link(), JSONObject().put("outbounds",
+            JSONArray().put(base).put(malformed)).toString()) }
+        assertTrue(error is IllegalArgumentException)
+        assertFalse(error is UnsupportedProfileException)
+
+        val malformedHeaders = JSONObject(base.toString())
+            .put("extra_headers", JSONObject().put("X-Test", JSONArray().put("first").put(2)))
+        assertTrue(expectFailure { helper().parseProfiles(Link(), JSONObject().put("outbounds",
+            JSONArray().put(base).put(malformedHeaders)).toString()) } is IllegalArgumentException)
+    }
+
+    @Test
+    fun allUnsupportedRefreshPreservesSourceSelectionProfilesAndReportsSkippedEntries() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val link = seed(server, "existing")
+            val beforeLink = links.find(link.id)
+            val before = profiles.linkProfiles(link.id)
+            settings.selectedProfile = before.single().id
+            val unsupported = "anytls://test-pass@proxy.example.org#Unavailable"
+            server.enqueue(unsupported)
+            val result = helper().refreshLinks(link.id)
+            assertEquals(0, result.refreshed)
+            assertEquals(1, result.failed)
+            assertEquals(listOf(SubscriptionRefreshHelper.SkippedProfile("Unavailable", "anytls")),
+                result.warnings.single().skippedProfiles)
+            assertEquals(beforeLink, links.find(link.id))
+            assertEquals(before, profiles.linkProfiles(link.id))
+            assertEquals(before.single().id, settings.selectedProfile)
+
+            val unsaved = Link(name = "unsaved")
+            val parsed = helper().parseProfiles(unsaved, unsupported)
+            assertTrue(parsed.profiles.isEmpty())
+            expectFailure { helper().saveResolvedLink(unsaved, parsed) }
+            assertEquals(0L, unsaved.id)
+            assertEquals(listOf(link.id), links.orderedIds())
+            server.enqueue("${vless("valid")}\nnaive+https://test-user@proxy.example.org")
+            assertEquals(1, helper().refreshLinks(link.id).failed)
+            assertEquals(before, profiles.linkProfiles(link.id))
+        }
+    }
+
+    @Test
+    fun singBoxUdpOverTcpRequiresAndPreservesExplicitOptIn() = runBlocking {
+        val outbound = JSONObject("""{"type":"naive","server":"proxy.example.org","server_port":443,
+            "username":"test-user","password":"test-pass","quic":true,"tls":{"enabled":true},
+            "udp_over_tcp":{"enabled":true,"version":2}}""")
+        val parsed = helper().parseProfiles(Link(), JSONObject().put("outbounds", JSONArray().put(outbound)).toString())
+        val settings = JSONObject(parsed.profiles.single().config).getJSONArray("outbounds")
+            .getJSONObject(0).getJSONObject("settings")
+        assertTrue(settings.getBoolean("udpOverTcp"))
+        outbound.put("udp_over_tcp", JSONObject("""{"enabled":true,"version":1}"""))
+        val unsupported = helper().parseProfiles(Link(), JSONObject().put("outbounds", JSONArray().put(outbound)).toString())
+        assertTrue(unsupported.profiles.isEmpty())
+        assertEquals(listOf(SubscriptionRefreshHelper.SkippedProfile("naive 1", "naive")), unsupported.skippedProfiles)
     }
 
     private fun vless(name: String) =

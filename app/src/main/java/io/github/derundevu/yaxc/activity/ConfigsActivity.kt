@@ -1,5 +1,7 @@
 package io.github.derundevu.yaxc.activity
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
@@ -9,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.presentation.configs.ConfigSection
 import io.github.derundevu.yaxc.presentation.configs.ConfigsScreen
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
@@ -22,6 +25,9 @@ class ConfigsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null && intent.getBooleanExtra(OPEN_DNS, false)) {
+            draft.selectedSection = ConfigSection.Dns
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.navigationBarColor = Color.TRANSPARENT
@@ -40,6 +46,7 @@ class ConfigsActivity : AppCompatActivity() {
                     onSave = ::saveConfigs,
                     onSectionSelected = { draft.selectedSection = it },
                     onModeSelected = draft::selectMode,
+                    loadDnsPreview = draft::previewDns,
                 )
             }
         }
@@ -51,5 +58,12 @@ class ConfigsActivity : AppCompatActivity() {
             if (draft.save()) finish()
             else feedback.show(getString(R.string.invalidConfig), FeedbackKind.Error)
         }
+    }
+
+    companion object {
+        private const val OPEN_DNS = "openDns"
+
+        internal fun openDns(context: Context): Intent =
+            Intent(context, ConfigsActivity::class.java).putExtra(OPEN_DNS, true)
     }
 }

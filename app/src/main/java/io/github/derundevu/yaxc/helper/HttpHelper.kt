@@ -61,31 +61,65 @@ class HttpHelper private constructor() {
             return withContext(Dispatchers.IO) {
                 currentCoroutineContext().ensureActive()
                 val defaultUserAgent = "yaxc/${BuildConfig.VERSION_NAME}"
-                val connection = getConnection(
-                    link = link,
-                    userAgent = userAgent ?: defaultUserAgent,
-                    headers = headers,
-                )
-                try {
-                    connection.connect()
-                    val responseCode = connection.responseCode
-                    val responseBody = connection.readResponseText()
+                var current = URL(link)
+                var requestHeaders = headers
+                repeat(21) {
                     currentCoroutineContext().ensureActive()
-                    if (responseCode != HttpURLConnection.HTTP_OK || responseBody == null) {
-                        throw IOException("HTTP Error: $responseCode")
+                    if (current.protocol != "http" && current.protocol != "https") {
+                        throw IOException("Unsupported subscription URL scheme")
                     }
-                    HttpResponse(
-                        body = responseBody,
-                        headers = connection.headerFields
-                            .filterKeys { it != null }
-                            .mapKeys { it.key!! },
+                    val connection = getConnection(
+                        link = current.toExternalForm(),
+                        userAgent = userAgent ?: defaultUserAgent,
+                        headers = requestHeaders,
                     )
-                } catch (error: Exception) {
-                    currentCoroutineContext().ensureActive()
-                    throw error
-                } finally {
-                    connection.disconnect()
+                    connection.instanceFollowRedirects = false
+                    try {
+                        connection.connect()
+                        val responseCode = connection.responseCode
+                        if (responseCode == 301 || responseCode == 302 || responseCode == 303 ||
+                            responseCode == 307 || responseCode == 308
+                        ) {
+                            val location = connection.getHeaderField("Location")
+                                ?: throw IOException("HTTP redirect has no Location")
+                            val next = URL(current, location)
+                            if (current.protocol == "https" && next.protocol == "http") {
+                                throw IOException("HTTPS subscription redirects to HTTP are not allowed")
+                            }
+                            if (next.protocol != "http" && next.protocol != "https") {
+                                throw IOException("Unsupported subscription redirect scheme")
+                            }
+                            if (current.protocol != next.protocol || current.host != next.host ||
+                                (current.port.takeIf { it != -1 } ?: current.defaultPort) !=
+                                (next.port.takeIf { it != -1 } ?: next.defaultPort)
+                            ) {
+                                requestHeaders = requestHeaders.filterKeys {
+                                    !it.equals("Authorization", true) && !it.equals("Cookie", true) &&
+                                        !it.equals("Proxy-Authorization", true)
+                                }
+                            }
+                            current = next
+                            return@repeat
+                        }
+                        val responseBody = connection.readResponseText()
+                        currentCoroutineContext().ensureActive()
+                        if (responseCode != HttpURLConnection.HTTP_OK || responseBody == null) {
+                            throw IOException("HTTP Error: $responseCode")
+                        }
+                        return@withContext HttpResponse(
+                            body = responseBody,
+                            headers = connection.headerFields
+                                .filterKeys { it != null }
+                                .mapKeys { it.key!! },
+                        )
+                    } catch (error: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        throw error
+                    } finally {
+                        connection.disconnect()
+                    }
                 }
+                throw IOException("Too many subscription redirects")
             }
         }
 

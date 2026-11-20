@@ -6,6 +6,9 @@ import androidx.core.content.edit
 import androidx.core.os.LocaleListCompat
 import io.github.derundevu.yaxc.BuildConfig
 import io.github.derundevu.yaxc.helper.AntifilterHelper
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
+import org.json.JSONArray
+import org.json.JSONObject
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import java.io.File
 import java.security.SecureRandom
@@ -76,6 +79,8 @@ class Settings(private val context: Context) {
     companion object {
         private const val LEGACY_APPS_ROUTING_MODE_KEY = "appsRoutingMode"
         private const val APPS_ROUTING_MODE_KEY = "appsRoutingModeV2"
+        private const val SUBSCRIPTION_WARNINGS_KEY = "pendingSubscriptionWarnings"
+        private val subscriptionWarningsLock = Any()
         private const val LEGACY_DEFAULT_USER_AGENT = "${BuildConfig.APPLICATION_ID}/${BuildConfig.VERSION_NAME}"
         private const val DEFAULT_USER_AGENT = "yaxc/${BuildConfig.VERSION_NAME}"
         private const val PREVIOUS_DEFAULT_PING_ADDRESS = "https://www.google.com"
@@ -342,6 +347,54 @@ class Settings(private val context: Context) {
     var refreshLinksOnOpen: Boolean
         get() = sharedPreferences.getBoolean("refreshLinksOnOpen", false)
         set(value) = sharedPreferences.edit { putBoolean("refreshLinksOnOpen", value) }
+
+    /** Reports survive worker completion and process recreation until explicitly acknowledged. */
+    fun pendingSubscriptionWarnings(): List<SubscriptionRefreshHelper.SourceWarning> =
+        synchronized(subscriptionWarningsLock) {
+            val array = JSONArray(sharedPreferences.getString(SUBSCRIPTION_WARNINGS_KEY, "[]"))
+            (0 until array.length()).map { index ->
+                val source = array.getJSONObject(index)
+                val profiles = source.getJSONArray("skippedProfiles")
+                SubscriptionRefreshHelper.SourceWarning(
+                    source.getLong("sourceId"),
+                    source.getString("sourceName"),
+                    (0 until profiles.length()).map { profileIndex ->
+                        val profile = profiles.getJSONObject(profileIndex)
+                        SubscriptionRefreshHelper.SkippedProfile(profile.getString("name"), profile.getString("protocol"))
+                    },
+                )
+            }
+        }
+
+    fun recordSubscriptionWarnings(warnings: List<SubscriptionRefreshHelper.SourceWarning>) {
+        if (warnings.isEmpty()) return
+        synchronized(subscriptionWarningsLock) {
+            val pending = pendingSubscriptionWarnings().associateByTo(linkedMapOf()) { it.sourceId }
+            warnings.filter { it.skippedProfiles.isNotEmpty() }.forEach { pending[it.sourceId] = it }
+            storeSubscriptionWarnings(pending.values.toList())
+        }
+    }
+
+    fun acknowledgeSubscriptionWarnings(warnings: List<SubscriptionRefreshHelper.SourceWarning>) {
+        if (warnings.isEmpty()) return
+        synchronized(subscriptionWarningsLock) {
+            // A newer report arriving while the dialog is open must remain pending.
+            storeSubscriptionWarnings(pendingSubscriptionWarnings().filterNot { it in warnings })
+        }
+    }
+
+    private fun storeSubscriptionWarnings(warnings: List<SubscriptionRefreshHelper.SourceWarning>) {
+        val array = JSONArray()
+        warnings.forEach { source ->
+            array.put(JSONObject().put("sourceId", source.sourceId).put("sourceName", source.sourceName)
+                .put("skippedProfiles", JSONArray().apply {
+                    source.skippedProfiles.forEach { profile ->
+                        put(JSONObject().put("name", profile.name).put("protocol", profile.protocol))
+                    }
+                }))
+        }
+        sharedPreferences.edit { putString(SUBSCRIPTION_WARNINGS_KEY, array.toString()) }
+    }
 
     /** Advanced */
     var primaryDns: String

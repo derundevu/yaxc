@@ -198,6 +198,86 @@ class LinkHelperTest : HelperSettingsTest() {
     }
 
     @Test
+    fun naiveHttpsDecodesPasswordBeforeColonSplittingAndPreservesPlusIpv6AndSni() {
+        val helper = LinkHelper(settings,
+            "naive+https://test%2Buser:test%3Apass%2Bword@[2001:db8::1]" +
+                "?padding=1&tfo=1&sni=proxy.example.org#Naive%20%2B+")
+        assertTrue(helper.isValid())
+        assertEquals("Naive ++", helper.remark())
+        val outbound = JSONObject(helper.json()).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("naive", outbound.getString("protocol"))
+        val options = outbound.getJSONObject("settings")
+        assertEquals("2001:db8::1", options.getString("address"))
+        assertEquals(443, options.getInt("port"))
+        assertEquals("test+user", options.getString("user"))
+        assertEquals("test:pass+word", options.getString("pass"))
+        assertFalse(options.getBoolean("quic"))
+        assertFalse(options.getBoolean("udpOverTcp"))
+        val stream = outbound.getJSONObject("streamSettings")
+        assertEquals("raw", stream.getString("network"))
+        assertEquals("proxy.example.org", stream.getJSONObject("tlsSettings").getString("serverName"))
+        assertTrue(stream.getJSONObject("sockopt").getBoolean("tcpFastOpen"))
+    }
+
+    @Test
+    fun naiveQuicKeepsHttp3SeparateFromUdpDestinationSupport() {
+        val helper = LinkHelper(settings,
+            "naive+quic://test-user:test-pass@proxy.example.org:8443?padding=1&tfo=0#HTTP3")
+        val outbound = JSONObject(helper.json()).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals(8443, outbound.getJSONObject("settings").getInt("port"))
+        assertTrue(outbound.getJSONObject("settings").getBoolean("quic"))
+        assertFalse(outbound.getJSONObject("settings").getBoolean("udpOverTcp"))
+    }
+
+    @Test
+    fun naiveUrisWithoutAuthenticationPreserveTheNoAuthExportRoundtrip() {
+        listOf("naive+https", "naive+quic").forEach { scheme ->
+            val helper = LinkHelper(settings, "$scheme://proxy.example.org#No%20auth")
+            assertTrue(helper.isValid())
+            assertEquals("No auth", helper.remark())
+            val options = JSONObject(helper.json()).getJSONArray("outbounds").getJSONObject(0)
+                .getJSONObject("settings")
+            assertEquals("", options.getString("user"))
+            assertEquals("", options.getString("pass"))
+            assertEquals(scheme == "naive+quic", options.getBoolean("quic"))
+        }
+    }
+
+    @Test
+    fun naiveUnsupportedSemanticsAndMalformedCredentialsNeverFallBackToNative() {
+        listOf("padding=0", "fp=chrome", "alpn=h2", "allowInsecure=1", "tfo=1")
+            .forEach { option ->
+                assertTrue(runCatching {
+                    LinkHelper(settings, "naive+quic://test-user:test-pass@proxy.example.org?$option")
+                }.exceptionOrNull() is UnsupportedProfileException)
+            }
+        listOf(
+            "naive+https://test-user@proxy.example.org",
+            "naive+https://test%3Auser:test-pass@proxy.example.org",
+            "naive+https://test-user:test-pass@proxy.example.org:0",
+            "naive+https://test-user:test-pass@proxy.example.org?padding=maybe",
+            "naive+https://test-user:test-pass@proxy.example.org?padding=1&padding=0",
+            "naive+https://test-user:test%xxpass@proxy.example.org",
+        ).forEach { value ->
+            val error = runCatching { LinkHelper(settings, value) }.exceptionOrNull()
+            assertTrue(error is IllegalArgumentException && error !is UnsupportedProfileException)
+        }
+    }
+
+    @Test
+    fun fullRawConfigKeepsNullsAndUnsupportedOutboundForExplicitCoreValidation() {
+        val raw = """{"outbounds":[{"protocol":"future-protocol","settings":{"value":null}}],"future":null}"""
+        assertJsonEquals(JSONObject(raw), JSONObject(LinkHelper(settings, raw).json()))
+    }
+
+    @Test
+    fun inlineSingBoxIsNeverMistakenForAnXrayDocument() {
+        val value = """{"outbounds":[{"type":"naive","server":"proxy.example.org","server_port":443,
+            "username":"test-user","password":"test-pass","tls":{"enabled":true}}]}"""
+        assertTrue(runCatching { LinkHelper(settings, value) }.exceptionOrNull() is UnsupportedProfileException)
+    }
+
+    @Test
     fun base64UtilityDecodesUtf8AndReturnsMalformedInputUnchanged() {
         assertEquals("Привет", LinkHelper.tryDecodeBase64("0J/RgNC40LLQtdGC"))
         assertEquals("a", LinkHelper.tryDecodeBase64("a"))

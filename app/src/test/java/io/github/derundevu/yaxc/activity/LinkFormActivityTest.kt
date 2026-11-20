@@ -3,6 +3,7 @@ package io.github.derundevu.yaxc.activity
 import android.os.Bundle
 
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -14,15 +15,18 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.dto.SubscriptionMetadata
+import io.github.derundevu.yaxc.helper.SubscriptionHttpServer
 import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.RoomTestSupport
 import io.github.derundevu.yaxc.testing.waitForAsyncState
 import io.github.derundevu.yaxc.viewmodel.LinksManagerViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -138,6 +142,69 @@ class LinkFormActivityTest : RoomTestSupport() {
             assertEquals(1, runBlocking { database.profileDao().linkProfiles(source.id).size })
         } finally {
             controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun newHttpSourceRequiresConfirmationBeforeAnyRequestAndCancelKeepsTheDraftUnsaved() {
+        SubscriptionHttpServer().use { server ->
+            val controller = open(Link(name = "Synthetic HTTP source", address = server.url))
+            try {
+                compose.onNodeWithText(app.getString(R.string.createSource)).performScrollTo().performClick()
+                compose.onNodeWithText(app.getString(R.string.subscriptionHttpWarningTitle)).assertIsDisplayed()
+                assertEquals(0, server.requestCount.get())
+                assertTrue(runBlocking { database.linkDao().all().first().isEmpty() })
+                controller.recreate()
+                compose.waitForIdle()
+                compose.onNodeWithText(app.getString(R.string.subscriptionHttpWarningTitle)).assertIsDisplayed()
+                compose.onNodeWithText(app.getString(R.string.cancel)).performClick()
+                compose.waitForIdle()
+                assertEquals(0, server.requestCount.get())
+                assertTrue(runBlocking { database.linkDao().all().first().isEmpty() })
+                assertFalse(controller.get().isFinishing)
+                compose.onNodeWithTag("source:address").assertTextContains(server.url)
+
+                server.enqueue("""{"remarks":"Imported over HTTP","outbounds":[{"protocol":"freedom"}]}""")
+                compose.onNodeWithText(app.getString(R.string.createSource)).performScrollTo().performClick()
+                compose.onNodeWithText(app.getString(R.string.subscriptionHttpConfirm)).performClick()
+                compose.waitForAsyncState(10_000) { controller.get().isFinishing }
+                assertEquals(1, server.requestCount.get())
+                val saved = runBlocking { database.linkDao().all().first().single() }
+                assertEquals(server.url, saved.address)
+                assertEquals(1, runBlocking { database.profileDao().linkProfiles(saved.id).size })
+            } finally {
+                controller.pause().stop().destroy()
+            }
+        }
+    }
+
+    @Test
+    fun changingAnHttpAddressRequiresFreshConsentButTheUnchangedSavedAddressDoesNot() {
+        SubscriptionHttpServer().use { server ->
+            val source = runBlocking {
+                val link = Link(name = "Consented HTTP source", address = server.url)
+                link.id = database.linkDao().insertAtEnd(link)
+                link
+            }
+            val controller = open(source)
+            try {
+                val changedAddress = "${server.url}/changed"
+                compose.onNodeWithTag("source:address").performScrollTo().performTextReplacement(changedAddress)
+                compose.onNodeWithText(app.getString(R.string.updateSource)).performScrollTo().performClick()
+                compose.onNodeWithText(app.getString(R.string.subscriptionHttpWarningTitle)).assertIsDisplayed()
+                compose.onNodeWithText(app.getString(R.string.cancel)).performClick()
+                assertEquals(0, server.requestCount.get())
+                assertEquals(source, runBlocking { database.linkDao().find(source.id) })
+
+                compose.onNodeWithTag("source:address").performScrollTo().performTextReplacement(server.url)
+                server.enqueue("""{"remarks":"Refreshed over HTTP","outbounds":[{"protocol":"freedom"}]}""")
+                save(controller)
+                compose.onNodeWithText(app.getString(R.string.subscriptionHttpWarningTitle)).assertDoesNotExist()
+                assertEquals(1, server.requestCount.get())
+                assertEquals(server.url, runBlocking { database.linkDao().find(source.id) }!!.address)
+            } finally {
+                controller.pause().stop().destroy()
+            }
         }
     }
 

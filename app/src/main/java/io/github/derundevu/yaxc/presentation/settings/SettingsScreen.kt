@@ -260,6 +260,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSave: () -> Unit,
     onSystemVpnSettings: () -> Unit,
+    onOpenCoreDns: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.Basic) }
@@ -484,6 +485,7 @@ fun SettingsScreen(
                         formState = formState,
                         tunRoutes = tunRoutes,
                         onFormStateChange = onFormStateChange,
+                        onOpenCoreDns = onOpenCoreDns,
                         onTunRoutesClick = {
                             tunRoutesDraft = tunRoutes.joinToString("\n")
                             showTunRoutesDialog = true
@@ -848,6 +850,7 @@ private fun AdvancedSettingsTab(
     formState: SettingsFormState,
     tunRoutes: List<String>,
     onFormStateChange: (SettingsFormState) -> Unit,
+    onOpenCoreDns: () -> Unit,
     onTunRoutesClick: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.lg)) {
@@ -875,6 +878,13 @@ private fun AdvancedSettingsTab(
                 label = textResource(R.string.secondaryDnsV6),
                 value = formState.secondaryDnsV6,
                 onValueChange = { onFormStateChange(formState.copy(secondaryDnsV6 = it)) },
+            )
+            SettingsDivider()
+            YaxcSettingsRow(
+                title = textResource(R.string.configCoreDns),
+                subtitle = textResource(R.string.configCoreDnsDescription),
+                icon = Icons.Outlined.Tune,
+                onClick = onOpenCoreDns,
             )
         }
 

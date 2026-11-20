@@ -73,7 +73,7 @@ object LiveRoutingHelper {
     private val packagePattern = Regex("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*")
     private val outboundProtocols = setOf(
         "block", "blackhole", "direct", "freedom", "http", "shadowsocks", "socks",
-        "vless", "vmess", "trojan", "hysteria", "masque", "dns", "wireguard",
+        "vless", "vmess", "trojan", "hysteria", "masque", "naive", "dns", "wireguard",
     )
     private val directProtocols = setOf("freedom", "direct")
     private val blockProtocols = setOf("blackhole", "block")

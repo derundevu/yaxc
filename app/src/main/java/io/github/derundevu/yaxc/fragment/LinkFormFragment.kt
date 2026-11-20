@@ -5,6 +5,7 @@ import android.content.DialogInterface
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.os.Parcelable
 import android.view.Window
 import android.view.WindowManager
 import androidx.activity.ComponentDialog
@@ -20,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -48,6 +50,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.viewmodel.LinksManagerViewModel
@@ -56,10 +59,13 @@ import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcProgressDialog
+import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.parcelize.Parcelize
 
 class LinkFormFragment : DialogFragment() {
     companion object {
@@ -94,6 +100,7 @@ class LinkFormFragment : DialogFragment() {
                     )
                     setContent {
                         YaxcAppTheme {
+                            val report = state.refreshResult
                             LinkFormDialogContent(
                                 link = link,
                                 busy = state.busy,
@@ -111,10 +118,17 @@ class LinkFormFragment : DialogFragment() {
                                     ))
                                 },
                             )
-                            LaunchedEffect(state.busy) {
-                                isCancelable = !state.busy
+                            LaunchedEffect(state.busy, report) {
+                                isCancelable = !state.busy && report == null
                             }
-                            if (state.busy) {
+                            if (report != null) {
+                                SubscriptionRefreshDialog(
+                                    result = report,
+                                    onClose = { lifecycleScope.launch { state.acknowledgeReport() } },
+                                    titleRes = if (report.refreshed > 0) R.string.subscriptionSourceSavedWithSkipped
+                                        else R.string.subscriptionSkippedTitle,
+                                )
+                            } else if (state.busy) {
                                 YaxcProgressDialog(
                                     title = textResource(R.string.feedbackSavingSource),
                                     onCancel = if (state.canCancel) ({ state.cancel() }) else null,
@@ -154,7 +168,7 @@ class LinkFormFragment : DialogFragment() {
         val defaultLinkName = textResource(R.string.newSource)
         val subscriptionAddressRequiredText = textResource(R.string.subscriptionAddressRequired)
         val invalidLinkText = textResource(R.string.invalidLink)
-        val onlyHttpsText = textResource(R.string.onlyHttps)
+        val addressSchemeRequiredText = textResource(R.string.subscriptionAddressSchemeRequired)
         val refreshIntervalLabel = textResource(R.string.sourceRefreshInterval)
         val invalidRefreshIntervalText = androidx.compose.ui.res.stringResource(
             R.string.invalidNumberValue,
@@ -185,6 +199,7 @@ class LinkFormFragment : DialogFragment() {
         }
         var refreshIntervalError by rememberSaveable { mutableStateOf<String?>(null) }
         var addressError by rememberSaveable { mutableStateOf<String?>(null) }
+        var pendingHttpDraft by rememberSaveable { mutableStateOf<UpdatedLinkForm?>(null) }
 
         fun shouldAutofillName(): Boolean {
             val trimmed = name.trim()
@@ -336,7 +351,7 @@ class LinkFormFragment : DialogFragment() {
                             },
                             enabled = !busy,
                             isError = addressError != null,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().testTag("source:address"),
                             label = { Text(text = textResource(R.string.linkAddress)) },
                             supportingText = {
                                 Text(text = addressError ?: textResource(R.string.sourceAddressRemoteLead))
@@ -441,8 +456,11 @@ class LinkFormFragment : DialogFragment() {
                                     addressError = invalidLinkText
                                     return@Button
                                 }
-                                if (modeAddress.isNotBlank() && uri?.scheme != "https") {
-                                    addressError = onlyHttpsText
+                                if (modeAddress.isNotBlank() && (uri == null ||
+                                    (!uri.scheme.equals("http", ignoreCase = true) && !uri.scheme.equals("https", ignoreCase = true)) ||
+                                    uri.host.isNullOrBlank() || (uri.port != -1 && uri.port !in 1..65535))
+                                ) {
+                                    addressError = addressSchemeRequiredText
                                     return@Button
                                 }
                                 val intervalText = refreshInterval.trim()
@@ -462,19 +480,24 @@ class LinkFormFragment : DialogFragment() {
                                 } else {
                                     null
                                 }
-                                onConfirm(
-                                    UpdatedLinkForm(
-                                        name = name.trim().ifBlank { defaultLinkName },
-                                        address = modeAddress,
-                                        userAgent = userAgent.trim().ifBlank { null }
-                                            .takeIf { sourceMode == SourceMode.Subscription },
-                                        xHwid = xHwid.trim().ifBlank { null }
-                                            .takeIf { sourceMode == SourceMode.Subscription },
-                                        customHeaders = customHeaders.trim().ifBlank { null }
-                                            .takeIf { sourceMode == SourceMode.Subscription },
-                                        refreshIntervalMinutes = intervalMinutes,
-                                    )
+                                val draft = UpdatedLinkForm(
+                                    name = name.trim().ifBlank { defaultLinkName },
+                                    address = modeAddress,
+                                    userAgent = userAgent.trim().ifBlank { null }
+                                        .takeIf { sourceMode == SourceMode.Subscription },
+                                    xHwid = xHwid.trim().ifBlank { null }
+                                        .takeIf { sourceMode == SourceMode.Subscription },
+                                    customHeaders = customHeaders.trim().ifBlank { null }
+                                        .takeIf { sourceMode == SourceMode.Subscription },
+                                    refreshIntervalMinutes = intervalMinutes,
                                 )
+                                if (uri?.scheme.equals("http", ignoreCase = true) &&
+                                    (link.id == 0L || modeAddress != link.address.trim())
+                                ) {
+                                    pendingHttpDraft = draft
+                                } else {
+                                    onConfirm(draft)
+                                }
                             },
                         ) {
                             Text(
@@ -489,6 +512,28 @@ class LinkFormFragment : DialogFragment() {
                 }
             }
         }
+        pendingHttpDraft?.let { draft ->
+            AlertDialog(
+                onDismissRequest = { pendingHttpDraft = null },
+                title = { Text(textResource(R.string.subscriptionHttpWarningTitle)) },
+                text = { Text(textResource(R.string.subscriptionHttpWarningMessage)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingHttpDraft = null
+                            onConfirm(draft)
+                        },
+                    ) {
+                        Text(textResource(R.string.subscriptionHttpConfirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingHttpDraft = null }) {
+                        Text(textResource(R.string.cancel))
+                    }
+                },
+            )
+        }
     }
 
     @Composable
@@ -496,12 +541,13 @@ class LinkFormFragment : DialogFragment() {
         return androidx.compose.ui.res.stringResource(id)
     }
 
-    private data class UpdatedLinkForm(
+    @Parcelize
+    internal data class UpdatedLinkForm(
         val name: String,
         val address: String,
         val userAgent: String?,
         val xHwid: String?,
         val customHeaders: String?,
         val refreshIntervalMinutes: Int?,
-    )
+    ) : Parcelable
 }

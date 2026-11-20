@@ -6,9 +6,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,9 +25,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Config
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
@@ -32,6 +39,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidD
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
+import kotlinx.coroutines.CancellationException
 
 enum class ConfigSection(
     @StringRes val titleRes: Int,
@@ -44,9 +52,11 @@ enum class ConfigSection(
     Routing(R.string.configSectionRouting, false),
 }
 
+internal data class DnsPreview(val connection: String, val json: String, val noUpstreams: Boolean)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConfigsScreen(
+internal fun ConfigsScreen(
     selectedSection: ConfigSection,
     currentMode: Config.Mode,
     isLoading: Boolean,
@@ -56,8 +66,13 @@ fun ConfigsScreen(
     onSave: () -> Unit,
     onSectionSelected: (ConfigSection) -> Unit,
     onModeSelected: (Config.Mode) -> Unit,
+    loadDnsPreview: suspend () -> DnsPreview?,
 ) {
     var modeMenuOpen by remember { mutableStateOf(false) }
+    var dnsPreviewOpen by remember { mutableStateOf(false) }
+    if (dnsPreviewOpen) {
+        EffectiveDnsDialog(loadDnsPreview, onDismiss = { dnsPreviewOpen = false })
+    }
     YaxcScaffold(
         topBar = {
             TopAppBar(
@@ -116,6 +131,14 @@ fun ConfigsScreen(
                     modifier = Modifier.padding(YaxcTheme.spacing.md),
                 )
             } else {
+                if (selectedSection == ConfigSection.Dns) {
+                    TextButton(
+                        onClick = { dnsPreviewOpen = true },
+                        enabled = !isSaving,
+                    ) {
+                        Text(textResource(R.string.configDnsPreview))
+                    }
+                }
                 YaxcJsonEditor(
                     state = editorState,
                     modifier = Modifier.fillMaxWidth().weight(1f),
@@ -125,8 +148,58 @@ fun ConfigsScreen(
     }
 }
 
+private sealed interface DnsPreviewState {
+    data object Loading : DnsPreviewState
+    data object Unavailable : DnsPreviewState
+    data object Failed : DnsPreviewState
+    data class Ready(val preview: DnsPreview) : DnsPreviewState
+}
+
 @Composable
-private fun textResource(id: Int): String = androidx.compose.ui.res.stringResource(id)
+private fun EffectiveDnsDialog(loadPreview: suspend () -> DnsPreview?, onDismiss: () -> Unit) {
+    val result by produceState<DnsPreviewState>(DnsPreviewState.Loading) {
+        value = try {
+            loadPreview()?.let(DnsPreviewState::Ready) ?: DnsPreviewState.Unavailable
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DnsPreviewState.Failed
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(textResource(R.string.configDnsPreview)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                when (val state = result) {
+                    DnsPreviewState.Loading -> Text(textResource(R.string.loadingConfig))
+                    DnsPreviewState.Failed -> Text(textResource(R.string.configDnsPreviewFailed))
+                    DnsPreviewState.Unavailable -> Text(textResource(R.string.configDnsPreviewNoSelection))
+                    is DnsPreviewState.Ready -> {
+                        val preview = state.preview
+                        Text(
+                            stringResource(R.string.configDnsPreviewConnection, preview.connection),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            textResource(R.string.configDnsPreviewDescription),
+                            modifier = Modifier.padding(vertical = YaxcTheme.spacing.sm),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (preview.noUpstreams) Text(textResource(R.string.configDnsPreviewSystemDefault))
+                        SelectionContainer {
+                            Text(preview.json, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(textResource(R.string.close)) } },
+    )
+}
+
+@Composable
+private fun textResource(id: Int): String = stringResource(id)
 
 private fun Config.Mode.titleRes(): Int = when (this) {
     Config.Mode.Disable -> R.string.configModeDisable

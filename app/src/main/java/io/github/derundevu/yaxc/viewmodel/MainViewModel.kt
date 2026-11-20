@@ -2,6 +2,9 @@ package io.github.derundevu.yaxc.viewmodel
 
 import android.app.Application
 import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.derundevu.yaxc.R
@@ -15,6 +18,7 @@ import io.github.derundevu.yaxc.helper.ConnectionFailureState
 import io.github.derundevu.yaxc.helper.LiveRoutingHelper
 import io.github.derundevu.yaxc.helper.LiveRoutingPlan
 import io.github.derundevu.yaxc.helper.XrayBatchPingHelper
+import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
 import io.github.derundevu.yaxc.presentation.main.MainEffect
 import io.github.derundevu.yaxc.presentation.main.MainPingState
@@ -41,6 +45,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    var inlineImportReport by mutableStateOf<SubscriptionRefreshHelper.RefreshResult?>(null)
 
     private data class SelectionState(
         val selectedTabId: Long,

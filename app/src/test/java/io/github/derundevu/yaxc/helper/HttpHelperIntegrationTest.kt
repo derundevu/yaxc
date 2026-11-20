@@ -78,6 +78,38 @@ class HttpHelperIntegrationTest : RoomTestSupport() {
     }
 
     @Test
+    fun redirectRetainsBodyAndRelativeTargetButDoesNotForwardCredentialsAcrossOrigins() = runBlocking {
+        SubscriptionHttpServer().use { first ->
+            SubscriptionHttpServer().use { second ->
+                first.enqueue("", 302, mapOf("Location" to "/relative"))
+                val relative = first.enqueue("", 307, mapOf("Location" to second.url))
+                val final = second.enqueue("redirected 東京")
+                val response = HttpHelper.fetch(first.url, headers = mapOf("Authorization" to "synthetic-token"))
+                assertEquals("redirected 東京", response.body)
+                assertEquals("/relative", relative.awaitRequest().path)
+                assertEquals("synthetic-token", relative.awaitRequest().headers["authorization"])
+                assertFalse(final.awaitRequest().headers.containsKey("authorization"))
+            }
+        }
+    }
+
+    @Test
+    fun secureSubscriptionCannotRedirectCredentialsOrFetchToCleartext() = runBlocking {
+        SubscriptionTlsFixture().use { secure ->
+            SubscriptionHttpServer().use { cleartext ->
+                secure.server.enqueue("", 302, mapOf("Location" to cleartext.url))
+                val failure = try {
+                    HttpHelper.fetch(secure.server.url, headers = mapOf("Authorization" to "synthetic-token"))
+                    null
+                } catch (error: IOException) { error }
+                assertEquals("HTTPS subscription redirects to HTTP are not allowed", failure?.message)
+                assertEquals(1, secure.server.requestCount.get())
+                assertEquals(0, cleartext.requestCount.get())
+            }
+        }
+    }
+
+    @Test
     fun cancelledFetchPropagatesCancellationInsteadOfReturningItsCompletedBody() = runBlocking {
         SubscriptionHttpServer().use { server ->
             val exchange = server.enqueue("must not return", held = true)

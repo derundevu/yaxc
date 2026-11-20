@@ -3,6 +3,30 @@
 Build, CI and regression coverage for contributors. For installation and everyday use, see the [project overview](../README.md).
 Run all commands below from the repository root.
 
+## Subscription formats
+
+Naive `naive+https` / `naive+quic` URIs and supported Naive/VLESS nodes in sing-box JSON are converted to Xray profiles.
+Mixed subscriptions import supported entries with an explicit skipped-entry report; all-unsupported imports do
+not replace existing profiles. Selector/urltest infrastructure is not imported as a proxy node.
+Unsupported TLS/transport options are reported rather than discarded. Naive UDP requires explicit sing UoT v2.
+Naive JSON `extra_headers` maps to proxide `settings.headers`. As in sing-box, each header can be a string or a list
+of strings; only the first list value is sent, and empty lists and null values are omitted. Names reserved by the
+core and case-insensitive name collisions are reported as unsupported. The URI `extra-headers` option is not supported.
+General hiddify-manager conversion, AnyTLS, TUIC and Mieru runtime support are not implemented.
+
+Adding or changing an HTTP subscription URL requires an explicit unencrypted-transport confirmation before any
+request or save. The saved HTTP URL records that choice for later refreshes; there is no global insecure mode.
+The platform cleartext policy permits those requests, but subscription redirects never downgrade HTTPS to HTTP.
+Changing origin strips authorization/cookie headers. HTTPS title previews remain HTTPS-only.
+
+## DNS configuration
+
+`ConfigHelper` composes the same Xray `dns` object for runtime generation and the DNS editor preview. Replace
+returns only the sanitized global DNS object, even when it has no `servers`. Merge combines profile and global
+DNS first; Disable skips the global overlay. Both modes append the Settings IP addresses that are not already
+present as identical strings. Live Routing has no member-profile DNS. None of these modes changes the Android
+VPN DNS advertisement or the managed port-53 routing rules.
+
 ## Build
 
 Use JDK 21, Android SDK platform 36/build-tools 36.0.0, and NDK 28.2.13676358.
@@ -12,9 +36,10 @@ module graph. XrayHelper selects the same Go patch. Use the Gradle wrapper.
 If `ANDROID_SDK_ROOT` is already set, make it match `ANDROID_HOME` (or unset it for the command); AGP rejects conflicting SDK paths.
 
 Native builds use submodule sources directly; see [Native dependencies](NATIVE.md#sources-and-versions).
-The current source candidate selects published proxide **26.11.9.1**, the retained libXray wrapper and the
-unchanged Live Routing tunnel fork; see the exact commits in [Native dependencies](NATIVE.md#sources-and-versions).
-Hosted CI passed on historical `518e3a9`, not this candidate. Local scripts and CI apply no patches; preserve any local submodule edits.
+The current source candidate uses published proxide **26.11.9.6**, including the QUIC-congestion schema.
+The retained wrapper, helper and tunnel pins are unchanged.
+Android builds enable Naive and statically link pinned Cronet archives. The APK is a GPL-3.0-or-later combined work;
+keep bundled notices and provide complete corresponding source when distributing it. Preserve local submodule edits.
 
 On a fresh checkout with no local submodule edits:
 
@@ -67,7 +92,7 @@ per ABI. Gradle retains ABI splits and adds a universal output whenever `abiTarg
 The all-ABI debug build produces `app-universal-debug.apk` plus the four `app-<ABI>-debug.apk` files in
 `app/build/outputs/apk/debug/`. A single-ABI build produces only its split APK, such as
 `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`; explicitly select that ABI when building native artifacts for one device.
-Every APK uses the same `app/versionCode.txt` value, currently **1177**, without architecture offsets.
+Every APK uses the same `app/versionCode.txt` value, currently **1179**, without architecture offsets.
 `build_do_not_push.sh` is machine-specific and may install a stale APK after a build failure; do not use it as the build entry point.
 
 ### Install and verify
@@ -177,6 +202,8 @@ Stop with the helper so guest filesystem writes are synchronized before the VM e
 
 [CI](../.github/workflows/ci.yml) runs on every branch push, pull request and manual dispatch.
 It validates workflows with pinned actionlint and inline ShellCheck, and checks tracked shell scripts with `bash -n`.
+The slow x86_64 emulator matrix (`device-regressions`) runs only on manual dispatch; run it from the Actions tab
+before a release or when touching native/VPN/page-size behavior.
 The Android job first runs facade/library ownership, live-routing, Observatory/router/outbound, TLS/XHTTP and
 splice race regressions plus retained-wrapper compatibility checks. It then builds the pinned native dependencies
 for `arm64-v8a`, assembles the debug APK and runs full `lintDebug` plus `testDebugUnitTest`.
@@ -195,22 +222,38 @@ curl --fail --location --silent --show-error \
   https://raw.githubusercontent.com/XTLS/Xray-rules-dat/b2fd201b17cdbb2a6aff5e49a52910247d026778/geosite/geosite-expand.dat
 ```
 
-### Proxide 26.11.9.1 migration gates
+### Proxide 26.11.9.6 migration gates
 
-After preparing the pinned geosite fixture above, run the native compatibility gates from the repository root:
+Before committing changes in `XrayCore/Xray-core`, run the fork's format and protobuf checks from that
+submodule directory:
+
+```bash
+go run ./infra/vformat/main.go -mode check -pwd ./
+go run ./infra/vprotogen/main.go -mode check -pwd ./
+```
+
+If either reports changes, use `-mode format` for `vformat` or `-mode generate` for `vprotogen`, then rerun both
+checks. Use the in-repo protobuf generator, not a standalone `protoc` invocation. Publish the new tag only after
+the checks pass on the exact commit in `fork/main`.
+
+After preparing the pinned geosite fixture above, run the enabled native compatibility gates from the repository root:
 
 ```bash
 (
   cd XrayCore &&
-  GOTOOLCHAIN=go1.27.3 go test -mod=readonly -race -count=1 -timeout=240s . ./lib \
+  export GOTOOLCHAIN=go1.27.3 &&
+  go mod download github.com/sagernet/cronet-go/lib/linux_amd64 &&
+  export LD_LIBRARY_PATH="$(go list -mod=readonly -m -f '{{.Dir}}' github.com/sagernet/cronet-go/lib/linux_amd64)" &&
+  go test -mod=readonly -tags=with_naive_outbound,with_purego -race -count=1 -timeout=240s . ./lib \
     github.com/xtls/xray-core/app/observatory \
     github.com/xtls/xray-core/app/router \
     github.com/xtls/xray-core/app/proxyman/outbound \
     github.com/xtls/xray-core/infra/conf \
     github.com/xtls/xray-core/transport/internet \
     github.com/xtls/xray-core/transport/internet/tls \
-    github.com/xtls/xray-core/transport/internet/splithttp &&
-  GOTOOLCHAIN=go1.27.3 go test -mod=readonly -count=1 -timeout=90s \
+    github.com/xtls/xray-core/transport/internet/splithttp \
+    github.com/xtls/xray-core/proxy/naive &&
+  go test -mod=readonly -tags=with_naive_outbound,with_purego -count=1 -timeout=90s \
     github.com/xtls/libxray/nodep github.com/xtls/libxray/share
 ) &&
 (
@@ -220,10 +263,11 @@ After preparing the pinned geosite fixture above, run the native compatibility g
 )
 ```
 
-These cover the retained facade/import/ping/routing contracts and changed log schema, mux writers, observations
-and splice behavior. They do not establish Android runtime compatibility. Rebuild native artifacts for every
-packaged ABI, then run the Android host gates below and the isolated 4 KB/16 KB instrumentation matrix.
-Do not treat old AARs or the historical CI result as evidence for proxide 26.11.9.1.
+These cover facade/import/ping/routing contracts, schema, mux writers, observations and splice behavior.
+Tagged facade regressions also exercise real loopback Chromium HTTP/2 and HTTP/3 with explicit BBR, custom trust,
+authentication rejection, both padding transitions, isolated validation and stop/restart. Missing Cronet fails
+explicitly; these tests are not skipped. Rebuild native artifacts for every packaged ABI, then run the Android
+host gates and isolated 4 KB/16 KB instrumentation matrix. Old AARs and old CI do not validate this candidate.
 
 
 After building the arm64 native artifacts, the local Android check is:
@@ -239,17 +283,17 @@ tests use `RegressionApplication`, which deliberately skips production startup s
 owns its database/executor/preferences and resets AndroidX's cached application factory before reuse.
 Host tests never load the Android Go library, modify a device or depend on public network services.
 
-If Robolectric cannot fetch its SDK 28 fixture because `repo1.maven.org` fails TLS, a one-off invocation can use
-`JAVA_TOOL_OPTIONS=-Drobolectric.dependency.repo.url=https://repo.maven.apache.org/maven2 ./gradlew ...`
-with the same task/ABI arguments. This fetched the fixture during Live Routing work; it is not a permanent
-repository, Gradle or global environment change.
+Host tests use `repo.maven.apache.org` for Robolectric's SDK 34 fixture instead of `repo1.maven.org`. CI caches that
+fixture under `~/.m2` and prefetches it with retries before running tests, because Robolectric downloads it outside
+Gradle's dependency cache. For a manual cache miss, the same `robolectric.dependency.repo.url` system property can be
+supplied with `JAVA_TOOL_OPTIONS`.
 
 Core routing editor tests inject a separate `StandardTestDispatcher` sharing Main's test scheduler.
 This queues snapshot processing until the test yields, so concurrent-draft checks do not depend on
 host thread timing. `CoroutineStart.UNDISPATCHED` alone does not guarantee suspension at `withContext`:
 short work on `Dispatchers.Default` can finish without suspending its caller.
 
-The device CI matrix builds x86_64 dependencies and runs the separate `regression` variant on disposable
+The manual device CI matrix builds x86_64 dependencies and runs the separate `regression` variant on disposable
 API 35 emulators with 4096-byte and 16384-byte pages. Emulator 36.6.11 and the emulator action revision are pinned.
 The ordinary debug unit-test task remains enabled independently of the instrumentation build type.
 Lint errors and test failures fail CI; warnings remain visible. There is no lint baseline or ignored failure.
@@ -259,8 +303,8 @@ Required-check branch rules must be configured separately on GitHub; CI alone do
 in `app/build.gradle.kts`. Its five-row matrix builds four signed ABI APKs and a complete universal APK;
 the universal row builds all native ABIs but stages only `app-universal-release.apk`. A GitHub Release is published
 only after all five builds succeed. Notes come from `metadata/en-US/changelogs/<versionCode>.txt`, using the shared code directly.
-The prepared candidate is **1.5.5 / versionCode 1177**, with notes in
-[`metadata/en-US/changelogs/1177.txt`](../metadata/en-US/changelogs/1177.txt). Local unsigned APKs are packaging
+The prepared candidate is **1.6.0 / versionCode 1179**, with notes in
+[`metadata/en-US/changelogs/1179.txt`](../metadata/en-US/changelogs/1179.txt). Local unsigned APKs are packaging
 checks, not production-signed release assets; publication still requires the configured release signing secrets.
 The release workflow does not run or wait for the CI workflow. Tag only the exact parent revision whose clean-checkout
 CI has passed with all modified fork commits published and pinned; pushing a release tag starts publication directly.
@@ -274,7 +318,8 @@ The legacy container wrapper `build-yaxc.sh` follows the same naming: use `NATIV
 The `regression` build uses application ID `io.github.derundevu.yaxc.regression`, its own data and worker
 processes, and the debug signing configuration. It never replaces the installed release/debug application.
 The test runner refuses any other target package. The original package ID is unchanged; regression uses the same Room schema as production.
-Only this variant allows cleartext HTTP to loopback fixture endpoints; production network security is unchanged.
+Both variants allow explicitly confirmed HTTP subscription sources. Only disposable loopback fixtures are used by tests;
+production and regression share the same no-HTTPS-downgrade subscription transport policy.
 
 Use a dedicated API 35 x86_64 emulator, not the owner's device. `default` is the 4 KB image;
 `google_apis_ps16k` is the 16 KB image. Set `EMU_DEVICE` to that emulator and verify its ABI/page size:
@@ -305,11 +350,15 @@ Require the final `OK (...)` result and no failed tests: `am instrument` can exi
 CI uses `connectedRegressionAndroidTest`, whose provider interprets instrumentation failures correctly.
 VPN tests additionally require `allowVpn=true`, emulator hardware and no existing regression-package session.
 Their client runs under a separate shell UID; only a synthetic benchmark destination/port reaches the loopback peer.
-After each START/forced RESTART, before opening a shell TCP client, the fixture waits for
-`ConnectivityManager` to publish an IPv4 default route for a **new VPN network owned by the regression
-package**. Service START acknowledges native ownership, not Android's asynchronous route installation.
-The previous network cannot satisfy the restart barrier. A core-only NEW_CONFIG keeps the existing TUN
-and must not wait for a replacement network. Because the app itself is excluded, callback registration
+Do not run these tests with `adb root`: the fixture includes shell UID 2000 in the VPN, while a rooted adbd runs
+instrumentation shell commands as UID 0, so the test traffic bypasses the VPN and every transfer times out.
+Do not run two instrumentation jobs against the same regression package concurrently; the second install/force-stop
+kills the first process and reports `Process crashed`.
+After initial START or an unprotected forced RESTART, before opening a shell TCP client, the fixture waits for
+`ConnectivityManager` to publish an IPv4 default route for a **new VPN network owned by the regression package**.
+Service START acknowledges native ownership, not Android's asynchronous route installation. Protected same-interface
+reconnects intentionally retain their owned network; core-only NEW_CONFIG also keeps the existing TUN.
+Because the app itself is excluded, callback registration
 temporarily adopts shell `NETWORK_SETTINGS` permission to observe other-UID networks; that permission
 is then dropped and the callback is always unregistered.
 
@@ -361,9 +410,10 @@ Validated routing/rule/balancer/outbound-graph changes use `ApplyRouting` when t
 options are unchanged. Other core changes reload Xray once; changed TUN/root options require a full validated
 restart. Explicit `RESTART` remains forced. A rejected live update never falls back to a restart.
 Validation runs outside the ownership lock and Room transaction; committed state is re-read before applying it so
-edits/deletions during validation cannot publish stale state. Missing selection on `NEW_CONFIG` stops the owned
-runtime; explicit live apply rejects it without stopping the last applied session. A partially committed, cancelled
-refresh batch still schedules one conditional reconciliation; that command cannot start an inactive VPN or undo STOP.
+edits/deletions during validation cannot publish stale state. Missing selection on `NEW_CONFIG` stops an unprotected
+runtime; a protected session retains its existing interface/runtime and reports the missing selection. Explicit live
+apply rejects it without stopping the last applied session. A partially committed, cancelled refresh batch still
+schedules one conditional reconciliation; that command cannot start an inactive VPN or undo STOP.
 
 Foreground promotion for explicit START/RESTART happens on Android's main thread before consulting native state.
 Native teardown runs on the command dispatcher; its successful completion returns to the main thread before STOP
@@ -371,6 +421,31 @@ is acknowledged. A start-generation guard rejects stale teardown, and `stopSelfR
 start ID against ActivityManager's pending requests. Foreground is removed only when the stop is accepted, so a
 START already queued in Android cannot be demoted or stopped by an older command. An idle STATUS/NETWORK_UPDATE
 can finish a deferred stop; a refused native join retains its descriptor, core and foreground notification.
+
+### Kill switch
+
+`Settings.killSwitch` defaults to false and is valid only in TUN VPN mode. Captured runtime options own the policy;
+changing a preference does not retroactively reinterpret a descriptor or start an inactive service.
+Protected connection attempts establish TUN before asynchronous validation or core startup. Forwarding teardown
+joins the tunnel worker and stops the core without closing TUN. A same-interface restart reuses it; replacement
+establishment must succeed before the old descriptor is closed. Rejected validation preserves healthy forwarding.
+
+An active protected session checks the existing native core status and worker lifetime every second, without public
+network probes or enabling connection analytics. A failure leaves an owned, non-forwarding TUN and foreground
+notification. `TProxyService.isActive()` and the status broadcast's `isRunning` mean session ownership, including a
+blocked session; `isBlocking`/`isBlocked` distinguish actual blocking. Main, notification and tile surface this state.
+Explicit STOP/revoke/destroy release ownership after successful teardown; a refused worker join retains ownership.
+Android system starts (`SERVICE_INTERFACE` or sticky null intent) restore the saved TUN connection, rejecting
+SOCKS-only/root mode. An idle status query never starts a connection.
+
+Host lifecycle regressions cover failed initial validation, native/worker failure, retained/replaced descriptors,
+recovery, policy disable, revoke and STOP/start cancellation ordering. The emulator VPN regression forces an actual
+`XrayCore.stop()` with analytics disabled, verifies the same published TUN and blocked shell-UID traffic, rejects an
+invalid recovery, then exercises successful recovery/reconnect and explicit STOP.
+
+This process-local protection does not cover excluded apps/LAN or intentional Xray direct outbounds. Process death
+and boot-time blocking require Android Always-on plus Block connections without VPN; the settings row opens the OS
+configuration rather than pretending the app preference enables that system policy. Lockdown may block exclusions.
 
 ### Live Routing
 
@@ -534,6 +609,20 @@ stop/preference boundaries. Restored active rows become interrupted/incomplete. 
 file/backups and retains memory. Clear removes only finished records in native/memory/disk history. There is no Room
 migration, payload/access-log journal, credential export or per-packet capture. Native buffer evictions and local drops
 are explicit; totals are for retained filtered data, not an estimate of omitted connections.
+
+`Settings.connectionAnalyticsEnabled` defaults true and controls admission of new records, not a frozen history.
+Native `enabled=false` snapshots still contain byte/status updates for records admitted before the cutoff.
+The repository includes the synchronous cutoff frame, continues polling pending tracked records while Off, and
+keeps runtime/epoch/capture-generation/clear fences against stale frames. An empty disabled startup stays unpolled.
+Disabling never synthesizes interrupted rows; actual runtime Stop/restore still does. The obsolete per-record
+`captureStopped` persistence flag is no longer emitted; older v1–v3 histories remain readable with their original
+incomplete totals. Disk persistence and clearing finished rows are independent of admission.
+
+The device scenario `analyticsAdmissionPauseUpdatesExistingTcpUdpWithoutRecordingOffPeriodFlows` transfers real
+shell-UID TCP/UDP across Off/On transitions. It checks exact admitted-flow bytes and terminal accounting while Off,
+no new Off-period records or retroactive associations, unchanged core/TUN/config, independent disk policy, and Clear
+retaining active accounting while removing finished records. Native facade/race tests cover admission cutoff against
+concurrent Open, actual TCP/UDP closure and old handles across resume.
 
 Focused source-matched emulator scenario:
 

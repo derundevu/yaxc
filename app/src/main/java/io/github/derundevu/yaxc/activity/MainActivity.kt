@@ -39,6 +39,7 @@ import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.dto.ProfileList
 import io.github.derundevu.yaxc.helper.AppUpdateManager
 import io.github.derundevu.yaxc.helper.LinkHelper
+import io.github.derundevu.yaxc.helper.InlineProfileImportHelper
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.helper.TransparentProxyHelper
 import io.github.derundevu.yaxc.presentation.main.MainAction
@@ -49,6 +50,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKin
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.main.MainScreen
+import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import io.github.derundevu.yaxc.service.TProxyService
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
@@ -56,6 +58,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
@@ -76,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     private val feedback = YaxcFeedbackState()
     private var linksOperationActive = false
     private var pendingDialog by mutableStateOf<MainDialog?>(null)
+    private var pendingSubscriptionWarnings by mutableStateOf<List<SubscriptionRefreshHelper.SourceWarning>>(emptyList())
 
     private sealed interface MainDialog {
         data class DeleteProfile(val profile: ProfileList) : MainDialog
@@ -221,7 +225,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        intent?.data?.let { deepLink ->
+        if (savedInstanceState == null) intent?.data?.let { deepLink ->
             val pathSegments = deepLink.pathSegments
             if (pathSegments.isNotEmpty()) processLink(pathSegments[0])
         }
@@ -259,7 +263,10 @@ class MainActivity : AppCompatActivity() {
                 registerReceiver(appUpdateDownloadReceiver, it)
             }
         }
-        if (settings.refreshLinksOnOpen) refreshDueSubscriptions()
+        lifecycleScope.launch {
+            pendingSubscriptionWarnings = withContext(Dispatchers.IO) { settings.pendingSubscriptionWarnings() }
+            if (settings.refreshLinksOnOpen) refreshDueSubscriptions()
+        }
     }
 
     override fun onStop() {
@@ -414,43 +421,40 @@ class MainActivity : AppCompatActivity() {
         val normalizedLink = link.trim()
         // Profile imports also accept JSON and base64, so a URI is not required.
         val uri = runCatching { URI(normalizedLink) }.getOrNull()
-        if (uri?.scheme == "http") {
-            feedback.show(getString(R.string.forbiddenHttp), FeedbackKind.Error)
-            return
-        }
-        if (uri?.scheme == "https") {
+        if (uri != null && (uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true))) {
             openLink(uri)
             return
         }
         val linkId = mainViewModel.uiState.value.selectedTabId.takeIf { it != 0L }
         lifecycleScope.launch {
-            val parsedProfile = withContext(Dispatchers.Default) {
-                try {
-                    val linkHelper = LinkHelper(settings, normalizedLink)
-                    if (linkHelper.isValid()) {
-                        linkHelper.json() to linkHelper.remark()
-                    } else {
-                        null
-                    }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            if (parsedProfile == null) {
+            val parsed = try {
+                SubscriptionRefreshHelper(applicationContext, settings).parseProfiles(Link(), normalizedLink)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
                 feedback.show(getString(R.string.invalidLink), FeedbackKind.Error)
                 return@launch
             }
-            val (json, name) = parsedProfile
-            startActivity(
-                ProfileActivity.getIntent(
-                    context = applicationContext,
-                    name = name,
-                    config = json,
-                    linkId = linkId,
+            if (parsed.profiles.isEmpty()) {
+                mainViewModel.inlineImportReport = SubscriptionRefreshHelper.RefreshResult(
+                    1, 0, 1, warnings = listOf(SubscriptionRefreshHelper.SourceWarning(
+                        0, getString(R.string.profileImportTitle), parsed.skippedProfiles,
+                    )),
                 )
-            )
+            } else if (parsed.profiles.size == 1 && parsed.skippedProfiles.isEmpty()) {
+                val profile = parsed.profiles.single()
+                startActivity(ProfileActivity.getIntent(
+                    context = applicationContext, name = profile.name, config = profile.config, linkId = linkId,
+                ))
+            } else {
+                try {
+                    mainViewModel.inlineImportReport = InlineProfileImportHelper.append(applicationContext, settings, parsed, linkId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    feedback.show(getString(R.string.feedbackOperationFailed), FeedbackKind.Error)
+                }
+            }
         }
     }
 
@@ -478,8 +482,29 @@ class MainActivity : AppCompatActivity() {
     private fun refreshDueSubscriptions() {
         if (subscriptionRefreshJob?.isActive == true) return
         subscriptionRefreshJob = lifecycleScope.launch {
-            runCatching {
+            try {
                 SubscriptionRefreshHelper(applicationContext, settings).refreshDueLinks()
+                pendingSubscriptionWarnings = withContext(Dispatchers.IO) { settings.pendingSubscriptionWarnings() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A later refresh can retry; previously queued skipped-entry reports stay intact.
+            }
+        }
+    }
+
+    private fun acknowledgeWarnings(
+        warnings: List<SubscriptionRefreshHelper.SourceWarning>,
+        onAcknowledged: () -> Unit = {},
+    ) {
+        lifecycleScope.launch {
+            withContext(NonCancellable) {
+                val remaining = withContext(Dispatchers.IO) {
+                    settings.acknowledgeSubscriptionWarnings(warnings)
+                    settings.pendingSubscriptionWarnings()
+                }
+                pendingSubscriptionWarnings = remaining
+                onAcknowledged()
             }
         }
     }
@@ -490,6 +515,29 @@ class MainActivity : AppCompatActivity() {
 
     @Composable
     private fun MainDialogs() {
+        mainViewModel.inlineImportReport?.let { report ->
+            SubscriptionRefreshDialog(
+                result = report,
+                titleRes = R.string.profileImportTitle,
+                warningsOnly = report.refreshed == 0,
+                onClose = {
+                    acknowledgeWarnings(report.warnings) { mainViewModel.inlineImportReport = null }
+                },
+            )
+            return
+        }
+        val warnings = pendingSubscriptionWarnings
+        if (pendingDialog == null && warnings.isNotEmpty()) {
+            SubscriptionRefreshDialog(
+                result = SubscriptionRefreshHelper.RefreshResult(0, 0, 0, warnings = warnings),
+                titleRes = R.string.subscriptionSkippedTitle,
+                warningsOnly = true,
+                onClose = {
+                    acknowledgeWarnings(warnings)
+                },
+            )
+            return
+        }
         when (val dialog = pendingDialog) {
             is MainDialog.DeleteProfile -> YaxcMessageDialog(
                 title = getString(R.string.deleteProfileDialogTitle, dialog.profile.index + 1),

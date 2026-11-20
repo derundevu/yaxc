@@ -1139,7 +1139,11 @@ class TProxyServiceLifecycleTest : RoomTestSupport() {
         command(TProxyService.STOP_VPN_SERVICE_ACTION_NAME)
         command(TProxyService.NEW_CONFIG_SERVICE_ACTION_NAME)
         command(TProxyService.START_VPN_SERVICE_ACTION_NAME)
-        pumpUntil { boundary.devices.size == 2 && TProxyService.isActive() }
+        // Ownership flips before the start broadcast is sent; the assertion below needs the broadcast.
+        pumpUntil {
+            boundary.devices.size == 2 && TProxyService.isActive() &&
+                broadcasts().count { it.action == TProxyService.START_VPN_SERVICE_ACTION_NAME } >= 2
+        }
         first.assertClosed()
         boundary.devices.last().assertTraffic("second lifecycle")
         assertEquals(2, boundary.coreStarts)

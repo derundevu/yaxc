@@ -73,6 +73,7 @@ class SettingsActivity : AppCompatActivity() {
                     onBack = ::finish,
                     onSave = { applySettings(formState) },
                     onSystemVpnSettings = ::openSystemVpnSettings,
+                    onOpenCoreDns = { startActivity(ConfigsActivity.openDns(this)) },
                 )
             }
         }

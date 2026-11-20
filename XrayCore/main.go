@@ -3,7 +3,6 @@ package XrayCore
 import (
 	"XrayCore/lib"
 	"github.com/xtls/libxray/nodep"
-	"github.com/xtls/libxray/share"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -61,12 +60,12 @@ func Version() string {
 
 func Json(link string) string {
 	var response nodep.CallResponse[*conf.Config]
-	xrayJson, err := share.ConvertShareLinksToXrayJson(link)
+	xrayJson, err := convertShareLinksToXrayJSON(link)
 	return response.EncodeToBase64(xrayJson, err)
 }
 
 func Share(config string) string {
-	links, err := share.ConvertXrayJsonToShareLinks([]byte(config))
+	links, err := convertXrayJSONToShareLinks([]byte(config))
 	if err != nil {
 		return ""
 	}

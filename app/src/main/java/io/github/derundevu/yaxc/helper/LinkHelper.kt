@@ -13,7 +13,9 @@ import java.nio.charset.StandardCharsets
 
 class LinkHelper(
     private val settings: Settings,
-    link: String
+    link: String,
+    private val outboundOverride: JSONObject? = null,
+    private val nameOverride: String? = null,
 ) {
 
     private data class ParsedConfigResult(
@@ -33,13 +35,22 @@ class LinkHelper(
 
     init {
         val link = link.trim().removePrefix("\uFEFF").trim()
+        val shareScheme = link.substringBefore("://", "").lowercase()
+        if (shareScheme in setOf("vless", "naive+https", "naive+quic")) {
+            requireNotNull(runCatching { URI(link) }.getOrNull()) { "Malformed share URI" }
+        }
         val inlineConfig = parseInlineConfig(link)
-        if (inlineConfig != null) {
+        if (outboundOverride != null) {
+            success = true
+            importedConfig = null
+            outbound = outboundOverride
+            remark = nameOverride ?: defaultRemark()
+        } else if (inlineConfig != null) {
             success = true
             importedConfig = inlineConfig.config
             outbound = inlineConfig.config.optJSONArray("outbounds")
                 ?.optJSONObject(0)
-                ?.let(::sanitizeObject)
+                ?.let { JSONObject(it.toString()) }
             inlineConfig.remark?.takeIf { it.isNotBlank() }?.let { remark = it }
         } else {
             val uri = runCatching { URI(link) }.getOrNull()
@@ -56,7 +67,7 @@ class LinkHelper(
                     importedConfig = decodedInlineConfig.config
                     outbound = decodedInlineConfig.config.optJSONArray("outbounds")
                         ?.optJSONObject(0)
-                        ?.let(::sanitizeObject)
+                        ?.let { JSONObject(it.toString()) }
                     decodedInlineConfig.remark?.takeIf { it.isNotBlank() }?.let { remark = it }
                 } else {
                     val parsedFromXray = parseOutboundFromXray(link)
@@ -70,7 +81,7 @@ class LinkHelper(
 
     companion object {
         fun remark(uri: URI, default: String = ""): String {
-            val name = uri.fragment ?: ""
+            val name = uri.rawFragment?.let(ProxyImportHelper::decode) ?: ""
             return name.ifEmpty { default }
         }
 
@@ -81,6 +92,7 @@ class LinkHelper(
             }.getOrNull() ?: value
         }
     }
+
 
     fun isValid(): Boolean {
         return success && (importedConfig != null || outbound != null)
@@ -174,7 +186,7 @@ class LinkHelper(
     private fun outbounds(): JSONArray {
         val outbounds = JSONArray()
 
-        val proxy = sanitizeObject(JSONObject(outbound!!.toString()))
+        val proxy = JSONObject(outbound!!.toString())
         if (proxy.has("sendThrough")) {
             remark = proxy.optString("sendThrough", defaultRemark())
             proxy.remove("sendThrough")
@@ -262,6 +274,10 @@ class LinkHelper(
     }
 
     private fun parseOutboundFromXray(link: String): ParsedOutboundResult {
+        val scheme = runCatching { URI(link).scheme?.lowercase() }.getOrNull()
+        if (scheme !in setOf("ss", "vmess", "socks", "trojan", "hysteria2", "hy2")) {
+            throw UnsupportedProfileException("Unsupported share scheme")
+        }
         val base64 = XrayCore.json(link)
         val decoded = tryDecodeBase64(base64)
         val response = try {
@@ -283,7 +299,10 @@ class LinkHelper(
     }
 
     private fun sanitizeImportedConfig(source: JSONObject): ParsedConfigResult? {
-        val config = sanitizeObject(source)
+        if (ProxyImportHelper.isSingBox(source)) {
+            throw UnsupportedProfileException("Import sing-box JSON as a profile source")
+        }
+        val config = JSONObject(source.toString())
         val remark = config.optString("remarks")
             .ifBlank { config.optString("remark") }
             .trim()
@@ -313,7 +332,8 @@ class LinkHelper(
 
     private fun parseKnownOutbound(uri: URI): JSONObject? {
         return when (uri.scheme?.lowercase()) {
-            "vless" -> parseVlessOutbound(uri)
+            "naive+https", "naive+quic" -> ProxyImportHelper.naiveUri(uri)
+            "vless" -> requireNotNull(parseVlessOutbound(uri)) { "Invalid VLESS URI" }
             else -> null
         }
     }

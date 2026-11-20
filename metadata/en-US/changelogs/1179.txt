@@ -1,5 +1,12 @@
 ## What's new in 1.6.0
 
+### Naive and subscriptions
+
+- Updated the embedded core to proxide 26.11.9.6 and enabled Chromium/Cronet Naive over HTTPS/HTTP2 and QUIC/HTTP3, including explicit QUIC congestion control.
+- Added Naive share-link import/export and conversion of supported Naive/VLESS nodes from sing-box JSON subscriptions, including Naive extra HTTP headers. Unsupported nodes/options are listed in the import report; an entirely unsupported source does not replace existing profiles.
+- Background import warnings remain available until acknowledged. Naive participates in Core Routing, Live Routing and the existing JSON editor.
+- Naive-enabled APKs include GPL-3.0-or-later components. Open-source notices and license texts are available in Settings; first-party MIT notices are retained.
+
 ### VPN protection
 
 - Added an optional Kill switch for TUN VPN mode. It is off by default and keeps the established TUN during an Xray or tunnel failure, blocking VPN-routed traffic until retry, profile change or disconnect.
@@ -22,6 +29,7 @@
 - Added a versions card with the installed app version, component versions and update checking.
 - Update downloads show real byte progress when the total is known and an indeterminate state otherwise; a completed download becomes an explicit install action.
 - Added an offline What's new dialog with localized release notes bundled for the installed version. The notes require no network access.
+- DNS Replace now uses only the configured Xray DNS JSON. The DNS editor previews the effective settings for the selected profile or Live Routing before saving.
 
 ### Interface
 

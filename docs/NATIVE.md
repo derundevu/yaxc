@@ -19,20 +19,31 @@ The tunnel's nested submodules have their own URLs and pinned commits; they were
 [`XrayCore/go.mod`](../XrayCore/go.mod) replaces `github.com/xtls/xray-core` and `github.com/xtls/libxray`
 with local directories. Do not rename module paths/imports just because the Git remote is a fork.
 
-### Current candidate: proxide 26.11.9.1
+### Current candidate: proxide 26.11.9.6 with Naive
 
-The core checkout selects [proxide v26.11.9.1](https://github.com/derundevu/proxide/releases/tag/v26.11.9.1),
-published commit `3e448b440b1c22d3ed14f03d43ffe71c3a8661a8`, based on upstream Xray **26.11.9**.
-The existing `XrayCore/Xray-core` directory and `github.com/xtls/xray-core` import/module path remain unchanged.
-`XrayCore/go.mod` records `v1.260327.1-0.20261109082005-3e448b440b1c` with the local replacement;
-the four-component fork tag is not a Go-module semantic version. `core.Version()` now reports **26.11.9.1**
-without linker overrides. Pin the checked-out published commit in the parent gitlink when committing this migration.
+The Android build uses published [proxide v26.11.9.6](https://github.com/derundevu/proxide/releases/tag/v26.11.9.6),
+commit `7525e03e69141a64192a3a1ff79abfcb4da6efd2`, based on upstream Xray **26.11.9**.
+The canonical module path and local replacements remain unchanged; `XrayCore/go.mod` records
+`v1.260327.1-0.20261120083527-7525e03e6914`.
 
-The retained libXray pin remains `ae5f78b63aee108c4fc21d08be8221fb2f5f8e41`; its standalone builder still targets
-upstream .31, but the application module's local replacements and selected graph use proxide for every wrapper import.
-No wrapper working-tree patch, compatibility shim or new unpublished fork commit is required. Go **1.27.3**,
-the gomobile pin, XrayHelper and tunnel pins remain unchanged. The application graph updates uTLS, REALITY, gRPC,
-`x/net`, compression/CPU dependencies and adds `go-brrr`; obsolete Brotli dependency entries are removed.
+This revision publishes `settings.quicCongestionControl`, which preserves an explicit BBR choice in
+sing-box Naive JSON instead of silently using Chromium's default. The standard proxide CLI release ZIPs are
+built without Naive; use the released source, not a downloaded CLI binary, to build the Android AAR.
+
+The retained libXray pin remains `ae5f78b63aee108c4fc21d08be8221fb2f5f8e41`; the parent owns Naive share conversion.
+Its standalone builder still targets upstream .31, while app imports use the replaced core. Go **1.27.3**,
+gomobile, XrayHelper and tunnel pins remain unchanged. Cronet Go bindings are pinned to `0d28acc44093`,
+native archives to `c10c03c318db`, through the locked module graph.
+
+`buildXrayCore.sh` enables `with_naive_outbound` and statically links the matching Android Cronet archive into
+each `libgojni.so`; no separately loaded `libcronet.so` is required on Android. Host regressions use
+`with_naive_outbound,with_purego` and the pinned Linux shared library instead.
+Naive-enabled APKs are GPL-3.0-or-later combined works. First-party MIT and original MPL notices remain;
+license texts and source notices are bundled in `assets/licenses/` and accessible from Settings.
+`NaiveProxy.txt` and `Chromium.txt` reproduce `LICENSE` and `src/LICENSE` from
+[the pinned NaiveProxy source](https://github.com/SagerNet/naiveproxy/tree/72a06c9fca0e2d228588c7f3074bf7efff3ff686).
+The same dialog also displays the `Cronet.txt` copyright and license notice.
+Distributors must supply the complete corresponding source for the actual binaries, including changed submodules.
 
 Compatibility changes relevant to consumers:
 
@@ -47,12 +58,10 @@ Compatibility changes relevant to consumers:
 - The default Chrome TLS fingerprint advances to Chrome 155. Connection-observation, managed-routing and
   cancellation APIs used by the application remain present; no facade API cutover is needed.
 
-The core AAR, helper and debug APK have been built for arm64; a host smoke run reported 26.11.9.1 and exercised
-validation, start and stop. The host facade tests passed without proxy environment variables, while the lib
-stress suite failed on macOS with `can't assign requested address` during concurrent SOCKS flows. These checks do
-not establish Android runtime compatibility. Run the [native migration gates](DEVELOPMENT.md#proxide-261191-migration-gates),
-rebuild for every release ABI, and run the Android and 4 KB/16 KB emulator gates before publication. Historical
-results below are not evidence for this source pin.
+On the published source, Go host race checks passed for the facade, core config and Naive, including real
+loopback Chromium HTTP/2 and HTTP/3 with BBR. The local all-ABI AAR and debug APKs carry the matching core
+module metadata and Naive build tag, and the core ELF and APK ZIP alignment checks passed at 16 KB.
+These checks do not replace the [Android migration gates](DEVELOPMENT.md#proxide-261196-migration-gates).
 
 ### Historical baselines
 
@@ -425,7 +434,7 @@ The source-built host target observed five simultaneous held requests and all fi
 ## Connection analytics
 
 The connection-observation core changes were published in the previous parent pin
-`1ad22b5caf1f59cbbae54cf6c8f6765b3759aaca` and are retained by proxide **26.11.9.1**.
+`1ad22b5caf1f59cbbae54cf6c8f6765b3759aaca` and are retained by proxide **26.11.9.6**.
 The parent facade and Android consumers require a matching source-built AAR: an older AAR lacks
 `ConnectionSnapshot` and `ClearConnectionHistory`. The retained libXray, tunnel and helper pins are unchanged.
 
@@ -435,6 +444,13 @@ selected handler after route selection, never a mutable session pointer or the c
 `_yaxcConnectionProfiles` maps logical outbound tags to captured profile ID/name/fingerprint and actual protocol
 route kind. Runtime comparison ignores display-name-only changes; IDs/fingerprints/routes remain real inputs.
 Ordinary profiles provision UID accounts independently of Live Routing and never read its saved plan.
+
+`SetConnectionAnalyticsEnabled` controls admission only. Each dispatcher receives its ledger observer once, before
+startup; toggles never replace the dispatcher's unsynchronized live observer field. `Open` checks admission and
+runtime ownership under the shared history lock. Disabling updates `enabled`/`captureGeneration` at that boundary
+without closing admitted handles: their bytes, routing metadata and terminal callbacks continue. Off-period sessions
+get no observation handle and cannot attach retroactively when admission resumes. The gate also applies across
+core restart and hot routing; forwarding, retention and Clear remain independent of the preference.
 
 The facade binds new physical tags before router publication, retaining old identities for established flows.
 Identity-only changes get aliases rather than reusing a mutable tag binding. Rule-local immutable alias maps
