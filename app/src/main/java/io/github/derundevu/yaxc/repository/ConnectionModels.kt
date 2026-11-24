@@ -40,9 +40,9 @@ data class ConnectionHistoryCounters(
 
 data class ConnectionHistoryState(
     val connections: List<ConnectionRecord> = emptyList(),
-    val status: ConnectionCaptureStatus = ConnectionCaptureStatus.Stopped,
+    val status: ConnectionCaptureStatus = ConnectionCaptureStatus.Disabled,
     val counters: ConnectionHistoryCounters = ConnectionHistoryCounters(),
     val persistOnDisk: Boolean = false,
     val error: String? = null,
-    val captureEnabled: Boolean = true,
+    val captureEnabled: Boolean = false,
 )

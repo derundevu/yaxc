@@ -226,11 +226,6 @@ class MainActivityRegressionTest : RoomTestSupport() {
         launch()
         compose.onNodeWithTag("main:connection-analytics").performClick()
         compose.onNodeWithTag("analytics:history").performClick()
-        compose.onNodeWithTag("analytics:capture").assertIsOn().performClick()
-        await {
-            val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
-            !settings.connectionAnalyticsEnabled && !state.captureEnabled && state.status == ConnectionCaptureStatus.Disabled
-        }
         compose.onNodeWithTag("analytics:capture").assertIsOff()
         assertFalse(settings.connectionHistoryOnDisk)
         val disk = File(app.noBackupFilesDir, "connection-history.json")
@@ -238,16 +233,16 @@ class MainActivityRegressionTest : RoomTestSupport() {
         await { settings.connectionHistoryOnDisk && app.connectionRepository.state.value.persistOnDisk && disk.isFile }
         assertFalse(settings.connectionAnalyticsEnabled)
         assertFalse(app.connectionRepository.state.value.captureEnabled)
+        compose.onNodeWithTag("analytics:capture").assertIsOff().performClick()
+        await { settings.connectionAnalyticsEnabled && app.connectionRepository.state.value.captureEnabled }
         compose.onNodeWithText(app.getString(R.string.ca_done)).performClick()
 
         controller.recreate()
         await {
             val state = ViewModelProvider(activity)[ConnectionAnalyticsViewModel::class.java].uiState.value
-            !state.captureEnabled && state.persistOnDisk
+            state.captureEnabled && state.persistOnDisk
         }
         compose.onNodeWithTag("analytics:history").performClick()
-        compose.onNodeWithTag("analytics:capture").assertIsOff().performClick()
-        await { settings.connectionAnalyticsEnabled && app.connectionRepository.state.value.captureEnabled }
         compose.onNodeWithTag("analytics:capture").assertIsOn()
         compose.onNodeWithTag("analytics:persistence").performScrollTo().assertIsOn().performClick()
         await { !settings.connectionHistoryOnDisk && !app.connectionRepository.state.value.persistOnDisk && !disk.exists() }

@@ -7,6 +7,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -106,29 +107,96 @@ class ConnectionAnalyticsScreenTest {
     }
 
     @Test
-    fun searchAndProtocolControlsCombineWithoutChangingTheRootFilterOnBack() {
-        val records = listOf(
-            ConnectionRecord(id = "tcp", uid = 1, protocol = "tcp", destination = "203.0.113.1:443", state = "closed"),
-            ConnectionRecord(id = "udp", uid = 1, protocol = "udp", destination = "203.0.113.1:443", state = "closed"),
-            ConnectionRecord(id = "elsewhere", uid = 1, protocol = "udp", destination = "198.51.100.1:53", state = "closed"))
-        val history = ConnectionHistoryState(records)
-        val root = connectionAnalyticsState(history, ConnectionAnalyticsQuery(rootFilter = ConnectionFilter.Closed))
-        val query = mutableStateOf(root.query.copy(selection = root.summaries.single().identity, filter = ConnectionFilter.Closed))
+    fun scopedFiltersCombineInBothDirectionsAndResetKeepsSearchAndStatus() {
+        val udp = ConnectionRecord(
+            id = "udp", uid = 1, apps = listOf(ConnectionApp("first.app", "First app")),
+            profileId = 1, profileName = "First config", protocol = "udp",
+            destination = "203.0.113.1:443", state = "closed",
+        )
+        val otherApp = udp.copy(id = "other-app", uid = 2, apps = listOf(ConnectionApp("second.app", "Second app")))
+        val history = ConnectionHistoryState(listOf(
+            udp,
+            udp.copy(id = "tcp", protocol = "tcp"),
+            udp.copy(id = "elsewhere", destination = "198.51.100.1:53"),
+            udp.copy(id = "active", state = "active"),
+            udp.copy(id = "other-config", profileId = 2, profileName = "Second config"),
+            otherApp,
+            otherApp.copy(
+                id = "other-app-elsewhere", profileId = 2, profileName = "Second config",
+                protocol = "tcp", destination = "198.51.100.1:53",
+            ),
+        ))
+        val query = mutableStateOf(ConnectionAnalyticsQuery())
+        val appGroups = connectionAnalyticsState(history, query.value).summaries
+        val firstApp = appGroups.single { "first.app" in it.identity.packages }.key
+        val secondApp = appGroups.single { "second.app" in it.identity.packages }.key
+        val configGroups = connectionAnalyticsState(history, query.value.copy(grouping = ConnectionGrouping.Config)).summaries
+        val firstConfig = configGroups.single { it.identity.title == "First config" }.key
+        val context = RuntimeEnvironment.getApplication()
         compose.setContent {
             YaxcTheme { ConnectionAnalyticsScreen(connectionAnalyticsState(history, query.value), {}, { query.value = it }, {}, {}, {}) }
         }
+
+        compose.onNodeWithTag("analytics:filters").assertDoesNotExist()
+        compose.onNodeWithTag("analytics:filter:Closed").performClick()
+        compose.onNodeWithTag(firstApp).performClick()
+        compose.onNodeWithTag("analytics:filter:Closed").assertIsSelected()
+        compose.onNodeWithTag("analytics:filter:All").performClick()
         compose.onNodeWithTag("analytics:search").performTextInput("443")
-        compose.onNodeWithTag("analytics:choice:protocol").performClick()
+        compose.onNodeWithTag("analytics:filters").performClick()
+        compose.onNodeWithTag("analytics:filters-sheet").assertIsDisplayed()
+        compose.onNodeWithTag("analytics:choice:opposite").performScrollTo()
+            .assertTextContains(context.getString(R.string.ca_config), substring = true).performClick()
+        compose.onNodeWithTag("analytics:option:opposite:1").performClick()
+        compose.onNodeWithTag("analytics:choice:protocol").performScrollTo().performClick()
         compose.onNodeWithTag("analytics:option:protocol:2").performClick()
+        compose.onNodeWithTag("analytics:filters-done").performClick()
+        compose.onNodeWithTag("analytics:filters-sheet").assertDoesNotExist()
+        compose.onNodeWithTag("flow:udp").assertIsDisplayed()
+        compose.onNodeWithTag("flow:active").assertIsDisplayed()
         compose.onNodeWithTag("flow:tcp").assertDoesNotExist()
         compose.onNodeWithTag("flow:elsewhere").assertDoesNotExist()
-        compose.onNodeWithTag("flow:udp").assertIsDisplayed()
+        compose.onNodeWithTag("flow:other-config").assertDoesNotExist()
+        compose.onNodeWithTag("flow:other-app").assertDoesNotExist()
+
         compose.onNodeWithTag("analytics:back").performClick()
-        compose.runOnIdle {
-            assertEquals(null, query.value.selection)
-            assertEquals(ConnectionFilter.Closed, query.value.rootFilter)
-        }
-        compose.onNodeWithTag(root.summaries.single().key).assertIsDisplayed()
+        compose.onNodeWithTag("analytics:group:App").assertIsSelected()
+        compose.onNodeWithTag("analytics:filter:Closed").assertIsSelected()
+        compose.onNodeWithTag(secondApp).performClick()
+        compose.onNodeWithTag("analytics:filter:Closed").assertIsSelected()
+        compose.onNodeWithTag("flow:other-app-elsewhere").assertIsDisplayed()
+        compose.onNodeWithTag("analytics:back").performClick()
+
+        compose.onNodeWithTag("analytics:group:Config").performClick()
+        compose.onNodeWithTag("analytics:filter:All").performClick()
+        compose.onNodeWithTag(firstConfig).performClick()
+        compose.onNodeWithTag("analytics:filter:All").assertIsSelected()
+        compose.onNodeWithTag("flow:active").assertIsDisplayed()
+        compose.onNodeWithTag("flow:elsewhere").assertIsDisplayed()
+        compose.onNodeWithTag("flow:other-app").assertIsDisplayed()
+        compose.onNodeWithTag("analytics:filter:Closed").performClick()
+        compose.onNodeWithTag("analytics:search").performTextInput("443")
+        compose.onNodeWithTag("analytics:filters").performClick()
+        compose.onNodeWithTag("analytics:choice:opposite").performScrollTo()
+            .assertTextContains(context.getString(R.string.ca_app), substring = true).performClick()
+        compose.onNodeWithTag("analytics:option:opposite:1").performClick()
+        compose.onNodeWithTag("analytics:choice:protocol").performScrollTo().performClick()
+        compose.onNodeWithTag("analytics:option:protocol:2").performClick()
+        compose.onNodeWithTag("analytics:filters-done").performClick()
+        compose.onNodeWithTag("flow:udp").assertIsDisplayed()
+        compose.onNodeWithTag("flow:other-app").assertDoesNotExist()
+        compose.onNodeWithTag("flow:other-config").assertDoesNotExist()
+        compose.onNodeWithTag("flow:tcp").assertDoesNotExist()
+        compose.onNodeWithTag("flow:elsewhere").assertDoesNotExist()
+
+        compose.onNodeWithTag("analytics:filters").performClick()
+        compose.onNodeWithTag("analytics:reset").performScrollTo().performClick()
+        compose.onNodeWithTag("analytics:filters-done").performClick()
+        compose.onNodeWithTag("analytics:filter:Closed").assertIsSelected()
+        compose.onNodeWithTag("flow:active").assertDoesNotExist()
+        compose.onNodeWithTag("flow:other-app").assertIsDisplayed()
+        compose.onNodeWithTag("flow:tcp").assertIsDisplayed()
+        compose.onNodeWithTag("flow:elsewhere").assertDoesNotExist()
     }
 
     @Test
@@ -137,6 +205,7 @@ class ConnectionAnalyticsScreenTest {
             destination = "203.0.113.1:443", upload = 321, liveBytesExact = false)
         val history = mutableStateOf(ConnectionHistoryState(
             connections = listOf(record), status = ConnectionCaptureStatus.Running, persistOnDisk = true,
+            captureEnabled = true,
         ))
         val query = mutableStateOf(ConnectionAnalyticsQuery())
         val captureIntents = mutableListOf<Boolean>()

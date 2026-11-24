@@ -1,0 +1,11 @@
+## What's new in 1.6.2
+
+### Main screen
+
+- Scrolling expanded subscription groups is smoother. The group keeps its glass styling, rounded edges and existing animations.
+
+### Connection analytics
+
+- App → config and Config → apps put advanced filters behind a filter icon next to search. Its badge shows how many advanced filters are active. Opening another group no longer carries filters over from the previous one.
+- Opening a group and going back now use a short transition. Back still restores the previous list position and state filter.
+- Recording new connections is off unless explicitly enabled in History. This also applies after an update if no choice was saved. Saved choices and existing history are preserved. Saving history to disk remains off by default.

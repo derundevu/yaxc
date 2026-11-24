@@ -179,7 +179,7 @@ class Settings(private val context: Context) {
 
     /** Admit new connection records independently of disk persistence; existing records keep updating. */
     var connectionAnalyticsEnabled: Boolean
-        get() = sharedPreferences.getBoolean("connectionAnalyticsEnabled", true)
+        get() = sharedPreferences.getBoolean("connectionAnalyticsEnabled", false)
         set(value) {
             check(sharedPreferences.edit().putBoolean("connectionAnalyticsEnabled", value).commit()) {
                 "Connection analytics preference could not be saved."

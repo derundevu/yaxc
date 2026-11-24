@@ -6,6 +6,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -51,6 +52,8 @@ class VersionsPanelSmoke {
         check(!TProxyService.isActive())
         val settings = Settings(context)
         val version = BuildConfig.VERSION_NAME
+        val versionSeries = version.substringBeforeLast('.')
+        val patch = version.substringAfterLast('.').toInt()
         val oldTheme = settings.themeStyle
         val oldLanguage = settings.languageTag
         val oldRefresh = settings.refreshLinksOnOpen
@@ -80,7 +83,7 @@ class VersionsPanelSmoke {
                     capture(activity, "versions-panel-ru")
                     compose.onNodeWithTag("settings:whats-new").performClick()
                     compose.waitUntil(10_000) {
-                        compose.onAllNodes(androidx.compose.ui.test.hasText("Соединения и история")).fetchSemanticsNodes().isNotEmpty()
+                        compose.onAllNodes(hasTestTag("changelog:content")).fetchSemanticsNodes().isNotEmpty()
                     }
                     capture(activity, "versions-changelog-ru")
                     compose.onNodeWithTag("changelog:close").performClick()
@@ -92,7 +95,7 @@ class VersionsPanelSmoke {
                     }
                     compose.onNodeWithTag("settings:whats-new").performScrollTo().performClick()
                     compose.waitUntil(10_000) {
-                        compose.onAllNodes(androidx.compose.ui.test.hasText("Connections and history")).fetchSemanticsNodes().isNotEmpty()
+                        compose.onAllNodes(hasTestTag("changelog:content")).fetchSemanticsNodes().isNotEmpty()
                     }
                     capture(activity, "versions-changelog-en")
                     compose.onNodeWithTag("changelog:close").performClick()
@@ -105,7 +108,7 @@ class VersionsPanelSmoke {
                     manager = updater(activity)
                     compose.waitUntil(15_000) { !manager.uiState.isChecking }
                     endpoint(manager, server.url)
-                    server.prepare("1.6.2", chunked = false)
+                    server.prepare("$versionSeries.${patch + 1}", chunked = false)
                     withContext(Dispatchers.Main) { manager.refresh() }
                     compose.onNodeWithTag("updates:download").performScrollTo().performClick()
                     compose.waitUntil(25_000) { manager.uiState.downloadedBytes > 0L && manager.uiState.totalBytes == apk.length() }
@@ -134,7 +137,7 @@ class VersionsPanelSmoke {
                     capture(activity, "versions-update-ready")
                     assertEquals("content", withContext(Dispatchers.Main) { manager.installDownloadedUpdate() }?.data?.scheme)
                     endpoint(manager, server.url)
-                    server.prepare("1.6.3", chunked = true)
+                    server.prepare("$versionSeries.${patch + 2}", chunked = true)
                     withContext(Dispatchers.Main) {
                         manager.refresh()
                         check(manager.startDownload())

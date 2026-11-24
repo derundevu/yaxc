@@ -77,7 +77,9 @@ class ConnectionAnalyticsViewModel(application: Application, private val savedSt
                     }
                 }.flowOn(Dispatchers.Default)
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 0), ConnectionAnalyticsState(query = query.value))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 0), with(repository.state.value) {
+        ConnectionAnalyticsState(query = query.value, status = status, persistOnDisk = persistOnDisk, captureEnabled = captureEnabled)
+    })
 
     fun setVisible(value: Boolean) { visible.value = value }
 

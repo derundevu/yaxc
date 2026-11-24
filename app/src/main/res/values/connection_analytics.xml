@@ -3,6 +3,8 @@
     <string name="ca_back">Back</string>
     <string name="ca_history">History</string>
     <string name="ca_search">Domain, IP or port</string>
+    <string name="ca_filters">Filters</string>
+    <string name="ca_filters_count">Filters, applied: %1$d</string>
     <string name="ca_app">App</string>
     <string name="ca_config">Config</string>
     <string name="ca_protocol">Protocol</string>

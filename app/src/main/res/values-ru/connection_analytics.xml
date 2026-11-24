@@ -3,6 +3,8 @@
     <string name="ca_back">Назад</string>
     <string name="ca_history">История</string>
     <string name="ca_search">Домен, IP или порт</string>
+    <string name="ca_filters">Фильтры</string>
+    <string name="ca_filters_count">Фильтры, применено: %1$d</string>
     <string name="ca_app">Приложение</string>
     <string name="ca_config">Конфиг</string>
     <string name="ca_protocol">Протокол</string>

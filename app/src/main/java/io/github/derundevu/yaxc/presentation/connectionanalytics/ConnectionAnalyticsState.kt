@@ -66,7 +66,7 @@ data class ConnectionFlow(
 
 data class ConnectionAnalyticsState(
     val query: ConnectionAnalyticsQuery = ConnectionAnalyticsQuery(),
-    val status: ConnectionCaptureStatus = ConnectionCaptureStatus.Stopped,
+    val status: ConnectionCaptureStatus = ConnectionCaptureStatus.Disabled,
     val persistOnDisk: Boolean = false,
     val error: String? = null,
     val counters: ConnectionHistoryCounters = ConnectionHistoryCounters(),
@@ -75,7 +75,7 @@ data class ConnectionAnalyticsState(
     val flows: List<ConnectionFlow> = emptyList(),
     val oppositeIdentities: List<ConnectionIdentity> = emptyList(),
     val hasClosedHistory: Boolean = false,
-    val captureEnabled: Boolean = true,
+    val captureEnabled: Boolean = false,
 )
 
 private fun identityKey(vararg parts: String) = parts.joinToString("") { "${it.length}:$it" }

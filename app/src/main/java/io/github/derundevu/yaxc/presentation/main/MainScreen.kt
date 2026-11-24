@@ -107,6 +107,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -166,6 +167,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcVectorBorderShape
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
 import io.github.derundevu.yaxc.presentation.designsystem.components.LocalYaxcFeedback
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
@@ -618,65 +620,126 @@ private fun ExpandedSourceBackground(
     bottomPaddingPx: Float,
     horizontalPadding: androidx.compose.ui.unit.Dp,
 ) {
-    val layout = listState.layoutInfo
-    val footerIndex = headerIndex + bodyCount + 1
-    val visibleItems = layout.visibleItemsInfo
-    val anchor = visibleItems.firstOrNull { it.index in headerIndex..footerIndex } ?: return
-    val measuredHeaderHeight = visibleItems.firstOrNull { it.index == headerIndex }?.size
-        ?: headerHeightPx
-    // Profile title, summary and badge are single-line. All rows therefore share
-    // the same measured stride, including at non-default density/font scale.
-    val measuredStride = visibleItems.firstOrNull {
-        it.index > headerIndex && it.index < footerIndex
-    }?.size ?: bodyStridePx
-    val anchorWithinSource = when (anchor.index) {
-        headerIndex -> 0
-        footerIndex -> measuredHeaderHeight + bodyCount * measuredStride
-        else -> measuredHeaderHeight + (anchor.index - headerIndex - 1) * measuredStride
+    val baseShape = YaxcTheme.shapes.extraLarge
+    val density = LocalDensity.current
+    // Keep the virtual corners, border and elevation shadow well outside the viewport
+    // before using the same cached outline for every position in the group's middle.
+    val edgeBleed = with(density) { 96.dp.toPx() }
+    val geometry by remember(listState, headerIndex, bodyCount, headerHeightPx, bodyStridePx, bottomPaddingPx, edgeBleed) {
+        derivedStateOf(structuralEqualityPolicy()) {
+            expandedSourceGeometry(listState, headerIndex, bodyCount, headerHeightPx, bodyStridePx, bottomPaddingPx, edgeBleed)
+        }
     }
-    val sourceTop = anchor.offset + layout.beforeContentPadding - anchorWithinSource
-    val sourceBottom = sourceTop + measuredHeaderHeight + bodyCount * measuredStride + bottomPaddingPx
-    val viewportHeight = layout.viewportSize.height.toFloat()
-    val visibleTop = sourceTop.coerceIn(0, layout.viewportSize.height)
-    val visibleHeight = sourceBottom.coerceAtMost(viewportHeight) - visibleTop
-    if (visibleHeight <= 0f) return
-    val shape = if (sourceTop >= 0 && sourceBottom <= viewportHeight) {
-        YaxcTheme.shapes.extraLarge
-    } else {
-        SourceViewportShape(
-            shape = YaxcTheme.shapes.extraLarge,
-            top = if (measuredHeaderHeight == 0 && anchor.index > headerIndex) {
-                -viewportHeight
-            } else {
-                (sourceTop - visibleTop).toFloat().coerceAtLeast(-viewportHeight)
-            },
-            bottom = (sourceBottom - visibleTop).coerceAtMost(viewportHeight * 2f),
-        )
+    val bounds: Modifier
+    val shape: Shape
+    val current = geometry ?: return
+    when (current) {
+        ExpandedSourceGeometry.Middle -> {
+            bounds = Modifier.fillMaxSize()
+            shape = remember(baseShape, edgeBleed) {
+                SourceViewportShape(baseShape, top = -edgeBleed, bottom = edgeBleed, bottomRelativeToSize = true)
+            }
+        }
+        is ExpandedSourceGeometry.Edges -> {
+            bounds = Modifier.offset { IntOffset(0, current.visibleTop) }
+                .fillMaxWidth()
+                .height(with(density) { current.visibleHeight.toDp() })
+            shape = if (current.clipped) SourceViewportShape(baseShape, current.top, current.bottom) else baseShape
+        }
     }
     YaxcGlassPanel(
-        modifier = Modifier
-            .offset { IntOffset(0, visibleTop) }
-            .fillMaxWidth()
-            .height(with(LocalDensity.current) { visibleHeight.toDp() })
-            .padding(horizontal = horizontalPadding),
+        modifier = bounds.padding(horizontal = horizontalPadding),
         shape = shape,
         contentPadding = PaddingValues(0.dp),
     ) {}
+}
+
+private sealed interface ExpandedSourceGeometry {
+    data object Middle : ExpandedSourceGeometry
+
+    data class Edges(
+        val visibleTop: Int,
+        val visibleHeight: Float,
+        val top: Float,
+        val bottom: Float,
+        val clipped: Boolean,
+    ) : ExpandedSourceGeometry
+}
+
+private fun expandedSourceGeometry(
+    listState: LazyListState,
+    headerIndex: Int,
+    bodyCount: Int,
+    headerHeightPx: Int,
+    bodyStridePx: Int,
+    bottomPaddingPx: Float,
+    edgeBleed: Float,
+): ExpandedSourceGeometry? {
+    val layout = listState.layoutInfo
+    val footerIndex = headerIndex + bodyCount + 1
+    val visibleItems = layout.visibleItemsInfo
+    var anchorIndex = -1
+    var anchorOffset = 0
+    var measuredHeaderHeight = headerHeightPx
+    var measuredStride = bodyStridePx
+    var hasMeasuredStride = false
+    // Single-line profile cards share their stride even at non-default font scales.
+    for (i in visibleItems.indices) {
+        val item = visibleItems[i]
+        if (item.index !in headerIndex..footerIndex) continue
+        if (anchorIndex < 0) {
+            anchorIndex = item.index
+            anchorOffset = item.offset
+        }
+        if (item.index == headerIndex) {
+            measuredHeaderHeight = item.size
+        } else if (item.index < footerIndex && !hasMeasuredStride) {
+            measuredStride = item.size
+            hasMeasuredStride = true
+        }
+    }
+    if (anchorIndex < 0) return null
+    val anchorWithinSource = when (anchorIndex) {
+        headerIndex -> 0
+        footerIndex -> measuredHeaderHeight + bodyCount * measuredStride
+        else -> measuredHeaderHeight + (anchorIndex - headerIndex - 1) * measuredStride
+    }
+    val sourceTop = anchorOffset + layout.beforeContentPadding - anchorWithinSource
+    val sourceBottom = sourceTop + measuredHeaderHeight + bodyCount * measuredStride + bottomPaddingPx
+    val viewportHeight = layout.viewportSize.height
+    val visibleTop = sourceTop.coerceIn(0, viewportHeight)
+    val visibleHeight = sourceBottom.coerceAtMost(viewportHeight.toFloat()) - visibleTop
+    if (visibleHeight <= 0f) return null
+
+    val top = if (measuredHeaderHeight == 0 && anchorIndex > headerIndex) -viewportHeight.toFloat()
+        else (sourceTop - visibleTop).toFloat().coerceAtLeast(-viewportHeight.toFloat())
+    if (visibleTop == 0 && top <= -edgeBleed && sourceBottom >= viewportHeight + edgeBleed) {
+        return ExpandedSourceGeometry.Middle
+    }
+    return ExpandedSourceGeometry.Edges(
+        visibleTop = visibleTop,
+        visibleHeight = visibleHeight,
+        top = top,
+        bottom = (sourceBottom - visibleTop).coerceAtMost(viewportHeight * 2f),
+        clipped = sourceTop < 0 || sourceBottom > viewportHeight,
+    )
 }
 
 private data class SourceViewportShape(
     val shape: Shape,
     val top: Float,
     val bottom: Float,
-) : Shape {
+    val bottomRelativeToSize: Boolean = false,
+) : YaxcVectorBorderShape {
     override fun createOutline(
         size: Size,
         layoutDirection: LayoutDirection,
         density: Density,
     ): Outline {
-        if (bottom <= top) return Outline.Rectangle(Rect.Zero)
+        val virtualBottom = if (bottomRelativeToSize) size.height + bottom else bottom
+        if (virtualBottom <= top) return Outline.Rectangle(Rect.Zero)
         val offset = Offset(0f, top)
-        return when (val outline = shape.createOutline(Size(size.width, bottom - top), layoutDirection, density)) {
+        return when (val outline = shape.createOutline(Size(size.width, virtualBottom - top), layoutDirection, density)) {
             is Outline.Rectangle -> Outline.Rectangle(outline.rect.translate(offset))
             is Outline.Rounded -> with(outline.roundRect) {
                 val translated = RoundRect(
@@ -689,7 +752,7 @@ private data class SourceViewportShape(
                     bottomRightCornerRadius = bottomRightCornerRadius,
                     bottomLeftCornerRadius = bottomLeftCornerRadius,
                 )
-                // The rounded-border fast path ignores translated bounds.
+                // Keep the translated contour for the clip and hardware shadow.
                 Outline.Generic(Path().apply { addRoundRect(translated) })
             }
             is Outline.Generic -> Outline.Generic(Path().apply { addPath(outline.path, offset) })

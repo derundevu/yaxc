@@ -204,7 +204,7 @@ class ConnectionAnalyticsStateTest {
     fun captureAndDiskTransitionsRefreshCachedStateWithoutDiscardingRetainedRows() {
         val records = listOf(ConnectionRecord(id = "past", uid = 1, state = "interrupted", upload = 456))
         val presenter = ConnectionAnalyticsPresenter()
-        val enabled = ConnectionHistoryState(connections = records, status = ConnectionCaptureStatus.Running)
+        val enabled = ConnectionHistoryState(connections = records, status = ConnectionCaptureStatus.Running, captureEnabled = true)
         val root = presenter.present(enabled, ConnectionAnalyticsQuery(), Locale.US, now)
         assertTrue(root.captureEnabled)
         val disabled = enabled.copy(status = ConnectionCaptureStatus.Disabled, captureEnabled = false)

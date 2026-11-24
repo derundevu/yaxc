@@ -104,7 +104,11 @@ class ConnectionRepository(
     private val file by lazy(LazyThreadSafetyMode.NONE) {
         AtomicFile(historyFile ?: File(appContext.noBackupFilesDir, "connection-history.json"))
     }
-    private val mutableState = MutableStateFlow(ConnectionHistoryState())
+    private var captureEnabled = settings.connectionAnalyticsEnabled
+    private val mutableState = MutableStateFlow(ConnectionHistoryState(
+        status = if (captureEnabled) ConnectionCaptureStatus.Stopped else ConnectionCaptureStatus.Disabled,
+        captureEnabled = captureEnabled,
+    ))
     val state: StateFlow<ConnectionHistoryState> = mutableState.asStateFlow()
 
     // Everything below, except the listener and public command enqueueing, belongs to the actor.
@@ -116,7 +120,6 @@ class ConnectionRepository(
     private var status = ConnectionCaptureStatus.Stopped
     private var idleStatus = ConnectionCaptureStatus.Stopped
     private var persistence = false
-    private var captureEnabled = settings.connectionAnalyticsEnabled
     private var captureSettingError: String? = null
     private var captureToggleError: String? = null
     private var captureError: String? = null

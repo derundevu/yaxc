@@ -444,10 +444,6 @@ class VpnDeviceIntegrationTest {
     @Test
     fun analyticsAdmissionPauseUpdatesExistingTcpUdpWithoutRecordingOffPeriodFlows() = runBlocking {
         val repository = (context.applicationContext as Yaxc).connectionRepository
-        // Exercise the absent-preference default, not a fixture that preselects On.
-        assertTrue(context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
-            .remove("connectionAnalyticsEnabled").commit())
-        assertTrue(Settings(context).connectionAnalyticsEnabled)
         repository.setCaptureEnabled(true)
         repository.setPersistence(false)
         repository.clearHistory()
@@ -828,6 +824,7 @@ class VpnDeviceIntegrationTest {
     @Test
     fun connectionAnalyticsTracksRealAppAndConfigAcrossLiveRoutingTcpUdpAndActualScreen() = runBlocking {
         settings.connectionHistoryOnDisk = false
+        settings.connectionAnalyticsEnabled = true
         settings.selectedProfile = LiveRoutingHelper.CONNECTION_PROFILE_ID
         settings.socksUsername = "analytics-fixture"
         settings.socksPassword = "analytics-fixture-password"
@@ -965,8 +962,11 @@ class VpnDeviceIntegrationTest {
                                 compose.onNodeWithTag("analytics:search").performTextReplacement("analytics.invalid")
                                 val opposite = model.uiState.value.oppositeIdentities.indexOfFirst { it.title == a.name }
                                 assertTrue(opposite >= 0)
-                                compose.onNodeWithTag("analytics:choice:opposite").performClick()
-                                compose.onNodeWithTag("analytics:option:opposite:${opposite + 1}").performClick()
+                                compose.onNodeWithTag("analytics:filters").performClick()
+                                compose.onNodeWithTag("analytics:filters-sheet").assertIsDisplayed()
+                                compose.onNodeWithTag("analytics:choice:opposite").performScrollTo().performClick()
+                                compose.onNodeWithTag("analytics:option:opposite:${opposite + 1}").performScrollTo().performClick()
+                                compose.onNodeWithTag("analytics:filters-done").performClick()
                                 compose.waitUntil(10_000) {
                                     val state = model.uiState.value
                                     state.query.filter == ConnectionFilter.Closed && state.query.search == "analytics.invalid" &&

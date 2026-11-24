@@ -96,7 +96,7 @@ per ABI. Gradle retains ABI splits and adds a universal output whenever `abiTarg
 The all-ABI debug build produces `app-universal-debug.apk` plus the four `app-<ABI>-debug.apk` files in
 `app/build/outputs/apk/debug/`. A single-ABI build produces only its split APK, such as
 `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`; explicitly select that ABI when building native artifacts for one device.
-Every APK uses the same `app/versionCode.txt` value, currently **1180**, without architecture offsets.
+Every APK uses the same `app/versionCode.txt` value, currently **1181**, without architecture offsets.
 `build_do_not_push.sh` is machine-specific and may install a stale APK after a build failure; do not use it as the build entry point.
 
 ### Install and verify
@@ -114,6 +114,39 @@ stop on a signing conflict, never uninstall or clear data to bypass it. Do not i
 Observe the actual changed scenario, not just process startup. VPN/root testing must not interrupt the user's connection without approval.
 For subscription changes, verify repeat refresh and failure handling without destroying profiles or selection;
 for list changes, verify expand/scroll/selection on a large controlled group without changing real subscriptions.
+
+### Main-screen frame timing
+
+On the physical device, use the installed release build, warm up the list once, and keep the subscription,
+refresh-rate mode, theme, VPN/recording state and device temperature comparable. Capture separate short runs for
+the collapsed list, opening and scrolling the same expanded group, and the expanded group during a batch ping.
+Repeat each run with comparable gestures; do not use screen recording while measuring.
+
+For a quick baseline, reset [the app's graphics counters](https://developer.android.com/tools/dumpsys#test-ui-performance),
+perform one scenario with yaxc in the foreground, then dump the counters and recent frame timings:
+
+```bash
+PACKAGE=io.github.derundevu.yaxc
+adb -s "$DEVICE_ID" shell dumpsys gfxinfo "$PACKAGE" reset
+# Open the group and scroll, then dump immediately.
+adb -s "$DEVICE_ID" shell dumpsys gfxinfo "$PACKAGE" framestats > yaxc-expanded-idle.txt
+```
+
+Reset again before each run and use a separate file for each scenario. Compare janky frames and P95/P99, not just
+average FPS. `gfxinfo` is a baseline, not a timeline of where the frame deadline was missed.
+
+For attribution, take a short system trace in Android Studio or Perfetto. On Android 12+, enable
+[FrameTimeline](https://perfetto.dev/docs/data-sources/frametimeline) with graphics/view and CPU scheduling.
+Compare expected and actual frames for yaxc against the main thread, `RenderThread` and SurfaceFlinger. This
+distinguishes slow UI work from rendering or system compositor delays. Use synthetic profiles when sharing traces,
+and inspect the trace for private data before sharing.
+
+Measure steady scrolling in the middle of a long group separately from swipes that cross its header or footer.
+The expanded background keeps its moving outline near an edge and reuses one viewport-sized outline when both
+edges are beyond the shadow margin. The clipped surface paints the same glass gradients and a vector inner
+border under one shared clip. This avoids a bitmap border mask and duplicate outline creation for each gradient.
+Fully visible groups and profile cards use the regular panel. Check both rounded edges after scrolling through
+the middle as well as after returning from overscroll.
 
 ### Local TV and tablet emulators
 
@@ -307,9 +340,11 @@ Required-check branch rules must be configured separately on GitHub; CI alone do
 in `app/build.gradle.kts`. Its five-row matrix builds four signed ABI APKs and a complete universal APK;
 the universal row builds all native ABIs but stages only `app-universal-release.apk`. A GitHub Release is published
 only after all five builds succeed. Notes come from `metadata/en-US/changelogs/<versionCode>.txt`, using the shared code directly.
-The prepared candidate is **1.6.1 / versionCode 1180**, with notes in
-[`metadata/en-US/changelogs/1180.txt`](../metadata/en-US/changelogs/1180.txt). Local unsigned APKs are packaging
-checks, not production-signed release assets; publication still requires the configured release signing secrets.
+The prepared candidate is **1.6.2 / versionCode 1181**, with notes in
+[`metadata/en-US/changelogs/1181.txt`](../metadata/en-US/changelogs/1181.txt) and
+[`metadata/ru-RU/changelogs/1181.txt`](../metadata/ru-RU/changelogs/1181.txt).
+Local unsigned APKs are packaging checks, not production-signed release assets; publication requires the configured
+release signing secrets.
 The release workflow does not run or wait for the CI workflow. Tag only the exact parent revision whose clean-checkout
 CI has passed with all modified fork commits published and pinned; pushing a release tag starts publication directly.
 
@@ -600,6 +635,9 @@ bottom control remain. `ConnectionAnalyticsViewModel` gates grouping/formatting 
 `ConnectionRepository` continues capturing independently of Activities. Lists use flat, stable-key lazy rows, not
 whole groups in one item. App keys include the UID/package set; known config keys use captured ID/fingerprint.
 Captured names stay on each row; header labels cannot create duplicate keys or overwrite historical identities.
+Group links start a fresh detail query seeded from the root state filter. The filter sheet changes only the
+selected scope, and reset leaves search, state and sort untouched. The list transition keys by scope rather
+than live counters or filter values, and the saved scroll anchor remains separate for each scope.
 
 The service starts the IO reader only after actual native start, supplies final snapshots on stop, and marks external
 root capture unavailable. Runtime generations reject late polls; core reload cannot overwrite the final old snapshot.
@@ -614,7 +652,9 @@ file/backups and retains memory. Clear removes only finished records in native/m
 migration, payload/access-log journal, credential export or per-packet capture. Native buffer evictions and local drops
 are explicit; totals are for retained filtered data, not an estimate of omitted connections.
 
-`Settings.connectionAnalyticsEnabled` defaults true and controls admission of new records, not a frozen history.
+`Settings.connectionAnalyticsEnabled` defaults false if the preference is absent, including on upgrade. It controls
+admission of new records, not a frozen history. Explicit choices are unchanged. The app applies the preference to
+native capture before starting the core.
 Native `enabled=false` snapshots still contain byte/status updates for records admitted before the cutoff.
 The repository includes the synchronous cutoff frame, continues polling pending tracked records while Off, and
 keeps runtime/epoch/capture-generation/clear fences against stale frames. An empty disabled startup stays unpolled.

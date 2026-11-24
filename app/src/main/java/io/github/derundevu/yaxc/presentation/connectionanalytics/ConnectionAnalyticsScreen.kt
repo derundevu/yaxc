@@ -1,16 +1,26 @@
 package io.github.derundevu.yaxc.presentation.connectionanalytics
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,8 +32,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -31,35 +43,48 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
+import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.repository.ConnectionCaptureStatus
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,9 +97,14 @@ fun ConnectionAnalyticsScreen(
     onClearHistory: () -> Unit,
 ) {
     val query = state.query
+    val scopeKey = query.scopeKey
     val context = LocalContext.current
     val iconCache = remember(context.applicationContext) { ConnectionIconCache(context) }
     val positions = rememberSaveableStateHolder()
+    val focusManager = LocalFocusManager.current
+    val slideOffset = with(LocalDensity.current) { 20.dp.roundToPx() } *
+        if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+    var filtersOpen by rememberSaveable(scopeKey) { mutableStateOf(false) }
     var historyOpen by rememberSaveable { mutableStateOf(false) }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var capturedDetail by remember { mutableStateOf<ConnectionFlow?>(null) }
@@ -82,7 +112,11 @@ fun ConnectionAnalyticsScreen(
     val back = {
         when {
             detailId != null -> { detailId = null; capturedDetail = null }
-            query.selection != null -> onQuery(query.copy(selection = null))
+            filtersOpen -> filtersOpen = false
+            query.selection != null -> {
+                focusManager.clearFocus()
+                onQuery(query.copy(selection = null))
+            }
             else -> onBack()
         }
     }
@@ -101,73 +135,161 @@ fun ConnectionAnalyticsScreen(
             )
         },
     ) {
-        val scopeKey = "${query.grouping.name}:${query.selection?.key ?: "root"}"
-        positions.SaveableStateProvider(scopeKey) {
-            val listState = rememberLazyListState()
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().navigationBarsPadding().testTag("analytics:list"),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                item(key = "controls", contentType = "controls") {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (query.selection == null) {
-                            ChipRow {
-                                ConnectionGrouping.entries.forEach { group ->
-                                    FilterChip(selected = query.grouping == group,
-                                        onClick = { onQuery(query.copy(grouping = group)) },
-                                        label = { Text(stringResource(if (group == ConnectionGrouping.App) R.string.connectionAnalyticsByApp else R.string.connectionAnalyticsByConfig)) },
-                                        modifier = Modifier.testTag("analytics:group:${group.name}"))
-                                }
-                            }
-                        } else {
-                            OutlinedTextField(value = query.search, onValueChange = { onQuery(query.copy(search = it)) },
-                                label = { Text(stringResource(R.string.ca_search)) }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth().testTag("analytics:search"))
-                            DetailFilters(state, onQuery)
+        AnimatedContent(
+            targetState = state,
+            contentKey = { it.query.scopeKey },
+            modifier = Modifier.fillMaxSize().clipToBounds(),
+            transitionSpec = {
+                val enteringDetails = targetState.query.selection != null
+                if (enteringDetails == (initialState.query.selection != null)) {
+                    EnterTransition.None togetherWith ExitTransition.None
+                } else {
+                    val offset = if (enteringDetails) slideOffset else -slideOffset
+                    (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { offset }) togetherWith
+                        (fadeOut(tween(180)) + slideOutHorizontally(tween(180)) { -offset })
+                }.using(null)
+            },
+            label = "connection analytics scope",
+        ) { page ->
+            val pageKey = page.query.scopeKey
+            val active = pageKey == scopeKey
+            positions.SaveableStateProvider(pageKey) {
+                AnalyticsList(
+                    state = page,
+                    active = active,
+                    iconCache = iconCache,
+                    onQuery = { if (active) onQuery(it) },
+                    onShowFilters = {
+                        if (active) {
+                            focusManager.clearFocus()
+                            filtersOpen = true
                         }
-                        ChipRow {
-                            ConnectionFilter.entries.forEach { filter ->
-                                FilterChip(selected = (if (query.selection == null) query.rootFilter else query.filter) == filter,
-                                    onClick = { onQuery(if (query.selection == null) query.copy(rootFilter = filter) else query.copy(filter = filter)) },
-                                    label = { Text(stringResource(filterLabel(filter))) },
-                                    modifier = Modifier.testTag("analytics:filter:${filter.name}"))
-                            }
-                        }
-                        Text(stringResource(R.string.ca_retained), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Totals(state.totals)
-                        if (query.selection == null) {
-                            Text(stringResource(when (state.status) {
-                                ConnectionCaptureStatus.Running -> R.string.ca_running
-                                ConnectionCaptureStatus.Stopped -> R.string.ca_stopped
-                                ConnectionCaptureStatus.Disabled -> R.string.ca_disabled
-                                ConnectionCaptureStatus.Unsupported -> R.string.connectionAnalyticsUnsupported
-                                ConnectionCaptureStatus.Error -> R.string.connectionAnalyticsError
-                            }), modifier = Modifier.testTag("analytics:status"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (state.counters.nativeRejected > 0 || state.counters.historyRejected > 0 || state.error != null) {
-                            Text(stringResource(R.string.ca_incomplete), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-                if (state.summaries.isEmpty() && state.flows.isEmpty()) {
-                    item(key = "empty", contentType = "empty") {
-                        Text(stringResource(if (state.captureEnabled) R.string.connectionAnalyticsEmpty else R.string.ca_disabled_empty), modifier = Modifier.padding(vertical = 16.dp).testTag("analytics:empty"))
-                    }
-                }
-                items(state.summaries, key = { it.key }, contentType = { "summary" }) { summary ->
-                    SummaryRow(summary, iconCache) {
-                        onQuery(query.copy(selection = summary.identity, filter = query.rootFilter, oppositeKey = null))
-                    }
-                }
-                items(state.flows, key = { it.key }, contentType = { "flow" }) { flow ->
-                    FlowRow(flow, query.grouping, iconCache) { capturedDetail = flow; detailId = flow.record.id }
-                }
+                    },
+                    onShowFlow = { if (active) { capturedDetail = it; detailId = it.record.id } },
+                )
             }
         }
     }
+    if (filtersOpen && query.selection != null) {
+        DetailFilters(state, onQuery) { filtersOpen = false }
+    }
     if (historyOpen) HistoryDialog(state, onCaptureEnabled, onPersistence, onClearHistory) { historyOpen = false }
     if (detail != null) FlowDetail(detail) { detailId = null; capturedDetail = null }
+}
+
+private val ConnectionAnalyticsQuery.scopeKey: String
+    get() = "${grouping.name}:${selection?.key ?: "root"}"
+
+@Composable
+private fun AnalyticsList(
+    state: ConnectionAnalyticsState,
+    active: Boolean,
+    iconCache: ConnectionIconCache,
+    onQuery: (ConnectionAnalyticsQuery) -> Unit,
+    onShowFilters: () -> Unit,
+    onShowFlow: (ConnectionFlow) -> Unit,
+) {
+    val query = state.query
+    val isRoot = query.selection == null
+    val spacing = YaxcTheme.spacing
+    LazyColumn(
+        state = rememberLazyListState(),
+        modifier = Modifier.fillMaxSize().navigationBarsPadding().then(
+            if (active) Modifier.testTag("analytics:list")
+            else Modifier.clearAndSetSemantics { hideFromAccessibility() },
+        ),
+        userScrollEnabled = active,
+        contentPadding = PaddingValues(horizontal = spacing.md, vertical = spacing.sm),
+    ) {
+        item(key = "controls", contentType = "controls") {
+            Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
+                if (isRoot) {
+                    ChipRow {
+                        ConnectionGrouping.entries.forEach { group ->
+                            FilterChip(selected = query.grouping == group,
+                                onClick = { onQuery(query.copy(grouping = group)) },
+                                label = { Text(stringResource(if (group == ConnectionGrouping.App) R.string.connectionAnalyticsByApp else R.string.connectionAnalyticsByConfig)) },
+                                modifier = Modifier.testTag("analytics:group:${group.name}"))
+                        }
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(value = query.search, onValueChange = { onQuery(query.copy(search = it)) },
+                            label = { Text(stringResource(R.string.ca_search)) }, singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("analytics:search"))
+                        FilterButton(query, onShowFilters)
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(spacing.sm)) {
+                    ConnectionFilter.entries.forEach { filter ->
+                        FilterChip(selected = (if (isRoot) query.rootFilter else query.filter) == filter,
+                            onClick = { onQuery(if (isRoot) query.copy(rootFilter = filter) else query.copy(filter = filter)) },
+                            label = { Text(stringResource(filterLabel(filter))) },
+                            modifier = Modifier.testTag("analytics:filter:${filter.name}"))
+                    }
+                }
+                Text(stringResource(R.string.ca_retained), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Totals(state.totals)
+                if (isRoot) {
+                    Text(stringResource(when (state.status) {
+                        ConnectionCaptureStatus.Running -> R.string.ca_running
+                        ConnectionCaptureStatus.Stopped -> R.string.ca_stopped
+                        ConnectionCaptureStatus.Disabled -> R.string.ca_disabled
+                        ConnectionCaptureStatus.Unsupported -> R.string.connectionAnalyticsUnsupported
+                        ConnectionCaptureStatus.Error -> R.string.connectionAnalyticsError
+                    }), modifier = Modifier.testTag("analytics:status"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (state.counters.nativeRejected > 0 || state.counters.historyRejected > 0 || state.error != null) {
+                    Text(stringResource(R.string.ca_incomplete), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (state.summaries.isEmpty() && state.flows.isEmpty()) {
+            item(key = "empty", contentType = "empty") {
+                Text(stringResource(if (state.captureEnabled) R.string.connectionAnalyticsEmpty else R.string.ca_disabled_empty), modifier = Modifier.padding(vertical = 16.dp).testTag("analytics:empty"))
+            }
+        }
+        items(state.summaries, key = { it.key }, contentType = { "summary" }) { summary ->
+            SummaryRow(summary, iconCache) {
+                onQuery(ConnectionAnalyticsQuery(
+                    grouping = query.grouping,
+                    rootFilter = query.rootFilter,
+                    selection = summary.identity,
+                    filter = query.rootFilter,
+                ))
+            }
+        }
+        items(state.flows, key = { it.key }, contentType = { "flow" }) { flow ->
+            FlowRow(flow, query.grouping, iconCache) { onShowFlow(flow) }
+        }
+    }
+}
+
+private fun ConnectionAnalyticsQuery.advancedFilterCount(): Int =
+    (if (oppositeKey != null) 1 else 0) +
+        (if (protocol != ConnectionProtocol.All) 1 else 0) +
+        (if (route != ConnectionRoute.All) 1 else 0) +
+        (if (terminal != ConnectionTerminal.All) 1 else 0) +
+        (if (period != ConnectionPeriod.All) 1 else 0)
+
+@Composable
+private fun FilterButton(query: ConnectionAnalyticsQuery, onClick: () -> Unit) {
+    val count = query.advancedFilterCount()
+    val description = if (count == 0) stringResource(R.string.ca_filters)
+        else stringResource(R.string.ca_filters_count, count)
+    IconButton(onClick = onClick, modifier = Modifier.testTag("analytics:filters")) {
+        BadgedBox(badge = {
+            if (count > 0) {
+                Badge(
+                    modifier = Modifier.clearAndSetSemantics {},
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) { Text(count.toString()) }
+            }
+        }) {
+            Icon(Icons.Outlined.FilterList, contentDescription = description, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable
@@ -175,35 +297,71 @@ private fun ChipRow(content: @Composable () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { content() }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DetailFilters(state: ConnectionAnalyticsState, onQuery: (ConnectionAnalyticsQuery) -> Unit) {
+private fun DetailFilters(state: ConnectionAnalyticsState, onQuery: (ConnectionAnalyticsQuery) -> Unit, onDismiss: () -> Unit) {
     val query = state.query
-    ChipRow {
-        val opposite = state.oppositeIdentities.firstOrNull { it.key == query.oppositeKey }
-        Choice(stringResource(if (query.grouping == ConnectionGrouping.App) R.string.ca_config else R.string.ca_app),
-            opposite?.let { identityTitle(it) } ?: stringResource(if (query.oppositeKey == null) R.string.connectionAnalyticsAll else R.string.ca_unavailable_identity),
-            listOf<String?>(null) + state.oppositeIdentities.map { it.key }, "opposite",
-            { key -> state.oppositeIdentities.firstOrNull { it.key == key }?.let { identityTitle(it) } ?: stringResource(R.string.connectionAnalyticsAll) },
-            { onQuery(query.copy(oppositeKey = it)) })
-        Choice(stringResource(R.string.ca_protocol), protocolTitle(query.protocol), ConnectionProtocol.entries, "protocol", { protocolTitle(it) }, { onQuery(query.copy(protocol = it)) })
-        Choice(stringResource(R.string.ca_route), routeTitle(query.route), ConnectionRoute.entries, "route", { routeTitle(it) }, { onQuery(query.copy(route = it)) })
-    }
-    ChipRow {
-        Choice(stringResource(R.string.ca_terminal), terminalTitle(query.terminal), ConnectionTerminal.entries, "terminal", { terminalTitle(it) }, { onQuery(query.copy(terminal = it)) })
-        Choice(stringResource(R.string.ca_period), periodTitle(query.period), ConnectionPeriod.entries, "period", { periodTitle(it) }, { onQuery(query.copy(period = it)) })
-        Choice(stringResource(R.string.ca_sort), sortTitle(query.sort), ConnectionSort.entries, "sort", { sortTitle(it) }, { onQuery(query.copy(sort = it)) })
-        TextButton(onClick = { onQuery(ConnectionAnalyticsQuery(grouping = query.grouping, rootFilter = query.rootFilter, selection = query.selection)) }, modifier = Modifier.testTag("analytics:reset")) { Text(stringResource(R.string.ca_reset)) }
+    val spacing = YaxcTheme.spacing
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("analytics:filters-sheet"),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.ca_filters), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = {
+                    scope.launch {
+                        sheetState.hide()
+                        onDismiss()
+                    }
+                }, modifier = Modifier.testTag("analytics:filters-done")) { Text(stringResource(R.string.ca_done)) }
+            }
+            Column(
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                    .padding(bottom = spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(spacing.xs),
+            ) {
+                val oppositeByKey = remember(state.oppositeIdentities) { state.oppositeIdentities.associateBy { it.key } }
+                val oppositeKeys = remember(oppositeByKey) { listOf<String?>(null) + oppositeByKey.keys }
+                val opposite = oppositeByKey[query.oppositeKey]
+                Choice(stringResource(if (query.grouping == ConnectionGrouping.App) R.string.ca_config else R.string.ca_app),
+                    opposite?.let { identityTitle(it) } ?: stringResource(if (query.oppositeKey == null) R.string.connectionAnalyticsAll else R.string.ca_unavailable_identity),
+                    oppositeKeys, "opposite",
+                    { key -> oppositeByKey[key]?.let { identityTitle(it) } ?: stringResource(R.string.connectionAnalyticsAll) },
+                    { onQuery(query.copy(oppositeKey = it)) })
+                Choice(stringResource(R.string.ca_protocol), protocolTitle(query.protocol), ConnectionProtocol.entries, "protocol", { protocolTitle(it) }, { onQuery(query.copy(protocol = it)) })
+                Choice(stringResource(R.string.ca_route), routeTitle(query.route), ConnectionRoute.entries, "route", { routeTitle(it) }, { onQuery(query.copy(route = it)) })
+                Choice(stringResource(R.string.ca_terminal), terminalTitle(query.terminal), ConnectionTerminal.entries, "terminal", { terminalTitle(it) }, { onQuery(query.copy(terminal = it)) })
+                Choice(stringResource(R.string.ca_period), periodTitle(query.period), ConnectionPeriod.entries, "period", { periodTitle(it) }, { onQuery(query.copy(period = it)) })
+                TextButton(
+                    onClick = {
+                        onQuery(query.copy(oppositeKey = null, protocol = ConnectionProtocol.All,
+                            route = ConnectionRoute.All, terminal = ConnectionTerminal.All, period = ConnectionPeriod.All))
+                    },
+                    enabled = query.advancedFilterCount() > 0,
+                    modifier = Modifier.testTag("analytics:reset").align(Alignment.End),
+                ) { Text(stringResource(R.string.ca_reset)) }
+                HorizontalDivider()
+                Choice(stringResource(R.string.ca_sort), sortTitle(query.sort), ConnectionSort.entries, "sort", { sortTitle(it) }, { onQuery(query.copy(sort = it)) })
+            }
+        }
     }
 }
 
 @Composable
 private fun <T> Choice(label: String, value: String, options: List<T>, tag: String, title: @Composable (T) -> String, onSelect: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    androidx.compose.foundation.layout.Box {
-        OutlinedButton(onClick = { open = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("analytics:choice:$tag")) {
-            Text("$label: $value", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 240.dp))
+    Box {
+        OutlinedButton(
+            onClick = { open = true },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("analytics:choice:$tag"),
+        ) {
+            Text("$label: $value", modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 320.dp)) {
+        YaxcLiquidDropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 320.dp)) {
             options.forEachIndexed { index, option ->
                 DropdownMenuItem(text = { Text(title(option)) }, onClick = { open = false; onSelect(option) }, modifier = Modifier.testTag("analytics:option:$tag:$index"))
             }

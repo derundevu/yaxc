@@ -57,6 +57,7 @@ class ConnectionRepositoryTest {
         app = RuntimeEnvironment.getApplication()
         app.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
         settings = Settings(app)
+        settings.connectionAnalyticsEnabled = true
     }
 
     @After
@@ -66,7 +67,7 @@ class ConnectionRepositoryTest {
     }
 
     @Test
-    fun defaultOffNeverPollsBeforeActualStartAndNeverWritesDestinationMetadata() = runTest {
+    fun diskDefaultOffNeverPollsBeforeActualStartAndNeverWritesDestinationMetadata() = runTest {
         val disk = File(temporary.root, "history.json")
         disk.writeText("leftover-sensitive-history")
         val unrelated = File(temporary.root, "unrelated").apply { writeText("leave-me") }
@@ -913,16 +914,19 @@ class ConnectionRepositoryTest {
     }
 
     @Test
-    fun persistedOffStartsWithoutReadingAndClearAndDiskChangesNeverResumeCapture() = runTest {
-        settings.connectionAnalyticsEnabled = false
+    fun defaultOffStartsWithoutReadingAndClearAndDiskChangesNeverResumeCapture() = runTest {
+        check(app.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
+            .remove("connectionAnalyticsEnabled").commit())
         val disk = File(temporary.root, "startup-off.json")
         val reads = AtomicInteger()
         val clears = AtomicInteger()
-        val native = CaptureRuntime({ reads.incrementAndGet(); snapshot("process", row("fresh")) }, initialEnabled = false)
+        val native = CaptureRuntime({ reads.incrementAndGet(); snapshot("process", row("fresh")) })
         val repo = repository(disk)
-        repo.startRuntime(emptyMap(), native::read, { clears.incrementAndGet() }, native::setCapture)
+        repo.startNativeRuntime(native::setCapture) {
+            assertFalse(native.enabled)
+            repo.startRuntime(emptyMap(), native::read, { clears.incrementAndGet() }, native::setCapture)
+        }
         runCurrent()
-        assertEquals(listOf(false), native.toggles)
         assertEquals(ConnectionCaptureStatus.Disabled, repo.state.value.status)
         assertEquals(0, reads.get())
         repo.setPersistence(true)

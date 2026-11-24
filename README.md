@@ -243,12 +243,13 @@ disables shared Core Routing there; it does not import the individual members' r
 Tap the **large connection card** on **Connect** to open analytics. Ping and connection Info remain separate
 buttons; the compact bottom control keeps its existing behavior. **App → config** lists applications, while
 **Config → apps** lists configurations. Active, finished and all filters determine group membership and totals.
-Select a group to see only its connections, with a filter for the opposite identity.
+Select a group to see only its connections. It starts with the root's state filter and no extra restrictions.
 
-Connections use compact rows; tap one for complete selectable details and a copy action. Search destination
-domains/IPs/ports and combine state, TCP/UDP, Proxy/Direct/Block/unknown route, terminal outcome and start-period
-filters. Sort newest first, by traffic or by duration. Back preserves filter and scroll context; new traffic does
-not force scrolling. Summaries and totals describe retained filtered observations, never lifetime traffic.
+Search destinations by domain, IP or port and select a state above the records. The **filter icon** opens a panel
+for the opposite identity, TCP/UDP, route, outcome and start period; its badge counts these filters. The panel also
+has a separate sort control for newest, traffic or duration. Reset clears the panel's filters, not search, state or
+sort. Tap a record for full details and a copy action. Back restores the root's filter and scroll position; new
+traffic does not force scrolling. Totals describe retained matching records, never lifetime traffic.
 
 These are actual runtime observations, not an interpretation of the currently selected profile. An established
 Live Routing stream keeps its original member when new connections switch to another member. Captured names and
@@ -265,7 +266,7 @@ Counters describe logical proxy payload bytes, not IP headers, outer transport/e
 Zero-copy download totals can remain incomplete until copying ends. An opaque write failure can leave final totals
 unknown; incomplete values are labeled. Root mode uses an external Xray without this observer and is explicitly unavailable.
 
-Capture normally continues when this screen closes, but presentation work stops. In-memory history is limited to
+When enabled, capture continues when this screen closes, but presentation work stops. In-memory history is limited to
 **5,000 connections / 8 MiB**; finished rows expire after **24 hours**. Active records take priority; older
 finished records rotate out FIFO by completion order. The native buffer holds at most **2,048 observations**.
 An all-active buffer can refuse new observations, without affecting traffic.
@@ -282,11 +283,11 @@ are recorded. Restored active rows become interrupted. Disabling persistence del
 keeping active connections and their byte accounting. Late snapshots cannot restore pre-clear records/counters.
 It never stops traffic or deletes profiles/logs.
 
-**History → Record new connections** is an independent, default-on switch. Turning it off stops admitting new
-connection records without restarting the proxy or interrupting TCP/UDP traffic, in either ordinary or Live Routing
-mode. Previously recorded connections keep updating their byte totals and actual status until they finish.
-Connections opened while recording is Off are never added retroactively when recording resumes; only genuinely new
-connections are admitted. The setting persists across application and proxy restarts.
+**History → Record new connections** is independent of disk storage and off unless explicitly enabled. The default
+also applies after an update if no choice was saved. Turning recording off stops admitting new records without
+restarting the proxy or interrupting TCP/UDP traffic, in either ordinary or Live Routing mode. Previously recorded
+connections keep updating their byte totals and status until they finish. Connections opened while recording is off
+are never added retroactively. The setting persists across application and proxy restarts.
 
 Past history and the separate **Save history on this device** preference are preserved. Recording Off does not
 delete history or immediately free its retained RAM; use **Clear finished history** explicitly when wanted.
