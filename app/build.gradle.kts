@@ -112,7 +112,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
-        versionName = "1.6.2"
+        versionName = "1.6.3"
         testInstrumentationRunner = "io.github.derundevu.yaxc.testing.RegressionTestRunner"
     }
 

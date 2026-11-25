@@ -1,0 +1,27 @@
+## What's new in 1.6.3
+
+### JSON editor
+
+- The code area now meets the toolbar and status bars directly; the empty strips at the dividers are gone.
+- Scrolling a large document with the keyboard open, a caret or selected text no longer stutters. Syntax colors, selection, undo/redo and search work as before.
+
+### Profiles and subscriptions
+
+- A profile's menu now offers **Check latency**. It measures that profile even while another profile or Live Routing is connected, without switching the connection.
+- Refreshing a subscription keeps the provider's order, including entries that moved or were inserted. Matched profiles keep their identity, so the selected profile and Live Routing members are not reset.
+- Holding a source or profile menu button now clearly highlights it. The menu still opens on release.
+- The **+** menu appears only on **Connect**.
+
+### Live Routing
+
+- Opening the editor no longer flashes the app-rules warning before the environment check finishes. Real limitations and load errors are still shown.
+- **Choose profiles** lists checked members first. The primary node and backup order stay as configured.
+
+### Logs
+
+- Logs start empty until at least one level and one source are selected. Both filters support multiple choices, **All** selects every option, and the selection survives restarts. Level names stay in English in every interface language.
+
+### Interface
+
+- Screens share one back header, menus, dividers and navigation cards.
+- **Preferences** uses consistent spacing and no longer lets fields slide under the keyboard or navigation bar. Settings and Routing cards are more compact near the top.
