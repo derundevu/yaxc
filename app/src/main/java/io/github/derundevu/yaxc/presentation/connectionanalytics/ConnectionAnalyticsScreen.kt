@@ -31,7 +31,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -49,7 +48,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -79,8 +77,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcDivider
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 import io.github.derundevu.yaxc.repository.ConnectionCaptureStatus
 import java.text.DateFormat
 import java.util.Date
@@ -124,13 +124,12 @@ fun ConnectionAnalyticsScreen(
     YaxcScaffold(
         modifier = Modifier.testTag("analytics:screen"),
         topBar = {
-            TopAppBar(
-                title = { Text(query.selection?.let { identityTitle(it) } ?: stringResource(R.string.connectionAnalyticsTitle), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = back, modifier = Modifier.testTag("analytics:back")) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.ca_back))
-                    }
-                },
+            YaxcTopAppBar(
+                title = query.selection?.let { identityTitle(it) } ?: stringResource(R.string.connectionAnalyticsTitle),
+                titleMaxLines = 1,
+                onBack = back,
+                backLabel = stringResource(R.string.ca_back),
+                backModifier = Modifier.testTag("analytics:back"),
                 actions = { TextButton(onClick = { historyOpen = true }, modifier = Modifier.testTag("analytics:history")) { Text(stringResource(R.string.ca_history)) } },
             )
         },
@@ -344,7 +343,7 @@ private fun DetailFilters(state: ConnectionAnalyticsState, onQuery: (ConnectionA
                     enabled = query.advancedFilterCount() > 0,
                     modifier = Modifier.testTag("analytics:reset").align(Alignment.End),
                 ) { Text(stringResource(R.string.ca_reset)) }
-                HorizontalDivider()
+                YaxcDivider()
                 Choice(stringResource(R.string.ca_sort), sortTitle(query.sort), ConnectionSort.entries, "sort", { sortTitle(it) }, { onQuery(query.copy(sort = it)) })
             }
         }

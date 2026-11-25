@@ -2,17 +2,18 @@ package io.github.derundevu.yaxc.presentation.root
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
+import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ToggleOn
 import androidx.compose.material3.Icon
@@ -24,16 +25,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
-import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
-import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 
 enum class RootDestination {
     Connect,
@@ -87,53 +89,45 @@ fun RootBottomBar(
 }
 
 @Composable
-fun RootSectionCard(
+internal fun RootSectionCard(
     icon: ImageVector,
     title: String,
     description: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    showChevron: Boolean = false,
 ) {
-    YaxcGlassPanel(
-        modifier = modifier.yaxcClickable(shape = MaterialTheme.shapes.extraLarge, onClick = onClick),
+    val padding = YaxcTheme.paddings.card
+    val rowInset = YaxcTheme.spacing.xs
+    val layoutDirection = LocalLayoutDirection.current
+    YaxcCard(
+        modifier = modifier.yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onClick),
+        contentPadding = PaddingValues(
+            // The row already contributes its own vertical inset.
+            start = padding.calculateStartPadding(layoutDirection),
+            end = padding.calculateEndPadding(layoutDirection),
+            top = padding.calculateTopPadding() - rowInset,
+            bottom = padding.calculateBottomPadding() - rowInset,
+        ),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Surface(
-                color = yaxcSoftFill(darkAlpha = 0.10f, lightAlpha = 0.86f),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Box(
-                    modifier = Modifier.size(44.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
+        YaxcSettingsRow(
+            title = title,
+            subtitle = description,
+            subtitleMaxLines = Int.MAX_VALUE,
+            icon = icon,
+            trailing = if (showChevron) {
+                {
                     Icon(
-                        imageVector = icon,
+                        imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
                         contentDescription = null,
-                        tint = yaxcSoftOnSurface(darkAlpha = 0.86f, lightAlpha = 0.84f),
+                        tint = YaxcTheme.extendedColors.textMuted,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = YaxcTheme.extendedColors.textMuted,
-                )
-            }
-        }
+            } else {
+                null
+            },
+        )
     }
 }
 
@@ -158,9 +152,9 @@ private fun RootBottomTabItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
-                .padding(vertical = 8.dp),
+                .padding(vertical = YaxcTheme.spacing.xs),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(YaxcTheme.spacing.xs, Alignment.CenterVertically),
         ) {
             Icon(
                 imageVector = icon,

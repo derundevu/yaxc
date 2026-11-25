@@ -37,19 +37,16 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalCoroutinesApi::class)
 class LogsViewModel internal constructor(
     application: Application,
-    input: Flow<RuntimeLogEvent>,
-    private val processingDispatcher: CoroutineDispatcher,
+    private val settings: Settings,
+    input: Flow<RuntimeLogEvent> = RuntimeLogReader(settings).events(),
+    private val processingDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : AndroidViewModel(application) {
-    constructor(application: Application) : this(
-        application,
-        RuntimeLogReader(Settings(application)).events(),
-        Dispatchers.Default,
-    )
+    constructor(application: Application) : this(application, Settings(application))
 
     private data class Filters(
+        val levels: Set<LogLevel>,
+        val sources: Set<LogSource>,
         val query: String = "",
-        val level: LogLevel? = null,
-        val source: LogSource? = null,
     )
 
     private data class Data(
@@ -63,7 +60,11 @@ class LogsViewModel internal constructor(
     private val history = LogHistory()
     private val historyLock = Mutex()
     private val data = MutableStateFlow(Data(history.snapshot()))
-    private val filters = MutableStateFlow(Filters())
+    private val initialFilters = Filters(
+        levels = settings.logsSelectedLevels.let { ids -> allLevels.filterTo(mutableSetOf()) { it.preferenceId in ids } },
+        sources = settings.logsSelectedSources.let { ids -> allSources.filterTo(mutableSetOf()) { it.preferenceId in ids } },
+    )
+    private val filters = MutableStateFlow(initialFilters)
     private val exportResultChannel = Channel<Boolean>(capacity = 1)
     private var pendingExport: List<LogEntry>? = null
     private var exportJob: Job? = null
@@ -79,16 +80,14 @@ class LogsViewModel internal constructor(
             withContext(processingDispatcher) {
                 val visible = state.frozen ?: state.history
                 val query = filter.query
-                val entries = if (visible.entries === filteredInput && filter == filteredBy) {
-                    filteredEntries
-                } else if (query.isEmpty() && filter.level == null && filter.source == null) {
-                    visible.entries
-                } else {
-                    buildList {
+                val entries = when {
+                    visible.entries === filteredInput && filter == filteredBy -> filteredEntries
+                    filter.levels.isEmpty() || filter.sources.isEmpty() -> emptyList()
+                    query.isEmpty() && filter.levels == allLevels && filter.sources == allSources -> visible.entries
+                    else -> buildList {
                         visible.entries.forEachIndexed { index, entry ->
                             if (index % 64 == 0) currentCoroutineContext().ensureActive()
-                            if ((filter.level == null || entry.level == filter.level) &&
-                                (filter.source == null || entry.source == filter.source) &&
+                            if (entry.level in filter.levels && entry.source in filter.sources &&
                                 entry.containsText(query)
                             ) add(entry)
                         }
@@ -101,8 +100,8 @@ class LogsViewModel internal constructor(
                 LogsUiState(
                     entries = entries,
                     query = query,
-                    level = filter.level,
-                    source = filter.source,
+                    selectedLevels = filter.levels,
+                    selectedSources = filter.sources,
                     paused = state.frozen != null,
                     pendingCount = state.frozen?.let { state.history.received - it.received } ?: 0L,
                     totalCount = visible.entries.size,
@@ -112,7 +111,10 @@ class LogsViewModel internal constructor(
                     clearGeneration = state.clearGeneration,
                 )
             }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, LogsUiState())
+        }.stateIn(
+            viewModelScope, SharingStarted.Eagerly,
+            LogsUiState(selectedLevels = initialFilters.levels, selectedSources = initialFilters.sources),
+        )
 
     init {
         // One collector for this screen's ViewModel, including Activity recreation.
@@ -139,8 +141,22 @@ class LogsViewModel internal constructor(
     }
 
     fun setQuery(query: String) = filters.update { it.copy(query = query) }
-    fun setLevel(level: LogLevel?) = filters.update { it.copy(level = level) }
-    fun setSource(source: LogSource?) = filters.update { it.copy(source = source) }
+
+    fun toggleLevel(level: LogLevel) = setLevels(filters.value.levels.toggled(level))
+    fun selectAllLevels() = setLevels(allLevels)
+
+    fun toggleSource(source: LogSource) = setSources(filters.value.sources.toggled(source))
+    fun selectAllSources() = setSources(allSources)
+
+    private fun setLevels(levels: Set<LogLevel>) {
+        settings.logsSelectedLevels = levels.mapTo(mutableSetOf()) { it.preferenceId }
+        filters.update { it.copy(levels = levels) }
+    }
+
+    private fun setSources(sources: Set<LogSource>) {
+        settings.logsSelectedSources = sources.mapTo(mutableSetOf()) { it.preferenceId }
+        filters.update { it.copy(sources = sources) }
+    }
 
     fun togglePause() = data.update {
         it.copy(frozen = if (it.frozen == null) it.history else null)
@@ -195,7 +211,14 @@ class LogsViewModel internal constructor(
             exportResultChannel.send(success)
         }
     }
+
+    private companion object {
+        val allLevels = LogLevel.entries.toSet()
+        val allSources = LogSource.entries.toSet()
+    }
 }
+
+private fun <T> Set<T>.toggled(value: T): Set<T> = if (value in this) this - value else this + value
 
 /** Search original text without allocating a reconstructed raw line for every row and keystroke. */
 private fun LogEntry.containsText(query: String): Boolean {

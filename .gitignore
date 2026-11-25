@@ -27,3 +27,6 @@ docs/XRAY_26_10_MIGRATION.md
 
 # local test scripts
 local_build.sh
+
+# local test data
+/test_data

@@ -37,6 +37,7 @@ fun YaxcLiquidDropdownMenu(
 @Composable
 fun YaxcLiquidDropdownMenuItem(
     text: String,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     DropdownMenuItem(
@@ -48,6 +49,7 @@ fun YaxcLiquidDropdownMenuItem(
             )
         },
         onClick = onClick,
+        enabled = enabled,
         colors = MenuDefaults.itemColors(
             textColor = MaterialTheme.colorScheme.onSurface,
         ),

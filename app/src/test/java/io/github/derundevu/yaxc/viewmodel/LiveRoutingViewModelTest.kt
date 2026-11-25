@@ -1,5 +1,7 @@
 package io.github.derundevu.yaxc.viewmodel
 
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import androidx.lifecycle.viewModelScope
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.database.Link
@@ -19,6 +21,7 @@ import kotlinx.coroutines.joinAll
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -30,6 +33,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -486,6 +490,89 @@ class LiveRoutingViewModelTest : RoomTestSupport() {
     }
 
     @Test
+    fun appWarningAndSaveFollowCheckedCompatibilityRatherThanPendingMode() = runEditorTest {
+        val packageName = "synthetic.application"
+        shadowOf(app.packageManager).installPackage(PackageInfo().apply {
+            this.packageName = packageName
+            applicationInfo = ApplicationInfo().apply {
+                this.packageName = packageName
+                nonLocalizedLabel = "Synthetic application"
+                flags = ApplicationInfo.FLAG_INSTALLED
+            }
+        })
+        settings.tun2socks = true
+        val rule = AppDomainRule(name = "App rule", packages = listOf(packageName))
+        settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(rules = listOf(rule)))
+        val initialPlan = settings.liveRoutingPlan
+        val editor = editor(refreshEnvironment = false)
+        val editedRule = rule.copy(name = "Edited app rule")
+        editor.updateRule(editedRule)
+
+        assertNull(editor.appMatchingWarning)
+        assertFalse(editor.appMatchingAvailable)
+        assertTrue(editor.appSavePending)
+        save(editor)
+        assertNull(editor.error)
+        assertEquals(initialPlan, settings.liveRoutingPlan)
+
+        editor.refreshEnvironment()
+        testScheduler.runCurrent()
+        assertNull(editor.appMatchingWarning)
+        assertTrue(editor.appMatchingAvailable)
+        assertFalse(editor.appSavePending)
+        save(editor)
+        assertNull(editor.error)
+        assertEquals(listOf(editedRule), LiveRoutingHelper.decode(settings.liveRoutingPlan).rules)
+        val supportedPlan = settings.liveRoutingPlan
+
+        val nextRule = editedRule.copy(name = "Not yet saved")
+        editor.updateRule(nextRule)
+        settings.tun2socks = false
+        editor.refreshEnvironment()
+        assertNull(editor.appMatchingWarning)
+        assertFalse(editor.appMatchingAvailable)
+        assertTrue(editor.appSavePending)
+        testScheduler.runCurrent()
+        assertEquals(R.string.liveRoutingAppsUnavailable, editor.appMatchingWarning)
+        assertFalse(editor.appMatchingAvailable)
+        assertFalse(editor.appSavePending)
+        save(editor)
+        assertEquals(R.string.liveRoutingAppsUnavailable, editor.error)
+        assertEquals(supportedPlan, settings.liveRoutingPlan)
+    }
+
+    @Test
+    fun supersededCompatibilityReadCannotPublishOldModeOrEndTheNewLoad() = runEditorTest {
+        val ioScheduler = TestCoroutineScheduler()
+        val editor = LiveRoutingViewModel(
+            app, StandardTestDispatcher(ioScheduler), mainDispatcher.dispatcher, runtimeActive = { false },
+        )
+        models += editor
+        settings.transparentProxy = true
+        editor.refreshEnvironment()
+        testScheduler.runCurrent()
+        ioScheduler.runCurrent() // Root mode has been read, but the result has not reached Main.
+        settings.transparentProxy = false
+        settings.tun2socks = true
+        editor.refreshEnvironment()
+        testScheduler.runCurrent()
+        assertFalse(editor.rootMode)
+        assertFalse(editor.appMatchingAvailable)
+        assertNull(editor.appMatchingWarning)
+        assertTrue(editor.appsLoading)
+
+        ioScheduler.runCurrent()
+        testScheduler.runCurrent()
+        assertFalse(editor.rootMode)
+        assertTrue(editor.appMatchingAvailable)
+        assertNull(editor.appMatchingWarning)
+        assertTrue(editor.appsLoading)
+        ioScheduler.runCurrent()
+        testScheduler.runCurrent()
+        assertFalse(editor.appsLoading)
+    }
+
+    @Test
     fun rootModeRejectsSaveAndSocksModeAcceptsDomainsButRejectsAppCriteria() = runEditorTest {
         val rule = AppDomainRule(name = "Domain", domains = listOf("example.test"))
         settings.liveRoutingPlan = LiveRoutingHelper.encode(LiveRoutingPlan(rules = listOf(rule)))
@@ -532,10 +619,12 @@ class LiveRoutingViewModelTest : RoomTestSupport() {
     private fun editor(
         runtimeStatusReader: () -> String = { error("Stopped JVM fixture must never load native status") },
         runtimeActive: () -> Boolean = { false },
+        refreshEnvironment: Boolean = true,
     ): LiveRoutingViewModel {
         val dispatcher = StandardTestDispatcher(mainDispatcher.dispatcher.scheduler)
         return LiveRoutingViewModel(app, dispatcher, dispatcher, runtimeStatusReader, runtimeActive).also {
             models += it
+            if (refreshEnvironment) it.refreshEnvironment()
             mainDispatcher.dispatcher.scheduler.runCurrent()
             assertFalse(it.isLoading)
         }

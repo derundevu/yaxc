@@ -191,6 +191,14 @@ class Settings(private val context: Context) {
         get() = sharedPreferences.getBoolean("connectionHistoryOnDisk", false)
         set(value) = sharedPreferences.edit { putBoolean("connectionHistoryOnDisk", value) }
 
+    internal var logsSelectedLevels: Set<String>
+        get() = sharedPreferences.getStringSet("logsSelectedLevels", null).orEmpty()
+        set(value) = sharedPreferences.edit { putStringSet("logsSelectedLevels", value) }
+
+    internal var logsSelectedSources: Set<String>
+        get() = sharedPreferences.getStringSet("logsSelectedSources", null).orEmpty()
+        set(value) = sharedPreferences.edit { putStringSet("logsSelectedSources", value) }
+
     /** Tun Routes */
     var tunRoutes: Set<String>
         get() = sharedPreferences.getStringSet(

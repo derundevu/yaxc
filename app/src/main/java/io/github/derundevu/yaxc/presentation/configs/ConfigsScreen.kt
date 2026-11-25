@@ -10,7 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -21,7 +20,6 @@ import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +36,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEdi
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 import kotlinx.coroutines.CancellationException
 
@@ -75,13 +74,9 @@ internal fun ConfigsScreen(
     }
     YaxcScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(text = textResource(R.string.configs)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
-                    }
-                },
+            YaxcTopAppBar(
+                title = textResource(R.string.configs),
+                onBack = onBack,
                 actions = {
                     Box {
                         TextButton(onClick = { modeMenuOpen = true }, enabled = !isLoading) {

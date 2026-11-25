@@ -20,15 +20,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,7 +34,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -46,10 +41,8 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,7 +54,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -100,14 +92,17 @@ import io.github.derundevu.yaxc.helper.LiveRoutingMemberStatus
 import io.github.derundevu.yaxc.helper.ProxyGroup
 import io.github.derundevu.yaxc.helper.ProxyGroupStrategy
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingAppOption
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingProfileOption
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveRoutingScreen(
     draft: LiveRoutingViewModel,
@@ -155,41 +150,36 @@ fun LiveRoutingScreen(
     }
     BackHandler(enabled = draft.hasChanges || draft.isBusy, onBack = requestBack)
 
-    Scaffold(
-        containerColor = Color.Transparent,
+    YaxcScaffold(
         contentColor = MaterialTheme.colorScheme.onSurface,
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.liveRouting), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = requestBack, enabled = !draft.isBusy) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.liveRoutingBack))
-                    }
-                },
+            YaxcTopAppBar(
+                title = stringResource(R.string.liveRouting),
+                titleMaxLines = 1,
+                onBack = requestBack,
+                backEnabled = !draft.isBusy,
                 actions = {
                     IconButton(onClick = { showHelp = true }, modifier = Modifier.testTag("live-routing:help")) {
                         Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(R.string.liveRoutingHelp))
                     }
-                    TextButton(onClick = draft::save, enabled = editable && !draft.rootMode) {
+                    TextButton(onClick = draft::save, enabled = editable && !draft.rootMode && !draft.appSavePending) {
                         Text(stringResource(R.string.save))
                     }
                 },
             )
         },
-    ) { padding ->
+    ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.testTag("live-routing:content").fillMaxSize().background(YaxcTheme.backgroundBrush)
-                .padding(padding).navigationBarsPadding().imePadding(),
+            modifier = Modifier.testTag("live-routing:content").fillMaxSize().navigationBarsPadding().imePadding(),
             contentPadding = PaddingValues(start = spacing.md, end = spacing.md, top = spacing.md, bottom = spacing.xl),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
             if (draft.rootMode) item(key = "root-warning") {
                 WarningCard(R.string.liveRoutingRootUnavailable)
             }
-            if (!draft.appMatchingAvailable) item(key = "app-warning") {
-                WarningCard(R.string.liveRoutingAppsUnavailable)
+            draft.appMatchingWarning?.let { warning ->
+                item(key = "app-warning") { WarningCard(warning) }
             }
             if (connectionFailed) item(key = "runtime-error") {
                 YaxcCard {
@@ -346,7 +336,7 @@ fun LiveRoutingScreen(
             packages = rule.packages,
             apps = draft.apps,
             isLoading = draft.appsLoading,
-            enabled = editable,
+            enabled = editable && draft.appMatchingAvailable,
             onDismiss = { appPicker = null },
             onConfirm = {
                 draft.selectPackages(rule.id, it)
@@ -377,21 +367,20 @@ fun LiveRoutingScreen(
         )
     }
     if (confirmDiscard || confirmReload) {
-        AlertDialog(
-            onDismissRequest = { confirmDiscard = false; confirmReload = false },
-            title = { Text(stringResource(R.string.liveRoutingDiscardTitle)) },
-            text = { Text(stringResource(R.string.liveRoutingDiscardBody)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (confirmReload) draft.reload() else onBack()
-                    confirmDiscard = false
-                    confirmReload = false
-                }) { Text(stringResource(R.string.liveRoutingDiscard)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDiscard = false; confirmReload = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
+        val dismissConfirmation = {
+            confirmDiscard = false
+            confirmReload = false
+        }
+        YaxcMessageDialog(
+            title = stringResource(R.string.liveRoutingDiscardTitle),
+            message = stringResource(R.string.liveRoutingDiscardBody),
+            confirmLabel = stringResource(R.string.liveRoutingDiscard),
+            dismissLabel = stringResource(R.string.cancel),
+            kind = FeedbackKind.Warning,
+            onDismiss = dismissConfirmation,
+            onConfirm = {
+                if (confirmReload) draft.reload() else onBack()
+                dismissConfirmation()
             },
         )
     }
@@ -848,21 +837,39 @@ private fun ProfilePicker(
     onConfirm: (List<Long>, Long?) -> Unit,
 ) {
     var query by rememberSaveable(group.id) { mutableStateOf("") }
+    // Keep row order fixed until the picker closes, including across activity recreation.
+    val initialIds = rememberSaveable(group.id) { group.profileIds }
     var ids by rememberSaveable(group.id) { mutableStateOf(group.profileIds) }
     var selected by rememberSaveable(group.id) { mutableStateOf(group.selectedProfileId ?: group.profileIds.firstOrNull()) }
     val unchanged = ids == group.profileIds && selected == (group.selectedProfileId ?: group.profileIds.firstOrNull())
     val includedIds = remember(ids) { ids.toHashSet() }
+    val initiallyIncludedIds = remember(initialIds) { initialIds.toHashSet() }
+    val missingIds = remember(initialIds, ids, profilesById) {
+        buildList {
+            initialIds.filterTo(this) { it !in profilesById }
+            // A profile checked in this dialog can disappear during a subscription refresh.
+            ids.filterTo(this) { it !in initiallyIncludedIds && it !in profilesById }
+        }
+    }
     val matched = rememberMatchingRuntime(group, profilesById, saved && unchanged, runtime)
     val members = remember(matched) { matched?.members?.associateBy { it.profileId }.orEmpty() }
     val eligible = remember(matched) { matched?.eligibleProfileIds?.toHashSet().orEmpty() }
     val missingLabel = stringResource(R.string.liveRoutingMissingProfileLabel)
-    val options by produceState<List<LiveRoutingProfileOption>>(emptyList(), profiles, profilesById, ids, query) {
+    val options by produceState<List<LiveRoutingProfileOption>>(emptyList(), profiles, initiallyIncludedIds, missingIds, query, missingLabel) {
         value = withContext(Dispatchers.Default) {
-            val missing = ids.filterNot { it in profilesById }.map { LiveRoutingProfileOption(it, missingLabel, "") }
-            val all = if (missing.isEmpty()) profiles else missing + profiles
             val keyword = query.trim()
-            if (keyword.isEmpty()) all else all.filter {
-                it.name.contains(keyword, true) || it.source.contains(keyword, true)
+            fun LiveRoutingProfileOption.matches() =
+                keyword.isEmpty() || name.contains(keyword, true) || source.contains(keyword, true)
+            buildList {
+                if (keyword.isEmpty() || missingLabel.contains(keyword, true)) {
+                    for (id in missingIds) add(LiveRoutingProfileOption(id, missingLabel, ""))
+                }
+                for (profile in profiles) {
+                    if (profile.id in initiallyIncludedIds && profile.matches()) add(profile)
+                }
+                for (profile in profiles) {
+                    if (profile.id !in initiallyIncludedIds && profile.matches()) add(profile)
+                }
             }
         }
     }
@@ -872,15 +879,12 @@ private fun ProfilePicker(
         onConfirm = { onConfirm(ids, if (unchanged) group.selectedProfileId else selected) },
         confirmEnabled = ids.isNotEmpty() && (group.strategy != ProxyGroupStrategy.Select || selected in ids),
     ) {
-        SearchField(query, { query = it })
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
+        SearchField(query, { query = it }, Modifier.testTag("live-routing:profile-search"))
+        LazyColumn(Modifier.weight(1f).testTag("live-routing:profiles-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "profile-help") {
-                Text(
-                    stringResource(if (group.checkAvailability) R.string.liveRoutingHealthProfilesHint else R.string.liveRoutingProfilesHint),
-                    Modifier.padding(16.dp),
-                )
-                if (group.checkAvailability || !saved) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(stringResource(if (group.checkAvailability) R.string.liveRoutingHealthProfilesHint else R.string.liveRoutingProfilesHint))
+                    if (group.checkAvailability || !saved) {
                         RuntimeSummary(group, profilesById, saved && unchanged, running, runtime, matched)
                     }
                 }
@@ -890,47 +894,43 @@ private fun ProfilePicker(
             }
             items(options, key = { "profile:${it.id}" }) { option ->
                 val included = option.id in includedIds
-                Row(
-                    modifier = Modifier.fillMaxWidth().toggleable(
-                        value = included,
-                        role = Role.Checkbox,
-                        onValueChange = {
-                            ids = if (it) ids + option.id else ids - option.id
-                            if (selected !in ids) selected = ids.firstOrNull()
-                        },
-                    ).padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = included, onCheckedChange = null)
-                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        Text(option.name, style = MaterialTheme.typography.bodyLarge)
-                        if (option.source.isNotBlank()) Text(option.source, color = YaxcTheme.extendedColors.textMuted, style = MaterialTheme.typography.bodySmall)
-                        if (group.checkAvailability && included) {
-                            if (group.strategy == ProxyGroupStrategy.Select && selected == option.id) Text(
-                                stringResource(R.string.liveRoutingPrimary),
-                                style = MaterialTheme.typography.labelMedium,
+                PickerCheckboxRow(
+                    checked = included,
+                    modifier = Modifier.testTag("live-routing:profile:${option.id}"),
+                    onCheckedChange = {
+                        ids = if (it) ids + option.id else ids - option.id
+                        if (selected !in ids) selected = ids.firstOrNull()
+                    },
+                    trailing = {
+                        if (group.strategy == ProxyGroupStrategy.Select) {
+                            val description = stringResource(
+                                if (group.checkAvailability) R.string.liveRoutingSetPrimary else R.string.liveRoutingUseProfile,
+                                option.name,
                             )
-                            RuntimeMember(
-                                member = members[option.id],
-                                active = matched?.state == "available" &&
-                                    (group.strategy == ProxyGroupStrategy.Select || group.strategy == ProxyGroupStrategy.LeastPing) &&
-                                    matched.activeProfileId == option.id && option.id in eligible,
-                                eligible = matched?.state == "available" &&
-                                    group.strategy != ProxyGroupStrategy.Select && group.strategy != ProxyGroupStrategy.LeastPing &&
-                                    option.id in eligible,
+                            RadioButton(
+                                selected = selected == option.id && included,
+                                onClick = { selected = option.id },
+                                enabled = included,
+                                modifier = Modifier.semantics { contentDescription = description },
                             )
                         }
-                    }
-                    if (group.strategy == ProxyGroupStrategy.Select) {
-                        val description = stringResource(
-                            if (group.checkAvailability) R.string.liveRoutingSetPrimary else R.string.liveRoutingUseProfile,
-                            option.name,
+                    },
+                ) {
+                    Text(option.name, style = MaterialTheme.typography.bodyLarge)
+                    if (option.source.isNotBlank()) Text(option.source, color = YaxcTheme.extendedColors.textMuted, style = MaterialTheme.typography.bodySmall)
+                    if (group.checkAvailability && included) {
+                        if (group.strategy == ProxyGroupStrategy.Select && selected == option.id) Text(
+                            stringResource(R.string.liveRoutingPrimary),
+                            style = MaterialTheme.typography.labelMedium,
                         )
-                        RadioButton(
-                            selected = selected == option.id && included,
-                            onClick = { selected = option.id },
-                            enabled = included,
-                            modifier = Modifier.semantics { contentDescription = description },
+                        RuntimeMember(
+                            member = members[option.id],
+                            active = matched?.state == "available" &&
+                                (group.strategy == ProxyGroupStrategy.Select || group.strategy == ProxyGroupStrategy.LeastPing) &&
+                                matched.activeProfileId == option.id && option.id in eligible,
+                            eligible = matched?.state == "available" &&
+                                group.strategy != ProxyGroupStrategy.Select && group.strategy != ProxyGroupStrategy.LeastPing &&
+                                option.id in eligible,
                         )
                     }
                 }
@@ -1118,21 +1118,15 @@ private fun AppPicker(
             }
             items(current?.apps.orEmpty(), key = { it.packageName }) { option ->
                 val checked = option.packageName in current?.selected.orEmpty()
-                Row(
-                    Modifier.fillMaxWidth().testTag("live-routing:app:${option.packageName}").toggleable(
-                        value = checked,
-                        enabled = selectionEnabled,
-                        role = Role.Checkbox,
-                        onValueChange = { selected = if (it) selected + option.packageName else selected - option.packageName },
-                    ).padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                PickerCheckboxRow(
+                    checked = checked,
+                    modifier = Modifier.testTag("live-routing:app:${option.packageName}"),
+                    enabled = selectionEnabled,
+                    onCheckedChange = { selected = if (it) selected + option.packageName else selected - option.packageName },
                 ) {
-                    Checkbox(checked = checked, onCheckedChange = null, enabled = selectionEnabled)
-                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        Text(option.name, style = MaterialTheme.typography.bodyLarge)
-                        Text(option.packageName, color = YaxcTheme.extendedColors.textMuted, style = MaterialTheme.typography.bodySmall)
-                        if (option.excluded) Text(stringResource(R.string.liveRoutingAppExcluded), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
+                    Text(option.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(option.packageName, color = YaxcTheme.extendedColors.textMuted, style = MaterialTheme.typography.bodySmall)
+                    if (option.excluded) Text(stringResource(R.string.liveRoutingAppExcluded), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -1151,17 +1145,7 @@ private fun TargetPicker(rule: AppDomainRule, groups: List<ProxyGroup>, onDismis
         )
         LazyColumn(Modifier.weight(1f)) {
             items(listOf("proxy", "direct", "block") + groups.map { it.id }, key = { it }) { target ->
-                Row(
-                    Modifier.fillMaxWidth().selectable(
-                        selected = selected == target,
-                        role = Role.RadioButton,
-                        onClick = { selected = target },
-                    ).padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected == target, onClick = null)
-                    Text(targetLabel(target, groups), Modifier.padding(start = 8.dp))
-                }
+                PickerRadioRow(targetLabel(target, groups), selected == target) { selected = target }
             }
         }
     }
@@ -1188,20 +1172,11 @@ private fun DefaultGroupPicker(
             ) { index ->
                 val group = groups.getOrNull(index - 1)
                 val id = group?.id
-                Row(
-                    Modifier.fillMaxWidth().selectable(
-                        selected = selected == id,
-                        role = Role.RadioButton,
-                        onClick = { selected = id },
-                    ).padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected == id, onClick = null)
-                    Text(
-                        group?.name ?: stringResource(R.string.liveRoutingDefaultGroupAutomatic, groups.first().name),
-                        Modifier.padding(start = 8.dp),
-                    )
-                }
+                PickerRadioRow(
+                    label = group?.name ?: stringResource(R.string.liveRoutingDefaultGroupAutomatic, groups.first().name),
+                    selected = selected == id,
+                    onClick = { selected = id },
+                )
             }
         }
     }
@@ -1254,7 +1229,45 @@ private fun LiveRoutingHelp(onDismiss: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickerCheckboxRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    trailing: @Composable (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().then(modifier).toggleable(
+            value = checked,
+            enabled = enabled,
+            role = Role.Checkbox,
+            onValueChange = onCheckedChange,
+        ).padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp), content = content)
+        trailing?.invoke()
+    }
+}
+
+@Composable
+private fun PickerRadioRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(
+            selected = selected,
+            role = Role.RadioButton,
+            onClick = onClick,
+        ).padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, Modifier.padding(start = 8.dp))
+    }
+}
+
 @Composable
 private fun PickerDialog(
     title: String,
@@ -1273,11 +1286,11 @@ private fun PickerDialog(
                 containerColor = Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 topBar = {
-                    TopAppBar(
-                        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.cancel)) }
-                        },
+                    YaxcTopAppBar(
+                        title = title,
+                        titleMaxLines = 1,
+                        onBack = onDismiss,
+                        backLabel = stringResource(R.string.cancel),
                         actions = { TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(stringResource(R.string.ok)) } },
                     )
                 },

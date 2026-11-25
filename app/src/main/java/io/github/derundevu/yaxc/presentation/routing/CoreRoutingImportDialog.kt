@@ -12,7 +12,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -30,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.CoreRoutingImportPreview
 import io.github.derundevu.yaxc.helper.CoreRoutingImportProfile
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcDivider
 
 @Composable
 fun CoreRoutingImportDialog(
@@ -77,7 +77,7 @@ fun CoreRoutingImportDialog(
                     }
                     if (preview.rules.isEmpty()) Text(stringResource(R.string.coreImportNoRules))
                     preview.rules.forEach { rule ->
-                        HorizontalDivider()
+                        YaxcDivider()
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
                                 modifier = Modifier.testTag("core-import:rule:${rule.index}"),
@@ -92,7 +92,7 @@ fun CoreRoutingImportDialog(
                     }
                     val references = selectedRules.mapNotNull { it.outbound }.distinctBy { it.tag }
                     references.forEach { reference ->
-                        HorizontalDivider()
+                        YaxcDivider()
                         Text(stringResource(R.string.coreImportMapOutbound, reference.tag), style = MaterialTheme.typography.labelLarge)
                         listOf("proxy", "direct", "block").forEach { target ->
                             ImportChoice(
@@ -113,7 +113,7 @@ fun CoreRoutingImportDialog(
                             Text(stringResource(R.string.coreImportMapInbound, tag, runtimeInboundTag), style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    HorizontalDivider()
+                    YaxcDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = strategy, enabled = !busy && preview.domainStrategy != null, onCheckedChange = { strategy = it })
                         Text(stringResource(R.string.coreImportStrategy, preview.domainStrategy ?: "—"))

@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,13 +19,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,7 +31,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.HelpOutline
@@ -43,20 +38,17 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.UnfoldMore
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,7 +83,10 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchRow
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,22 +151,11 @@ fun CoreRoutingScreen(
 
     reorder.synchronize(listOf(ruleKeys), !isLoading && !isBusy && editorMode == CoreRoutingEditorMode.Visual)
 
-    Scaffold(
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets.safeDrawing.only(
-            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-        ),
+    YaxcScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(text = textResource(R.string.coreRouting)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = null,
-                        )
-                    }
-                },
+            YaxcTopAppBar(
+                title = textResource(R.string.coreRouting),
+                onBack = onBack,
                 actions = {
                     IconButton(onClick = { helpVisible = true }) {
                         Icon(
@@ -227,13 +211,8 @@ fun CoreRoutingScreen(
                 },
             )
         },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(YaxcTheme.backgroundBrush)
-                .padding(innerPadding),
-        ) {
+    ) {
+        Column(Modifier.fillMaxSize()) {
             TabRow(selectedTabIndex = routingMode.ordinal) {
                 Config.Mode.entries.forEach { mode ->
                     Tab(
@@ -397,27 +376,12 @@ fun CoreRoutingScreen(
         }
 
         if (helpVisible) {
-            AlertDialog(
-                onDismissRequest = { helpVisible = false },
-                title = {
-                    Text(text = textResource(R.string.coreRouting))
-                },
-                text = {
-                    Text(
-                        text = textResource(R.string.coreRoutingModesHelp),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                },
-                confirmButton = {
-                    Text(
-                        text = textResource(R.string.ok),
-                        modifier = Modifier
-                            .clickable { helpVisible = false }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                },
+            YaxcMessageDialog(
+                title = textResource(R.string.coreRouting),
+                message = textResource(R.string.coreRoutingModesHelp),
+                confirmLabel = textResource(R.string.ok),
+                onConfirm = { helpVisible = false },
+                onDismiss = { helpVisible = false },
             )
         }
     }

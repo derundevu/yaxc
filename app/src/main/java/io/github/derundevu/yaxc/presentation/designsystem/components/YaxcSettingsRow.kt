@@ -31,6 +31,7 @@ fun YaxcSettingsRow(
     icon: ImageVector? = null,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
+    subtitleMaxLines: Int = 4,
     trailing: @Composable (() -> Unit)? = null,
 ) {
     val clickableModifier = if (enabled && onClick != null) {
@@ -89,7 +90,7 @@ fun YaxcSettingsRow(
                     text = it,
                     style = MaterialTheme.typography.bodyMedium,
                     color = YaxcTheme.extendedColors.textMuted,
-                    maxLines = 4,
+                    maxLines = subtitleMaxLines,
                     overflow = TextOverflow.Clip,
                 )
             }

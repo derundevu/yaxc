@@ -6,7 +6,7 @@
     <string name="scanQrCode">Scan QR code</string>
     <string name="scannerScreenLead">Import a subscription or profile from a QR code.</string>
     <string name="scannerFrameHint">Position the QR code inside the frame.</string>
-    <string name="scannerBack">Back</string>
+    <string name="navigateBack">Back</string>
     <string name="scannerCameraError">Camera initialization error: %1$s</string>
     <string name="scannerCameraPermissionDenied">Camera permission is required to scan QR codes.</string>
     <string name="fromClipboard">From Clipboard</string>
@@ -97,23 +97,21 @@
     <string name="preferences">Preferences</string>
     <string name="noLogsYet">Logs will appear here once the runtime starts writing output.</string>
     <string name="logsCopied">Logs copied</string>
-    <string name="logsBack">Back</string>
     <string name="logsClearLocal">Clear local log history</string>
     <string name="logsCopyVisible">Copy filtered logs</string>
     <string name="logsExportVisible">Export filtered logs</string>
     <string name="logsCopyEntry">Copy log entry</string>
     <string name="logsSearch">Search logs</string>
     <string name="logsClearSearch">Clear search</string>
-    <string name="logsLevelFilter">Level: %1$s</string>
-    <string name="logsSourceFilter">Source: %1$s</string>
+    <string name="logsLevelFilter">Level: %1$d/%2$d</string>
+    <string name="logsSourceFilter">Source: %1$d/%2$d</string>
     <string name="logsFilterAll">All</string>
-    <string name="logsFilterSelected">Selected</string>
-    <string name="logsLevelVerbose">Verbose</string>
-    <string name="logsLevelDebug">Debug</string>
-    <string name="logsLevelInfo">Info</string>
-    <string name="logsLevelWarning">Warning</string>
-    <string name="logsLevelError">Error</string>
-    <string name="logsLevelUnknown">Unknown</string>
+    <string name="logsLevelVerbose" translatable="false">Verbose</string>
+    <string name="logsLevelDebug" translatable="false">Debug</string>
+    <string name="logsLevelInfo" translatable="false">Info</string>
+    <string name="logsLevelWarning" translatable="false">Warning</string>
+    <string name="logsLevelError" translatable="false">Error</string>
+    <string name="logsLevelUnknown" translatable="false">Unknown</string>
     <string name="logsSourceXray">Xray</string>
     <string name="logsSourceApp">App</string>
     <string name="logsSourceVpn">VPN</string>
@@ -127,6 +125,7 @@
     <string name="logsCounts">%1$d shown · %2$d retained</string>
     <string name="logsPausedPending">Display paused · %1$d new entries received</string>
     <string name="logsDroppedOldest">%1$d oldest entries removed to keep history bounded</string>
+    <string name="logsSelectFilters">Select at least one level and one source to see logs.</string>
     <string name="logsNoMatches">No entries match these filters.</string>
     <string name="logsPausedEmpty">Display paused. Resume to see incoming entries.</string>
     <string name="logsUnavailableEmpty">Cannot read runtime output. Any retained entries remain available.</string>
@@ -158,7 +157,6 @@
     <string name="liveRoutingAppsUnavailable">App matching requires Android 10 or newer and VPN mode. Domain routing also works in SOCKS-only mode. Clear app criteria from enabled rules before saving in an unsupported mode.</string>
     <string name="liveRoutingRuntimeFailed">A runtime update or connection failed. Local saves are not proof that routing is active. Open Connect for the current error.</string>
     <string name="liveRoutingOpenConnection">Open Connect</string>
-    <string name="liveRoutingBack">Back</string>
     <string name="liveRoutingGroups">Proxy groups</string>
     <string name="liveRoutingRules">Ordered rules</string>
     <string name="liveRoutingGroupSummary">%1$d profiles · %2$s</string>
@@ -484,6 +482,7 @@
     <string name="mainSelectedProfileLabel">Active profile</string>
     <string name="mainNoSelectedProfile">No active profile selected</string>
     <string name="mainBatchPingAction">Ping All Profiles</string>
+    <string name="mainPingProfileAction">Check latency</string>
     <string name="mainQuickActions">Quick actions</string>
     <string name="mainQuickActionPing">Ping</string>
     <string name="mainPingQueueFull">Ping queue is full. Wait for a measurement to finish.</string>

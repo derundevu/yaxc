@@ -27,7 +27,7 @@ object InlineProfileImportHelper {
             val target = preferred ?: links.all().first().firstOrNull { it.address.isBlank() } ?: Link(
                 name = context.getString(R.string.defaultManualGroupName), address = "", type = Link.Type.Json, isActive = true,
             ).also { it.id = links.insertAtEnd(it) }
-            parsed.profiles.forEach { profile ->
+            parsed.profiles.asReversed().forEach { profile ->
                 database.profileDao().create(profile.copy(id = 0L, linkId = target.id, index = -1))
             }
             target
@@ -41,7 +41,7 @@ object InlineProfileImportHelper {
         SubscriptionRefreshHelper.RefreshResult(
             attempted = 1, refreshed = 1, failed = 0,
             changes = listOf(SubscriptionRefreshHelper.SourceChanges(
-                source.id, source.name, parsed.profiles.asReversed().map { it.name }, emptyList(), emptyList(),
+                source.id, source.name, parsed.profiles.map { it.name }, emptyList(), emptyList(),
             )),
             warnings = warnings,
         )

@@ -1,5 +1,7 @@
 package io.github.derundevu.yaxc.presentation.editor
 
+import android.text.TextPaint
+import android.text.style.CharacterStyle
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
@@ -213,6 +215,50 @@ class YaxcJsonEditorInteractionTest {
             assertEquals(0, view.scrollY)
             assertEquals(view.scrollX, state.scrollX)
             assertEquals(view.scrollY, state.scrollY)
+        }
+    }
+
+    @Test
+    fun syntaxColorsFollowFarViewportJumpsAndSameLengthEdits() {
+        val source = "{\n" + (1..600).joinToString(",\n") { "\"row$it\": true" } + "\n}"
+        val lastKey = source.indexOf("\"row600\"")
+        val lastValue = source.lastIndexOf("true")
+        val state = JsonEditorState(source)
+        show(state)
+        val view = editor()
+        val firstKey = source.indexOf("\"row1\"")
+        fun colorAt(offset: Int): Int {
+            val paint = TextPaint().apply { color = view.currentTextColor }
+            val text = checkNotNull(view.text)
+            for (span in text.getSpans(offset, offset + 1, CharacterStyle::class.java)) span.updateDrawState(paint)
+            return paint.color
+        }
+        fun awaitColor(offset: Int, expected: (Int) -> Boolean) {
+            compose.waitUntil(10_000) { compose.runOnIdle { expected(colorAt(offset)) } }
+        }
+
+        awaitColor(firstKey) { it != view.currentTextColor }
+        val stringColor = compose.runOnIdle { colorAt(firstKey) }
+        compose.runOnIdle {
+            val layout = checkNotNull(view.layout)
+            view.scrollTo(0, layout.getLineTop(layout.getLineForOffset(lastKey) - 4))
+        }
+        awaitColor(lastKey) { it == stringColor }
+        val constantColor = compose.runOnIdle { colorAt(lastValue) }
+        assertTrue(constantColor != stringColor && constantColor != view.currentTextColor)
+        compose.runOnIdle {
+            assertEquals(source, view.layout.text.toString())
+            view.setSelection(lastValue, lastValue + 4)
+            view.text!!.replace(lastValue, lastValue + 4, "\"ok\"")
+            view.bringPointIntoView(lastValue)
+        }
+        awaitColor(lastValue) { it == stringColor }
+        val edited = source.replaceRange(lastValue, lastValue + 4, "\"ok\"")
+        compose.runOnIdle {
+            assertEquals(edited, state.text)
+            assertEquals(edited, view.layout.text.toString())
+            view.undo()
+            assertEquals(source, view.layout.text.toString())
         }
     }
 

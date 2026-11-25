@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
@@ -84,38 +85,12 @@ fun SettingsHomeScreen(
                         color = YaxcTheme.extendedColors.textMuted,
                     )
                 }
-                item {
-                    RootSectionCard(
-                        icon = Icons.Outlined.FolderOpen,
-                        title = textResource(R.string.assets),
-                        description = textResource(R.string.assetsScreenLead),
-                        onClick = onOpenAssets,
-                    )
-                }
-                item {
-                    RootSectionCard(
-                        icon = Icons.Outlined.Link,
-                        title = textResource(R.string.links),
-                        description = textResource(R.string.linksScreenLead),
-                        onClick = onOpenLinks,
-                    )
-                }
-                item {
-                    RootSectionCard(
-                        icon = Icons.Outlined.Settings,
-                        title = textResource(R.string.preferences),
-                        description = textResource(R.string.settingsScreenLead),
-                        onClick = onOpenSettings,
-                    )
-                }
-                item {
-                    RootSectionCard(
-                        icon = Icons.Outlined.Terminal,
-                        title = textResource(R.string.logs),
-                        description = textResource(R.string.logsScreenLead),
-                        onClick = onOpenLogs,
-                    )
-                }
+                settingsHomeEntries(
+                    onOpenAssets = onOpenAssets,
+                    onOpenLinks = onOpenLinks,
+                    onOpenLogs = onOpenLogs,
+                    onOpenSettings = onOpenSettings,
+                )
                 item {
                     AppVersionsPanel(
                         appVersion = appVersion,
@@ -133,7 +108,7 @@ fun SettingsHomeScreen(
                 selectedDestination = RootDestination.Settings,
                 onSelectDestination = onSelectDestination,
                 modifier = Modifier
-                    .align(androidx.compose.ui.Alignment.BottomCenter)
+                    .align(Alignment.BottomCenter)
                     .padding(horizontal = spacing.lg)
                     .padding(bottom = spacing.lg + reservedBottomInset),
             )
@@ -141,6 +116,50 @@ fun SettingsHomeScreen(
     }
 }
 
+internal fun LazyListScope.settingsHomeEntries(
+    onOpenAssets: () -> Unit,
+    onOpenLinks: () -> Unit,
+    onOpenLogs: () -> Unit,
+    onOpenSettings: () -> Unit,
+    showChevron: Boolean = false,
+) {
+    item {
+        RootSectionCard(
+            icon = Icons.Outlined.FolderOpen,
+            title = textResource(R.string.assets),
+            description = textResource(R.string.assetsScreenLead),
+            onClick = onOpenAssets,
+            showChevron = showChevron,
+        )
+    }
+    item {
+        RootSectionCard(
+            icon = Icons.Outlined.Link,
+            title = textResource(R.string.links),
+            description = textResource(R.string.linksScreenLead),
+            onClick = onOpenLinks,
+            showChevron = showChevron,
+        )
+    }
+    item {
+        RootSectionCard(
+            icon = Icons.Outlined.Settings,
+            title = textResource(R.string.preferences),
+            description = textResource(R.string.settingsScreenLead),
+            onClick = onOpenSettings,
+            showChevron = showChevron,
+        )
+    }
+    item {
+        RootSectionCard(
+            icon = Icons.Outlined.Terminal,
+            title = textResource(R.string.logs),
+            description = textResource(R.string.logsScreenLead),
+            onClick = onOpenLogs,
+            showChevron = showChevron,
+        )
+    }
+}
 
 @Composable
 private fun textResource(id: Int): String {

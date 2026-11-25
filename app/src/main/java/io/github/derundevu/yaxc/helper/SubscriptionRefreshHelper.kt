@@ -155,7 +155,7 @@ class SubscriptionRefreshHelper(
                             }) { "A newer refresh has started" }
                         }
                     }
-                    val existing = if (source.id == 0L) emptyList() else profileDao.linkProfiles(source.id)
+                    val existing = if (source.id == 0L) emptyList() else profileDao.linkProfiles(source.id).asReversed()
                     val updated = source.copy(
                         type = parsed.type,
                         name = parsed.title?.takeIf { it.isNotBlank() } ?: source.name,
@@ -170,7 +170,10 @@ class SubscriptionRefreshHelper(
                     val configs = HashMap<String, Any?>()
                     val oldContent = profileContents(existing, configs)
                     val newContent = profileContents(parsed.profiles, configs)
-                    if (collectChanges) changes = sourceChanges(updated, oldContent, newContent)
+                    if (collectChanges) {
+                        // Keep the report's historical order; identity matching uses display order.
+                        changes = sourceChanges(updated, oldContent.asReversed(), newContent.asReversed())
+                    }
                     manageProfiles(
                         updated, existing, parsed.profiles,
                         matchProfiles(oldContent, newContent, safeIdentity = true), removedIds,
@@ -458,7 +461,7 @@ class SubscriptionRefreshHelper(
                 profiles.add(Profile(linkId = link.id, name = label, config = configuration.toString(2)))
             }
         }
-        return DetectedProfiles(profiles.reversed(), skipped)
+        return DetectedProfiles(profiles, skipped)
     }
 
     private suspend fun lineProfiles(link: Link, value: String): DetectedProfiles {
@@ -480,31 +483,65 @@ class SubscriptionRefreshHelper(
                 skipped.add(SkippedProfile(label, protocol))
             }
         }
-        return DetectedProfiles(profiles.reversed(), skipped)
+        return DetectedProfiles(profiles, skipped)
     }
 
     private suspend fun manageProfiles(
         link: Link,
-        linkProfiles: List<Profile>,
+        existing: List<Profile>,
         newProfiles: List<Profile>,
         matches: IntArray,
         removedIds: MutableSet<Long>,
     ) {
-        val retained = matches.filter { it >= 0 }.toSet()
-        linkProfiles.forEachIndexed { index, profile ->
-            if (index !in retained) {
-                profileDao.remove(profile)
+        var orderChanged = matches.size != existing.size
+        matches.forEachIndexed { index, previous ->
+            if (previous != index) orderChanged = true
+            if (previous >= 0) {
+                val profile = newProfiles[index]
+                profileDao.updateContent(existing[previous].id, link.id, profile.name, profile.config)
+            }
+        }
+        if (!orderChanged) return
+
+        val positions = profileDao.orderedPositions()
+        val retained = BooleanArray(existing.size)
+        matches.forEach { if (it >= 0) retained[it] = true }
+        existing.forEachIndexed { index, profile ->
+            if (!retained[index]) {
+                profileDao.delete(profile)
                 removedIds.add(profile.id)
             }
         }
-        newProfiles.forEachIndexed { index, profile ->
-            val previous = matches[index]
+
+        var nextIndex = 0
+        var nextProfile = 0
+        suspend fun placeProfile(profileIndex: Int, index: Int) {
+            val previous = matches[profileIndex]
             if (previous < 0) {
-                profileDao.create(profile.copy(id = 0L, linkId = link.id, index = -1))
+                val profile = newProfiles[profileIndex]
+                profileDao.insert(profile.copy(id = 0L, linkId = link.id, index = index))
             } else {
-                // Removal/insertion may have shifted the global index since the snapshot.
-                // Update content only, preserving both those shifts and user rearrangements.
-                profileDao.updateContent(linkProfiles[previous].id, link.id, profile.name, profile.config)
+                val profile = existing[previous]
+                if (profile.index != index) profileDao.updateIndex(index, profile.id)
+            }
+        }
+
+        // Prepend a first import. Otherwise reuse just this source's old slots, with
+        // overflow after its last slot. Assign dense indices as we walk the snapshot.
+        if (existing.isEmpty()) {
+            while (nextProfile < newProfiles.size) placeProfile(nextProfile++, nextIndex++)
+        }
+        var oldSlot = 0
+        for (position in positions) {
+            if (oldSlot < existing.size && position.id == existing[oldSlot].id) {
+                oldSlot++
+                if (nextProfile < newProfiles.size) placeProfile(nextProfile++, nextIndex++)
+                if (oldSlot == existing.size) {
+                    while (nextProfile < newProfiles.size) placeProfile(nextProfile++, nextIndex++)
+                }
+            } else {
+                if (position.index != nextIndex) profileDao.updateIndex(nextIndex, position.id)
+                nextIndex++
             }
         }
     }

@@ -9,26 +9,24 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +49,7 @@ import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 import kotlin.math.roundToInt
 
 @Immutable
@@ -64,7 +63,6 @@ data class AssetCardState(
     val progress: Int = 0,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AssetsScreen(
     geoIpState: AssetCardState,
@@ -107,16 +105,9 @@ fun AssetsScreen(
 
     YaxcScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(text = textResource(R.string.assets)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = null,
-                        )
-                    }
-                },
+            YaxcTopAppBar(
+                title = textResource(R.string.assets),
+                onBack = onBack,
             )
         },
     ) {
@@ -124,6 +115,8 @@ fun AssetsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .testTag("assets:list")
+                .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(scrollState)
                 .padding(horizontal = spacing.md)
                 .padding(top = spacing.md, bottom = spacing.xl),

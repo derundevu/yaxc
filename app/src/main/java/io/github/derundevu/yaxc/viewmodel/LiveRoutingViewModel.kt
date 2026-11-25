@@ -65,10 +65,15 @@ class LiveRoutingViewModel internal constructor(
         private set
     var isBusy by mutableStateOf(false)
         private set
-    var rootMode by mutableStateOf(false)
-        private set
-    var appMatchingAvailable by mutableStateOf(false)
-        private set
+    private var compatibility by mutableStateOf<Compatibility?>(null)
+    val rootMode: Boolean get() = compatibility == Compatibility.Root
+    val appMatchingAvailable: Boolean get() = compatibility == Compatibility.AppMatching
+    internal val appMatchingWarning: Int?
+        get() = when (compatibility) {
+            Compatibility.Root, Compatibility.DomainOnly -> R.string.liveRoutingAppsUnavailable
+            Compatibility.AppMatching, null -> null
+        }
+    internal val appSavePending: Boolean get() = compatibility == null && plan.hasEnabledAppRules()
     var error by mutableStateOf<Int?>(null)
         private set
     var canReload by mutableStateOf(false)
@@ -164,15 +169,23 @@ class LiveRoutingViewModel internal constructor(
     fun refreshEnvironment() {
         val revision = ++environmentRevision
         environmentJob?.cancel()
+        compatibility = null
         appsLoading = true
         environmentJob = viewModelScope.launch {
             try {
-                val environment = withContext(ioDispatcher) {
-                    val root = settings.transparentProxy
-                    val canMatch = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && settings.tun2socks && !root
+                val checkedCompatibility = withContext(ioDispatcher) {
+                    when {
+                        settings.transparentProxy -> Compatibility.Root
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && settings.tun2socks -> Compatibility.AppMatching
+                        else -> Compatibility.DomainOnly
+                    }
+                }
+                if (revision != environmentRevision) return@launch
+                compatibility = checkedCompatibility
+                val loadedApps = withContext(ioDispatcher) {
                     val mode = settings.appsRoutingMode
                     val selected = settings.appsRouting.lineSequence().map(String::trim).filter(String::isNotEmpty).toSet()
-                    val apps = app.packageManager.getInstalledApplications(0)
+                    app.packageManager.getInstalledApplications(0)
                         .filterNot { it.packageName == app.packageName }
                         .map { info ->
                             val excluded = when (mode) {
@@ -182,15 +195,12 @@ class LiveRoutingViewModel internal constructor(
                             }
                             LiveRoutingAppOption(info.packageName, info.loadLabel(app.packageManager).toString(), excluded)
                         }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-                    Triple(root, canMatch, apps)
                 }
-                rootMode = environment.first
-                appMatchingAvailable = environment.second
-                apps = environment.third
+                if (revision == environmentRevision) apps = loadedApps
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                error = R.string.liveRoutingAppsLoadFailed
+                if (revision == environmentRevision) error = R.string.liveRoutingAppsLoadFailed
             } finally {
                 if (revision == environmentRevision) appsLoading = false
             }
@@ -301,7 +311,7 @@ class LiveRoutingViewModel internal constructor(
     }
 
     fun save() {
-        if (isLoading || isBusy || baseline == null) return
+        if (isLoading || isBusy || baseline == null || appSavePending) return
         isBusy = true
         error = null
         val snapshot = plan
@@ -327,16 +337,17 @@ class LiveRoutingViewModel internal constructor(
                     return@launch
                 }
                 val result = withContext(ioDispatcher) {
+                    val hasEnabledAppRules = snapshot.hasEnabledAppRules()
                     when {
                         settings.transparentProxy -> SaveOutcome(R.string.liveRoutingRootUnavailable)
-                        snapshot.rules.any { it.enabled && it.packages.isNotEmpty() } &&
+                        hasEnabledAppRules &&
                             (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !settings.tun2socks) ->
                             SaveOutcome(R.string.liveRoutingAppsUnavailable)
                         snapshot.groups.asSequence().flatMap { it.profileIds.asSequence() }.distinct().any {
                             YaxcDatabase.ref(app).profileDao().indexOf(it) == null
                         } -> SaveOutcome(R.string.liveRoutingMissingProfiles)
                         else -> {
-                            val packages = if (snapshot.rules.any { it.enabled && it.packages.isNotEmpty() }) {
+                            val packages = if (hasEnabledAppRules) {
                                 app.packageManager.getInstalledApplications(0).mapTo(mutableSetOf()) { it.packageName }
                             } else emptySet()
                             if (snapshot.rules.any { rule -> rule.enabled && rule.packages.any { it !in packages } }) {
@@ -386,6 +397,10 @@ class LiveRoutingViewModel internal constructor(
             }
         }
     }
+
+    private fun LiveRoutingPlan.hasEnabledAppRules() = rules.any { it.enabled && it.packages.isNotEmpty() }
+
+    private enum class Compatibility { AppMatching, DomainOnly, Root }
 
     private data class SaveOutcome(val error: Int? = null, val saved: Boolean = false, val dispatchFailed: Boolean = false)
 }

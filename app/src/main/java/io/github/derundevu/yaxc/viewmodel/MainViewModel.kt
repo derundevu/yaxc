@@ -325,6 +325,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _effects.tryEmit(MainEffect.ReloadCurrentConfig)
                 }
             }
+            is MainAction.PingProfileClicked -> requestSinglePing(action.profileId)
             is MainAction.PingSourceClicked -> {
                 requestBatchPing(
                     sourceId = action.linkId,

@@ -18,11 +18,11 @@ interface ProfileDao {
         "  FROM `profiles`" +
         "  LEFT JOIN `links` ON `profiles`.`link_id` = `links`.`id`" +
         "  WHERE `links`.`is_active` IS NULL OR `links`.`is_active` = 1" +
-        "  ORDER BY `profiles`.`index` ASC"
+        "  ORDER BY `profiles`.`index` ASC, `profiles`.`id` ASC"
     )
     fun all(): Flow<List<ProfileList>>
 
-    @Query("SELECT * FROM profiles WHERE link_id = :linkId ORDER BY `index` DESC")
+    @Query("SELECT * FROM profiles WHERE link_id = :linkId ORDER BY `index` DESC, `id` DESC")
     suspend fun linkProfiles(linkId: Long): List<Profile>
 
     @Query("SELECT * FROM profiles WHERE `id` = :id")

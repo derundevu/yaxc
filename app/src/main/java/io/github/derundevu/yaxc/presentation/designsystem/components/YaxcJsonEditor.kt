@@ -4,10 +4,6 @@ import android.content.Context
 import android.graphics.Typeface
 import android.text.Editable
 import android.text.InputType
-import android.text.NoCopySpan
-import android.text.Spannable
-import android.text.Spanned
-import android.text.SpanWatcher
 import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
@@ -38,9 +34,6 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,14 +63,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.doOnLayout
-import com.blacksquircle.ui.editorkit.model.SyntaxHighlightSpan
 import com.blacksquircle.ui.editorkit.plugin.autoindent.autoIndentation
 import com.blacksquircle.ui.editorkit.plugin.base.PluginSupplier
 import com.blacksquircle.ui.editorkit.plugin.delimiters.highlightDelimiters
 import com.blacksquircle.ui.editorkit.plugin.linenumbers.LineNumbersPlugin
 import com.blacksquircle.ui.editorkit.widget.TextProcessor
 import com.blacksquircle.ui.editorkit.widget.internal.UndoRedoEditText
-import com.blacksquircle.ui.language.json.JsonLanguage
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.editor.JsonDiagnostic
@@ -108,6 +99,7 @@ fun YaxcJsonEditor(state: JsonEditorState, modifier: Modifier = Modifier) {
     var diagnostic by remember(state) { mutableStateOf<JsonDiagnostic?>(null) }
     var checkedText by remember(state) { mutableStateOf<String?>(null) }
     var busy by remember(state) { mutableStateOf(false) }
+    var syntax by remember(editor) { mutableStateOf<JsonEditorHighlighting.Result?>(null) }
     val colors = MaterialTheme.colorScheme
     val light = yaxcIsLightTheme()
     val palette = remember(editor, colors, light) {
@@ -143,6 +135,12 @@ fun YaxcJsonEditor(state: JsonEditorState, modifier: Modifier = Modifier) {
             editor.document = null
             editor.onUndoRedoChangedListener = null
         }
+    }
+
+    LaunchedEffect(editor, state.text) {
+        val snapshot = state.text
+        val result = withContext(Dispatchers.Default) { JsonEditorHighlighting.tokenize(snapshot) }
+        if (state.text === snapshot) syntax = result
     }
 
     LaunchedEffect(state, state.text) {
@@ -249,23 +247,23 @@ fun YaxcJsonEditor(state: JsonEditorState, modifier: Modifier = Modifier) {
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Outlined.MoreVert, stringResource(R.string.editorOptions))
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editorWrap, if (state.wordWrap) "✓" else "")) },
+                    YaxcLiquidDropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        YaxcLiquidDropdownMenuItem(
+                            text = stringResource(R.string.editorWrap, if (state.wordWrap) "✓" else ""),
                             onClick = { state.wordWrap = !state.wordWrap; menuOpen = false },
                         )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editorSmallerText)) },
+                        YaxcLiquidDropdownMenuItem(
+                            text = stringResource(R.string.editorSmallerText),
                             enabled = state.fontSizeSp > 10f,
                             onClick = { state.fontSizeSp = (state.fontSizeSp - 1f).coerceAtLeast(10f) },
                         )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editorLargerText)) },
+                        YaxcLiquidDropdownMenuItem(
+                            text = stringResource(R.string.editorLargerText),
                             enabled = state.fontSizeSp < 24f,
                             onClick = { state.fontSizeSp = (state.fontSizeSp + 1f).coerceAtMost(24f) },
                         )
-                        if (searchOpen) DropdownMenuItem(
-                            text = { Text(stringResource(R.string.editorMatchCase, if (matchCase) "✓" else "")) },
+                        if (searchOpen) YaxcLiquidDropdownMenuItem(
+                            text = stringResource(R.string.editorMatchCase, if (matchCase) "✓" else ""),
                             onClick = { matchCase = !matchCase; menuOpen = false },
                         )
                     }
@@ -327,15 +325,14 @@ fun YaxcJsonEditor(state: JsonEditorState, modifier: Modifier = Modifier) {
                     }
                 }
             }
-            HorizontalDivider()
+            YaxcDivider()
             key(editor) {
                 AndroidView(factory = { editor },
                 modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds(),
                 update = { view ->
                     if (view.colorScheme !== palette) {
                         view.colorScheme = palette
-                        // EditorKit updates chrome colors, but syntax spans need a language refresh.
-                        view.language = view.language
+                        view.highlighting.setPalette(palette)
                     }
                     if (view.configuredFontSize != state.fontSizeSp) {
                         view.updateFontSize(state.fontSizeSp)
@@ -344,9 +341,10 @@ fun YaxcJsonEditor(state: JsonEditorState, modifier: Modifier = Modifier) {
                         view.setHorizontallyScrolling(!state.wordWrap)
                     }
                     if (view.syncedText !== state.text) view.loadDocument(state)
+                    syntax?.let { if (it.source === view.syncedText) view.highlighting.setTokens(it) }
                 },)
             }
-            HorizontalDivider()
+            YaxcDivider()
             val caret = state.selectionStart.coerceIn(0, state.text.length)
             val line = editor.structure.getLineForIndex(caret)
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
@@ -411,6 +409,7 @@ private class JsonTextProcessor(context: Context) : TextProcessor(context) {
         lineNumbers = true
         highlightCurrentLine = true
     }
+    val highlighting = JsonEditorHighlighting(this)
 
     fun updateFontSize(sp: Float) {
         setTextSize(sp)
@@ -419,17 +418,15 @@ private class JsonTextProcessor(context: Context) : TextProcessor(context) {
         configuredFontSize = sp
     }
 
-    // EditorKit's syntax spans lack UpdateAppearance, so Android otherwise caches old glyph colors.
-    private val syntaxRedrawWatcher = object : SpanWatcher, NoCopySpan {
-        private fun changed(span: Any?) {
-            if (span is SyntaxHighlightSpan && !isDirty) invalidate()
-        }
+    override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
+        // The gutter plugin may update horizontal padding after layout or a digit-width change.
+        // Keep the text viewport flush with its two dividers even on that path.
+        super.setPadding(left, 0, right, 0)
+    }
 
-        override fun onSpanAdded(text: Spannable?, what: Any?, start: Int, end: Int) = changed(what)
-        override fun onSpanRemoved(text: Spannable?, what: Any?, start: Int, end: Int) = changed(what)
-        override fun onSpanChanged(
-            text: Spannable?, what: Any?, oldStart: Int, oldEnd: Int, newStart: Int, newEnd: Int,
-        ) = changed(what)
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (document != null) highlighting.refresh()
     }
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
@@ -442,7 +439,11 @@ private class JsonTextProcessor(context: Context) : TextProcessor(context) {
 
     override fun onScrollChanged(horiz: Int, vert: Int, oldHoriz: Int, oldVert: Int) {
         super.onScrollChanged(horiz, vert, oldHoriz, oldVert)
-        if (!synchronizing) document?.let { it.scrollX = horiz; it.scrollY = vert }
+        if (!synchronizing) document?.let {
+            it.scrollX = horiz
+            it.scrollY = vert
+            highlighting.refresh()
+        }
     }
 
     fun loadDocument(state: JsonEditorState) {
@@ -451,9 +452,9 @@ private class JsonTextProcessor(context: Context) : TextProcessor(context) {
         val x = state.scrollX
         val y = state.scrollY
         synchronizing = true
+        highlighting.documentReplaced()
         setTextContent(state.text)
         clearUndoHistory()
-        text?.setSpan(syntaxRedrawWatcher, 0, length(), Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         state.undoStack?.let { undoStack = it }
         state.redoStack?.let { redoStack = it }
         setSelection(start, end)
@@ -479,12 +480,13 @@ private fun createEditor(context: Context, state: JsonEditorState): JsonTextProc
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         isSaveEnabled = false
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        setEditableFactory(JsonEditorDisplayText.editableFactory)
+        transformationMethod = JsonEditorDisplayText
         imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
         typeface = Typeface.MONOSPACE
         // Plugins read the initial text paint on attachment.
         setTextSize(state.fontSizeSp)
         configuredFontSize = state.fontSizeSp
-        language = JsonLanguage()
         tabWidth = 4
         useSpacesInsteadOfTabs = true
         plugins(PluginSupplier.create {
@@ -493,7 +495,7 @@ private fun createEditor(context: Context, state: JsonEditorState): JsonTextProc
         })
         installPlugin(gutterPlugin)
         val padding = (8 * resources.displayMetrics.density).toInt()
-        setPadding(padding, padding, padding, padding)
+        setPadding(padding, 0, padding, 0)
         setLineSpacing(0f, 1.12f)
         isVerticalScrollBarEnabled = true
         isHorizontalScrollBarEnabled = true
@@ -506,7 +508,8 @@ private fun createEditor(context: Context, state: JsonEditorState): JsonTextProc
             override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(text: Editable?) {
                 if (!synchronizing && document === state) {
-                    val value = text?.toString().orEmpty()
+                    highlighting.textChanged()
+                    val value = JsonEditorDisplayText.snapshotAfterEdit(text)
                     state.text = value
                     syncedText = state.text
                     state.selectionStart = selectionStart.coerceAtLeast(0)

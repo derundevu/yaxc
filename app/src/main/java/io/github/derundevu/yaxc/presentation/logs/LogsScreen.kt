@@ -19,9 +19,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
@@ -29,7 +29,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -41,7 +41,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,17 +60,25 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 import kotlinx.coroutines.launch
 
 private data class LogsFilterKey(
     val query: String,
-    val level: LogLevel?,
-    val source: LogSource?,
+    val levels: Set<LogLevel>,
+    val sources: Set<LogSource>,
     val clearGeneration: Long,
 )
 
@@ -81,8 +88,10 @@ fun LogsScreen(
     state: LogsUiState,
     onBack: () -> Unit,
     onQueryChange: (String) -> Unit,
-    onLevelChange: (LogLevel?) -> Unit,
-    onSourceChange: (LogSource?) -> Unit,
+    onToggleLevel: (LogLevel) -> Unit,
+    onSelectAllLevels: () -> Unit,
+    onToggleSource: (LogSource) -> Unit,
+    onSelectAllSources: () -> Unit,
     onTogglePause: () -> Unit,
     onClear: () -> Unit,
     onCopyEntry: (LogEntry) -> Unit,
@@ -99,7 +108,7 @@ fun LogsScreen(
     var anchorId by rememberSaveable { mutableStateOf<Long?>(null) }
     var anchorOffset by rememberSaveable { mutableIntStateOf(0) }
     var entriesInitialized by remember { mutableStateOf(false) }
-    val filterKey = LogsFilterKey(state.query, state.level, state.source, state.clearGeneration)
+    val filterKey = LogsFilterKey(state.query, state.selectedLevels, state.selectedSources, state.clearGeneration)
     var previousFilterKey by remember { mutableStateOf(filterKey) }
     var queryDraft by rememberSaveable { mutableStateOf(state.query) }
     var pendingQuery by rememberSaveable { mutableStateOf<String?>(null) }
@@ -200,13 +209,9 @@ fun LogsScreen(
 
     YaxcScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.logs)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.logsBack))
-                    }
-                },
+            YaxcTopAppBar(
+                title = stringResource(R.string.logs),
+                onBack = onBack,
                 actions = {
                     IconButton(
                         onClick = onClear,
@@ -258,20 +263,22 @@ fun LogsScreen(
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(spacing.sm)) {
                 LogsFilterMenu(
-                    label = stringResource(R.string.logsLevelFilter, levelLabel(state.level)),
-                    values = listOf(null) + LogLevel.entries,
-                    selected = state.level,
+                    label = stringResource(R.string.logsLevelFilter, state.selectedLevels.size, LogLevel.entries.size),
+                    values = LogLevel.entries,
+                    selection = state.selectedLevels,
                     valueLabel = { levelLabel(it) },
                     tag = "logs_level",
-                    onSelect = onLevelChange,
+                    onToggle = onToggleLevel,
+                    onSelectAll = onSelectAllLevels,
                 )
                 LogsFilterMenu(
-                    label = stringResource(R.string.logsSourceFilter, sourceLabel(state.source)),
-                    values = listOf(null) + LogSource.entries,
-                    selected = state.source,
+                    label = stringResource(R.string.logsSourceFilter, state.selectedSources.size, LogSource.entries.size),
+                    values = LogSource.entries,
+                    selection = state.selectedSources,
                     valueLabel = { sourceLabel(it) },
                     tag = "logs_source",
-                    onSelect = onSourceChange,
+                    onToggle = onToggleSource,
+                    onSelectAll = onSelectAllSources,
                 )
                 TextButton(onClick = onTogglePause, modifier = Modifier.testTag("logs_pause")) {
                     Icon(
@@ -365,8 +372,11 @@ fun LogsScreen(
                         Text(
                             text = stringResource(
                                 when {
-                                    state.query.isNotEmpty() || state.level != null || state.source != null ->
-                                        R.string.logsNoMatches
+                                    state.selectedLevels.isEmpty() || state.selectedSources.isEmpty() ->
+                                        R.string.logsSelectFilters
+                                    state.query.isNotEmpty() ||
+                                        state.selectedLevels.size != LogLevel.entries.size ||
+                                        state.selectedSources.size != LogSource.entries.size -> R.string.logsNoMatches
                                     state.paused -> R.string.logsPausedEmpty
                                     state.status == LogStreamStatus.Unavailable -> R.string.logsUnavailableEmpty
                                     else -> R.string.noLogsYet
@@ -412,13 +422,14 @@ private suspend fun LazyListState.scrollToLatest(lastIndex: Int) {
 }
 
 @Composable
-private fun <T> LogsFilterMenu(
+private fun <T : Enum<T>> LogsFilterMenu(
     label: String,
     values: List<T>,
-    selected: T,
+    selection: Set<T>,
     valueLabel: @Composable (T) -> String,
     tag: String,
-    onSelect: (T) -> Unit,
+    onToggle: (T) -> Unit,
+    onSelectAll: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -426,20 +437,26 @@ private fun <T> LogsFilterMenu(
             Text(label)
             Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        YaxcLiquidDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            val allSelected = selection.size == values.size
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.logsFilterAll)) },
+                onClick = onSelectAll,
+                modifier = Modifier.testTag("${tag}_All").semantics { selected = allSelected },
+                trailingIcon = {
+                    if (allSelected) Icon(Icons.Outlined.Check, contentDescription = null)
+                },
+            )
             values.forEach { value ->
+                val checked = value in selection
                 DropdownMenuItem(
                     text = { Text(valueLabel(value)) },
-                    onClick = {
-                        expanded = false
-                        onSelect(value)
+                    onClick = { onToggle(value) },
+                    modifier = Modifier.testTag("${tag}_${value.name}").semantics {
+                        role = Role.Checkbox
+                        toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
                     },
-                    modifier = Modifier.testTag("${tag}_${value ?: "All"}"),
-                    trailingIcon = {
-                        if (value == selected) {
-                            Text(stringResource(R.string.logsFilterSelected), style = MaterialTheme.typography.labelSmall)
-                        }
-                    },
+                    trailingIcon = { Checkbox(checked = checked, onCheckedChange = null) },
                 )
             }
         }
@@ -495,9 +512,8 @@ private fun levelColor(level: LogLevel): Color = when (level) {
 }
 
 @Composable
-private fun levelLabel(level: LogLevel?): String = stringResource(
+private fun levelLabel(level: LogLevel): String = stringResource(
     when (level) {
-        null -> R.string.logsFilterAll
         LogLevel.Verbose -> R.string.logsLevelVerbose
         LogLevel.Debug -> R.string.logsLevelDebug
         LogLevel.Info -> R.string.logsLevelInfo
@@ -508,9 +524,8 @@ private fun levelLabel(level: LogLevel?): String = stringResource(
 )
 
 @Composable
-private fun sourceLabel(source: LogSource?): String = stringResource(
+private fun sourceLabel(source: LogSource): String = stringResource(
     when (source) {
-        null -> R.string.logsFilterAll
         LogSource.Xray -> R.string.logsSourceXray
         LogSource.App -> R.string.logsSourceApp
         LogSource.Vpn -> R.string.logsSourceVpn

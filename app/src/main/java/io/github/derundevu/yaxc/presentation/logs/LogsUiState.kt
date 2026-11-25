@@ -1,7 +1,13 @@
 package io.github.derundevu.yaxc.presentation.logs
 
-enum class LogLevel { Verbose, Debug, Info, Warning, Error, Unknown }
-enum class LogSource { Xray, App, Vpn, Helper }
+enum class LogLevel(internal val preferenceId: String) {
+    Verbose("verbose"), Debug("debug"), Info("info"), Warning("warning"), Error("error"), Unknown("unknown"),
+}
+
+enum class LogSource(internal val preferenceId: String) {
+    Xray("xray"), App("app"), Vpn("vpn"), Helper("helper"),
+}
+
 enum class LogStreamStatus { Connecting, Live, Waiting, Unavailable }
 
 data class LogEntry(
@@ -19,8 +25,8 @@ data class LogEntry(
 data class LogsUiState(
     val entries: List<LogEntry> = emptyList(),
     val query: String = "",
-    val level: LogLevel? = null,
-    val source: LogSource? = null,
+    val selectedLevels: Set<LogLevel> = emptySet(),
+    val selectedSources: Set<LogSource> = emptySet(),
     val paused: Boolean = false,
     val pendingCount: Long = 0L,
     val totalCount: Int = 0,

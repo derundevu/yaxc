@@ -5,12 +5,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.Language
@@ -36,7 +37,6 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
@@ -62,6 +62,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchRow
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 
 @Immutable
 data class SettingsFormState(
@@ -415,16 +416,9 @@ fun SettingsScreen(
 
     YaxcScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(text = textResource(R.string.preferences)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = null,
-                        )
-                    }
-                },
+            YaxcTopAppBar(
+                title = textResource(R.string.preferences),
+                onBack = onBack,
                 actions = {
                     IconButton(onClick = onSave) {
                         Icon(
@@ -439,8 +433,10 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = spacing.md)
-                .padding(top = spacing.md),
+                .padding(top = spacing.sm),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
             Surface(
@@ -451,7 +447,7 @@ fun SettingsScreen(
                 SingleChoiceSegmentedButtonRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
+                        .padding(YaxcTheme.paddings.dense),
                 ) {
                     SettingsTab.entries.forEach { tab ->
                         SegmentedButton(
@@ -768,7 +764,6 @@ private fun BasicSettingsTab(
                 text = textResource(R.string.settingsSystemVpnProtectionLead),
                 style = MaterialTheme.typography.bodySmall,
                 color = YaxcTheme.extendedColors.textMuted,
-                modifier = Modifier.padding(top = YaxcTheme.spacing.sm),
             )
         }
 

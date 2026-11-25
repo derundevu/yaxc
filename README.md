@@ -26,11 +26,13 @@ The standard Android VPN mode does **not** require root.
 
 ### Profiles and subscriptions
 
-- Import subscriptions and profile share links from the clipboard or a QR code.
+- Open **+** on **Connect** to add profiles or sources, scan a QR code, or import a share link from the clipboard.
 - Keep multiple sources organized alongside your manually created profiles.
-- Refresh subscriptions manually or automatically; see traffic usage and expiry when your provider supplies them.
+- Refresh subscriptions manually or automatically. Profiles follow the provider's order; traffic usage and
+  expiry appear when the provider supplies them.
 - Use Naive over HTTPS/HTTP2 or QUIC/HTTP3 via supported share links and sing-box JSON subscriptions. Mixed sources explicitly report unsupported entries.
-- Check a single profile or compare a group with batch latency checks. Choose HTTP GET, HTTP HEAD or TCP checks.
+- Open a profile's menu and tap **Check latency**, even while another profile or Live Routing is connected.
+  The check does not switch the active connection. To compare a group, use batch checks. Choose HTTP GET, HTTP HEAD or TCP.
 - Single-profile checks do not cancel a running batch. Checks share five workers; duplicate requests are combined and the single-check queue is capped at ten profiles.
 
 ### Routing you control
@@ -47,7 +49,11 @@ The standard Android VPN mode does **not** require root.
 - A full-screen JSON editor with syntax diagnostics, formatting, undo/redo and find/replace.
 - Connection details for troubleshooting local proxy access and subscription metadata.
 - Connection analytics in both directions: app → configurations and configuration → apps, with actual Live Routing member attribution, active/finished connections and bounded optional history. See [Connections and history](#connections-and-history).
-- Live runtime logs with search, level/source filters, pause, per-record copying and filtered text-file export. Reading older entries stops auto-scroll; “To latest” resumes it. History is bounded, and clearing the viewer does not erase runtime logs. Review logs for sensitive data before sharing.
+- Live runtime logs start with no levels or sources selected. Pick any combination in the two filters, or tap
+  **All** in either menu. A row must match both filters, and your selections survive app restarts. The viewer also
+  supports search, pause, copying and filtered text export. Reading older entries stops auto-scroll; **To latest**
+  resumes it. Clearing the bounded viewer history does not erase runtime logs. Review logs for sensitive data
+  before sharing.
 - English and Russian interfaces, system-following appearance and four theme presets, including Mint Graphite and Light Slate.
 - In-app release checks and APK updates.
 - A Quick Settings tile for connection control, plus optional start on boot.
@@ -329,6 +335,7 @@ Tap a group or rule header to expand or collapse its editor; new entries open au
 unsaved fields and text selection. For offscreen positions, scroll and drag again or use the arrows in the expanded
 card. Selected apps appear first in the app picker; **Select all visible apps** affects only the current search results
 and leaves hidden selections untouched.
+The profile picker opens with checked members first. This does not change the primary profile or backup priority.
 During a drag, expanded editors temporarily compact and reopen on release or cancellation. The preview does not
 change rule precedence until you drop the card.
 

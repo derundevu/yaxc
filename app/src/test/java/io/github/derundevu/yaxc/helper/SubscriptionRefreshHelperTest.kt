@@ -10,6 +10,7 @@ import io.github.derundevu.yaxc.testing.RoomTestSupport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.json.JSONArray
@@ -68,6 +69,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
         SubscriptionHttpServer().use { server ->
             val unrelatedId = profiles.create(Profile(name = "standalone", config = body("standalone")))
             val link = seed(server, "A", "B", "C")
+            assertEquals(listOf("A", "B", "C", "standalone"), profiles.all().first().map { it.name })
             val initial = profiles.linkProfiles(link.id).associateBy { it.name }
             val memberId = initial.getValue("B").id
             settings.selectedProfile = memberId
@@ -77,22 +79,25 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             val plan = settings.liveRoutingPlan
 
             server.enqueue(body("C", "A", "B"))
-            helper().refreshLinks(link.id)
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
             assertEquals(initial.mapValues { it.value.id },
                 profiles.linkProfiles(link.id).associate { it.name to it.id })
-            assertEquals(listOf("C", "B", "A"), profiles.linkProfiles(link.id).map { it.name })
+            assertEquals(listOf("C", "A", "B", "standalone"), profiles.all().first().map { it.name })
             assertEquals(memberId, settings.selectedProfile)
+            assertEquals(plan, settings.liveRoutingPlan)
             assertDenseIndices()
 
-            server.enqueue(body("D", "C", "A", "B"))
-            helper().refreshLinks(link.id)
+            server.enqueue(body("C", "D", "A", "B"))
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
+            assertEquals(listOf("C", "D", "A", "B", "standalone"), profiles.all().first().map { it.name })
             val grown = profiles.linkProfiles(link.id).associateBy { it.name }
             initial.forEach { (name, profile) -> assertEquals(profile.id, grown.getValue(name).id) }
             assertTrue(grown.getValue("D").id !in initial.values.map { it.id })
             assertDenseIndices()
 
-            server.enqueue(body("D", "C", "A", "E"))
-            helper().refreshLinks(link.id)
+            server.enqueue(body("C", "D", "E", "A"))
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
+            assertEquals(listOf("C", "D", "E", "A", "standalone"), profiles.all().first().map { it.name })
             val remaining = profiles.linkProfiles(link.id).associateBy { it.name }
             listOf("A", "C", "D").forEach { name ->
                 assertEquals(grown.getValue(name).id, remaining.getValue(name).id)
@@ -152,7 +157,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
     }
 
     @Test
-    fun refreshUsesTransactionLocalProfilesAndKeepsGlobalUserOrderAcrossSources() = runBlocking {
+    fun refreshUsesTransactionLocalSlotsAndOnlyShiftsOtherSourcesOnGrowthOrShrink() = runBlocking {
         SubscriptionHttpServer().use { server ->
             val first = seed(server, "A", "B")
             val second = seed(server, "A", "B")
@@ -160,19 +165,56 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             val held = server.enqueue(body("B", "A"), held = true)
             val pending = async(Dispatchers.IO) { helper().refreshLinks(first.id) }
             held.awaitRequest()
-            val old = profiles.linkProfiles(first.id)
-            val moved = old.first()
-            profiles.moveUp(0, moved.index, moved.id)
-            val edited = old.last()
-            profiles.updateContent(edited.id, first.id, "local rename", edited.config)
-            val order = profiles.orderedPositions()
+            val old = profiles.linkProfiles(first.id).associateBy { it.name }
+            val a = old.getValue("A")
+            val b = old.getValue("B")
+            profiles.moveUp(1, a.index, a.id)
+            profiles.moveUp(3, b.index, b.id)
+            profiles.updateContent(b.id, first.id, "local rename", b.config)
             val secondBefore = profiles.linkProfiles(second.id)
+            val standaloneBefore = profiles.find(standaloneId)
+            val (secondA, secondB) = secondBefore.asReversed().map { it.id }
+            assertEquals(listOf(standaloneId, a.id, secondA, b.id, secondB), profiles.all().first().map { it.id })
             held.release()
-            assertEquals(1, pending.await().refreshed)
-            assertEquals(order, profiles.orderedPositions())
-            assertEquals(old.map { it.id }.toSet(), profiles.linkProfiles(first.id).map { it.id }.toSet())
+            val refreshed = pending.await()
+            assertEquals(1, refreshed.refreshed)
+            assertEquals(listOf("local rename → B"), refreshed.changes.single().modified)
+            assertEquals(listOf(standaloneId, b.id, secondA, a.id, secondB), profiles.all().first().map { it.id })
             assertEquals(secondBefore, profiles.linkProfiles(second.id))
-            assertEquals("standalone", profiles.find(standaloneId).name)
+            assertEquals(standaloneBefore, profiles.find(standaloneId))
+            assertDenseIndices()
+
+            server.enqueue(body("A", "C", "B"))
+            assertEquals(1, helper().refreshLinks(first.id).refreshed)
+            val c = profiles.linkProfiles(first.id).single { it.name == "C" }
+            assertEquals(listOf(standaloneId, a.id, secondA, c.id, b.id, secondB), profiles.all().first().map { it.id })
+            assertDenseIndices()
+
+            server.enqueue(body("B"))
+            assertEquals(1, helper().refreshLinks(first.id).refreshed)
+            assertEquals(listOf(standaloneId, b.id, secondA, secondB), profiles.all().first().map { it.id })
+            assertDenseIndices()
+        }
+    }
+
+    @Test
+    fun tiedIndicesUseStableIdsAndOnlyCompactWhenOrderChanges() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val unrelated = profiles.create(Profile(name = "standalone", config = "{}"))
+            val link = seed(server, "A", "B")
+            val a = profiles.linkProfiles(link.id).single { it.name == "A" }.id
+            val b = profiles.linkProfiles(link.id).single { it.name == "B" }.id
+            listOf(unrelated, a, b).forEach { profiles.updateIndex(7, it) }
+            val tied = profiles.orderedPositions()
+            assertEquals(listOf(unrelated, a, b), profiles.all().first().map { it.id })
+
+            server.enqueue(bodyWithIdentities("A" to "A", "B" to "edited"))
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
+            assertEquals(tied, profiles.orderedPositions())
+
+            server.enqueue(bodyWithIdentities("B" to "edited", "A" to "A"))
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
+            assertEquals(listOf(unrelated, b, a), profiles.all().first().map { it.id })
             assertDenseIndices()
         }
     }
@@ -183,20 +225,32 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             val link = source(server.url)
             server.enqueue(bodyWithIdentities("duplicate" to "a", "duplicate" to "a", "duplicate" to "b"))
             helper().saveResolvedLink(link, helper().resolveProfiles(link))
-            val before = profiles.linkProfiles(link.id)
-            settings.selectedProfile = before.last().id
+            val before = profiles.all().first().filter { it.link == link.id }
+            assertEquals(listOf("duplicate", "duplicate", "duplicate"), before.map { it.name })
+            val memberId = before.first().id
+            settings.selectedProfile = memberId
+            val plan = LiveRoutingHelper.encode(LiveRoutingPlan(
+                groups = listOf(ProxyGroup(id = "group", profileIds = listOf(memberId))),
+            ))
+            settings.liveRoutingPlan = plan
             server.enqueue(bodyWithIdentities("duplicate" to "changed", "duplicate" to "b", "duplicate" to "a"))
-            helper().refreshLinks(link.id)
-            fun identity(profile: Profile) = JSONObject(profile.config).getJSONObject("future").getString("identity")
-            val after = profiles.linkProfiles(link.id).associateBy(::identity)
-            assertEquals(before.first().id, after.getValue("b").id)
-            assertEquals(before[1].id, after.getValue("a").id)
-            assertTrue(after.getValue("changed").id !in before.map { it.id })
-            assertEquals(0L, settings.selectedProfile)
-            val stable = profiles.linkProfiles(link.id).map { it.id }
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
+            val after = profiles.all().first().filter { it.link == link.id }
+            assertEquals(listOf("duplicate", "duplicate", "duplicate"), after.map { it.name })
+            assertEquals(listOf("changed", "b", "a"), after.map {
+                JSONObject(it.config).getJSONObject("future").getString("identity")
+            })
+            assertEquals(listOf(before[2].id, memberId), after.drop(1).map { it.id })
+            assertTrue(after.first().id !in before.map { it.id })
+            assertFalse(after.any { it.id == before[1].id })
+            assertEquals(memberId, settings.selectedProfile)
+            assertEquals(plan, settings.liveRoutingPlan)
+
             server.enqueue(bodyWithIdentities("duplicate" to "a", "duplicate" to "changed", "duplicate" to "b"))
-            helper().refreshLinks(link.id)
-            assertEquals(stable, profiles.linkProfiles(link.id).map { it.id })
+            assertEquals(1, helper().refreshLinks(link.id).refreshed)
+            assertEquals(listOf(memberId, after.first().id, before[2].id), profiles.all().first().map { it.id })
+            assertEquals(memberId, settings.selectedProfile)
+            assertEquals(plan, settings.liveRoutingPlan)
             assertDenseIndices()
         }
     }
@@ -581,7 +635,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 CREATE TRIGGER reject_profile_update BEFORE UPDATE ON profiles
                 WHEN NEW.name = 'reject' BEGIN SELECT RAISE(ABORT, 'synthetic rejection'); END
             """.trimIndent())
-            server.enqueue(bodyWithIdentities("reject" to "first", "changed-before-failure" to "second"),
+            server.enqueue(bodyWithIdentities("changed-before-failure" to "second", "reject" to "first"),
                 headers = mapOf("Profile-Title" to "must rollback"))
             val parsed = helper().resolveProfiles(link)
             expectFailure { helper().saveResolvedLink(link, parsed, 90_000L) }
@@ -601,7 +655,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             settings.selectedProfile = before[1].id
             database.openHelper.writableDatabase.execSQL("""
                 CREATE TRIGGER reject_profile_delete BEFORE DELETE ON profiles
-                WHEN OLD.name = 'first' BEGIN SELECT RAISE(ABORT, 'synthetic rejection'); END
+                WHEN OLD.name = 'third' BEGIN SELECT RAISE(ABORT, 'synthetic rejection'); END
             """.trimIndent())
             server.enqueue(body("remaining"))
             assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 0, 1), helper().refreshLinks(link.id))
@@ -609,6 +663,27 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             assertEquals(beforeLink, links.find(link.id))
             assertEquals(before[1].id, settings.selectedProfile)
             assertDenseIndices()
+        }
+    }
+
+    @Test
+    fun failedIndexShiftRollsBackEarlierReorderAndInsert() = runBlocking {
+        SubscriptionHttpServer().use { server ->
+            val unrelated = profiles.create(Profile(name = "standalone", config = "{}"))
+            val link = seed(server, "A", "B")
+            val before = profiles.all().first()
+            val beforeLink = links.find(link.id)
+            settings.selectedProfile = before.first().id
+            database.openHelper.writableDatabase.execSQL("""
+                CREATE TRIGGER reject_unrelated_index_shift BEFORE UPDATE OF `index` ON profiles
+                WHEN OLD.id = $unrelated BEGIN SELECT RAISE(ABORT, 'synthetic rejection'); END
+            """.trimIndent())
+            server.enqueue(body("B", "added", "A"))
+
+            assertEquals(SubscriptionRefreshHelper.RefreshResult(1, 0, 1), helper().refreshLinks(link.id))
+            assertEquals(before, profiles.all().first())
+            assertEquals(beforeLink, links.find(link.id))
+            assertEquals(before.first().id, settings.selectedProfile)
         }
     }
 
@@ -747,12 +822,11 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
                 val link = source(server.url, "batch-$index")
                 server.enqueue(response)
                 assertEquals(1, helper().refreshLinks(link.id).refreshed)
-                val saved = profiles.linkProfiles(link.id)
+                val saved = profiles.all().first().filter { it.link == link.id }
                 assertEquals(2, saved.size)
-                assertTrue(saved.all { it.linkId == link.id })
-                if (index < 2) assertEquals(listOf("Second", "Первый 🌍"), saved.map { it.name })
+                if (index < 2) assertEquals(listOf("Первый 🌍", "Second"), saved.map { it.name })
                 else {
-                    assertEquals(listOf("Тест", "First"), saved.map { it.name })
+                    assertEquals(listOf("First", "Тест"), saved.map { it.name })
                     saved.forEach {
                         val outbound = JSONObject(it.config).getJSONArray("outbounds").getJSONObject(0)
                         assertEquals("vless", outbound.getString("protocol"))
@@ -780,7 +854,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             """.trimIndent()
             server.enqueue(Base64.getEncoder().encodeToString(mixed.toByteArray()))
             val parsed = helper().resolveProfiles(link)
-            assertEquals(listOf("VLESS", "HTTP3", "HTTPS"), parsed.profiles.map { it.name })
+            assertEquals(listOf("HTTPS", "HTTP3", "VLESS"), parsed.profiles.map { it.name })
             assertEquals(listOf(
                 SubscriptionRefreshHelper.SkippedProfile("http2 1", "http2"),
                 SubscriptionRefreshHelper.SkippedProfile("Unsupported TLS", "anytls"),
@@ -824,9 +898,9 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
             ]}
         """.trimIndent()
         val parsed = helper().parseProfiles(Link(), value)
-        assertEquals(listOf("WebSocket", "VLESS", "HTTP3"), parsed.profiles.map { it.name })
+        assertEquals(listOf("HTTP3", "VLESS", "WebSocket"), parsed.profiles.map { it.name })
         assertEquals(listOf("selector", "urltest", "direct", "anytls", "tuic"), parsed.skippedProfiles.map { it.protocol })
-        val naive = JSONObject(parsed.profiles.last().config).getJSONArray("outbounds").getJSONObject(0)
+        val naive = JSONObject(parsed.profiles.first().config).getJSONArray("outbounds").getJSONObject(0)
         assertEquals("naive", naive.getString("protocol"))
         assertEquals("bbr", naive.getJSONObject("settings").getString("quicCongestionControl"))
         assertEquals("test:pass+word", naive.getJSONObject("settings").getString("pass"))
@@ -835,11 +909,11 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
         val vless = JSONObject(parsed.profiles[1].config).getJSONArray("outbounds").getJSONObject(0)
         assertEquals("reality", vless.getJSONObject("streamSettings").getString("security"))
         assertEquals("synthetic-key", vless.getJSONObject("streamSettings").getJSONObject("realitySettings").getString("publicKey"))
-        val websocket = JSONObject(parsed.profiles.first().config).getJSONArray("outbounds").getJSONObject(0)
+        val websocket = JSONObject(parsed.profiles.last().config).getJSONArray("outbounds").getJSONObject(0)
             .getJSONObject("streamSettings").getJSONObject("wsSettings")
         assertEquals("/socket?token=a+b", websocket.getString("path"))
         assertEquals("front.example.org", websocket.getJSONObject("headers").getString("Host"))
-        assertFalse(JSONObject(parsed.profiles.last().config).has("route"))
+        assertFalse(JSONObject(parsed.profiles.first().config).has("route"))
     }
 
     @Test
@@ -936,7 +1010,7 @@ class SubscriptionRefreshHelperTest : RoomTestSupport() {
 
         val parsed = helper().parseProfiles(Link(), body)
 
-        assertEquals(setOf("Naive-h2 ♾", "Naive-h3 \uD83D\uDE80"), parsed.profiles.map { it.name }.toSet())
+        assertEquals(listOf("Naive-h2 ♾", "Naive-h3 \uD83D\uDE80"), parsed.profiles.map { it.name })
         assertEquals(setOf("anytls"), parsed.skippedProfiles.map { it.protocol }.toSet())
         assertTrue(expectFailure { helper().parseProfiles(Link(), "vless://not-a-valid-uri") } is IllegalArgumentException)
     }

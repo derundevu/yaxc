@@ -12,9 +12,10 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
-import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.automirrored.outlined.Subject
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -72,30 +73,11 @@ fun RoutingHomeScreen(
                         color = YaxcTheme.extendedColors.textMuted,
                     )
                 }
-                item {
-                    RootSectionCard(
-                        icon = Icons.Outlined.Hub,
-                        title = textResource(R.string.liveRouting),
-                        description = textResource(R.string.liveRoutingEntryLead),
-                        onClick = onOpenLiveRouting,
-                    )
-                }
-                item {
-                    RootSectionCard(
-                        icon = Icons.AutoMirrored.Outlined.AltRoute,
-                        title = textResource(R.string.appsRouting),
-                        description = textResource(R.string.appsRoutingLead),
-                        onClick = onOpenAppsRouting,
-                    )
-                }
-                item {
-                    RootSectionCard(
-                        icon = Icons.Outlined.Hub,
-                        title = textResource(R.string.coreRouting),
-                        description = textResource(R.string.coreRoutingLead),
-                        onClick = onOpenCoreRouting,
-                    )
-                }
+                routingHomeEntries(
+                    onOpenAppsRouting = onOpenAppsRouting,
+                    onOpenCoreRouting = onOpenCoreRouting,
+                    onOpenLiveRouting = onOpenLiveRouting,
+                )
             }
 
             RootBottomBar(
@@ -107,6 +89,37 @@ fun RoutingHomeScreen(
                     .padding(bottom = spacing.lg + reservedBottomInset),
             )
         }
+    }
+}
+
+internal fun LazyListScope.routingHomeEntries(
+    onOpenAppsRouting: () -> Unit,
+    onOpenCoreRouting: () -> Unit,
+    onOpenLiveRouting: () -> Unit,
+) {
+    item {
+        RootSectionCard(
+            icon = Icons.AutoMirrored.Outlined.AltRoute,
+            title = textResource(R.string.liveRouting),
+            description = textResource(R.string.liveRoutingEntryLead),
+            onClick = onOpenLiveRouting,
+        )
+    }
+    item {
+        RootSectionCard(
+            icon = Icons.AutoMirrored.Outlined.AltRoute,
+            title = textResource(R.string.appsRouting),
+            description = textResource(R.string.appsRoutingLead),
+            onClick = onOpenAppsRouting,
+        )
+    }
+    item {
+        RootSectionCard(
+            icon = Icons.AutoMirrored.Outlined.Subject,
+            title = textResource(R.string.coreRouting),
+            description = textResource(R.string.coreRoutingLead),
+            onClick = onOpenCoreRouting,
+        )
     }
 }
 

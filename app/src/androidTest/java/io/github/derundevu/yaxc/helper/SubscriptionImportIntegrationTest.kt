@@ -8,7 +8,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.derundevu.yaxc.Settings
 import io.github.derundevu.yaxc.database.Link
+import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.database.YaxcDatabase
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -106,16 +108,15 @@ class SubscriptionImportIntegrationTest {
     }
 
     @Test
-    fun jsonArrayAndCrLfWrappedBase64RetainEveryProfileAndInputOrderContract() = runBlocking {
+    fun jsonArrayAndCrLfWrappedBase64KeepProviderDisplayOrder() = runBlocking {
         val raw = JSONArray().put(config("Первый")).put(config("Second 🌍")).toString()
         val bodies = listOf(raw, " \r\n" + Base64.getMimeEncoder(28, "\r\n".toByteArray())
             .encodeToString(raw.toByteArray(StandardCharsets.UTF_8)) + "\r\n ")
         bodies.forEachIndexed { index, body ->
             val source = import(body)
-            val stored = database.profileDao().linkProfiles(source.id)
-            assertEquals(listOf("Second 🌍", "Первый"), stored.map { it.name })
+            val stored = database.profileDao().all().first().filter { it.link == source.id }
+            assertEquals(listOf("Первый", "Second 🌍"), stored.map { it.name })
             assertEquals(2, stored.map { it.id }.distinct().size)
-            assertTrue(stored.all { it.linkId == source.id })
             assertEquals(if (index == 0) Link.Type.Json else Link.Type.Subscription, source.type)
             stored.forEach { assertEquals(9007199254740993L, JSONObject(it.config).getJSONObject("future").getLong("counter")) }
         }
@@ -128,8 +129,8 @@ class SubscriptionImportIntegrationTest {
             .encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
         listOf(raw, encoded).forEach { body ->
             val source = import(body)
-            val stored = database.profileDao().linkProfiles(source.id)
-            assertEquals(listOf("Тест", "First + One"), stored.map { it.name })
+            val stored = database.profileDao().all().first().filter { it.link == source.id }
+            assertEquals(listOf("First + One", "Тест"), stored.map { it.name })
             assertEquals(Link.Type.Subscription, source.type)
             stored.forEach { profile ->
                 val outbound = JSONObject(profile.config).getJSONArray("outbounds").getJSONObject(0)
@@ -142,6 +143,37 @@ class SubscriptionImportIntegrationTest {
                     .getJSONObject("wsSettings").getString("path"))
             }
         }
+    }
+
+    @Test
+    fun refreshMovesSupportedLabelAndDuplicateNamesWithoutChangingTheirIds() = runBlocking {
+        val dao = database.profileDao()
+        val tail = dao.create(Profile(name = "tail", config = "{}"))
+        val label = vless("%F0%9F%93%8A%20Traffic%20remaining")
+        val first = vless("Shared name", port = 9444)
+        val second = vless("Shared name", port = 9445)
+        val source = import(listOf(label, first, second).joinToString("\r\n"))
+        val head = dao.create(Profile(name = "head", config = "{}"))
+        val original = dao.all().first()
+        assertEquals(listOf("head", "📊 Traffic remaining", "Shared name", "Shared name", "tail"),
+            original.map { it.name })
+        val labelId = original[1].id
+        val firstId = original[2].id
+        val secondId = original[3].id
+        settings.selectedProfile = secondId
+
+        val unsupported = "anytls://test-pass@proxy.example.org#Unavailable"
+        OneResponseServer(listOf(second, unsupported, first, label).joinToString("\r\n")).use { server ->
+            source.address = server.url
+            database.linkDao().update(source)
+            val result = helper().refreshLinks(source.id)
+            assertEquals(1, result.refreshed)
+            assertEquals(listOf(SubscriptionRefreshHelper.SkippedProfile("Unavailable", "anytls")),
+                result.warnings.single().skippedProfiles)
+            server.awaitServed()
+        }
+        assertEquals(listOf(head, secondId, firstId, labelId, tail), dao.all().first().map { it.id })
+        assertEquals(secondId, settings.selectedProfile)
     }
 
     @Test
@@ -170,7 +202,7 @@ class SubscriptionImportIntegrationTest {
         }
     }
 
-    private fun vless(name: String) = "vless://00000000-0000-4000-8000-000000000001@127.0.0.1:9443" +
+    private fun vless(name: String, port: Int = 9443) = "vless://00000000-0000-4000-8000-000000000001@127.0.0.1:$port" +
         "?encryption=none&type=ws&security=tls&sni=localhost&path=%2Fsynthetic%3Ftoken%3Da%2Bb#$name"
 
     private class OneResponseServer(private val body: String) : Closeable {

@@ -14,6 +14,10 @@ of strings; only the first list value is sent, and empty lists and null values a
 core and case-insensitive name collisions are reported as unsupported. The URI `extra-headers` option is not supported.
 General hiddify-manager conversion, AnyTLS, TUIC and Mieru runtime support are not implemented.
 
+Import and successful refresh keep supported profiles in response order. Refresh matches profiles before
+assigning positions, so reordering does not change logical IDs or Live Routing membership. It reuses the
+source's global slots in one Room transaction and retains the relative order of unrelated profiles.
+
 Adding or changing an HTTP subscription URL requires an explicit unencrypted-transport confirmation before any
 request or save. The saved HTTP URL records that choice for later refreshes; there is no global insecure mode.
 The platform cleartext policy permits those requests, but subscription redirects never downgrade HTTPS to HTTP.
@@ -114,6 +118,23 @@ stop on a signing conflict, never uninstall or clear data to bypass it. Do not i
 Observe the actual changed scenario, not just process startup. VPN/root testing must not interrupt the user's connection without approval.
 For subscription changes, verify repeat refresh and failure handling without destroying profiles or selection;
 for list changes, verify expand/scroll/selection on a large controlled group without changing real subscriptions.
+
+### Shared screen components
+
+Use `YaxcTopAppBar` for the standard back header, `YaxcCard` and `YaxcSettingsRow` for ordinary
+navigation/settings cards, and `YaxcLiquidDropdownMenu` to give overflow and picker menus the same surface.
+Complete a checked row or checkbox through its own semantics; do not replace it with a plain menu action.
+The embedded and standalone Routing and Settings pages share the same lazy navigation entries. Their root
+shells retain distinct navigation behavior. Connection Details is still a separate screen with its own styling.
+
+Long profile and detail titles wrap; only screens that previously clamped their title pass
+`titleMaxLines = 1`. Navigation cards let descriptions wrap instead of clipping at large font scales.
+
+Keep system insets separate from visual spacing. `YaxcScaffold` applies the top and horizontal safe area once;
+full-height editors and scrolling forms handle their own bottom navigation and IME insets. Root pager lists
+reserve the same space as the floating top controls rather than duplicating an independent top gap.
+Dividers normally do not add padding. A section divider may intentionally use a muted stroke or a gap;
+for example, the Versions panel separates update actions from component and license details.
 
 ### Main-screen frame timing
 
@@ -507,7 +528,8 @@ busy/key changes restore authoritative order without committing stale indices. L
 rounded whole-card indication source; fields and switches remain independently interactive.
 
 `CoreRoutingReorderTest` checks preview/cancel/busy semantics and unequal-height release frames;
-`LiveRoutingEditorInteractionTest` exercises actual expanded-group drops and rule cancellation/section boundaries.
+`LiveRoutingEditorInteractionTest` exercises actual expanded-group drops, rule cancellation/section boundaries,
+and the profile picker's checked-first order, search, recreation and handling of a member removed while open.
 
 
 Live Routing connections start from global runtime settings, never an arbitrary member's full configuration.
@@ -534,6 +556,10 @@ SOCKS-only mode. Root transparent mode rejects the Live Routing connection expli
 ordinary root connections. Availability checks remain an optional per-group filter for Select/Random/round robin;
 LeastPing requires them. Existing observatory-based native balancers retain their separate compatibility limits in
 [the native contract](NATIVE.md#live-routing-candidate-2026-11-01).
+
+The editor shows an app-matching compatibility warning only after checking the environment. While the check is
+pending, app selection and saving enabled app rules are unavailable. Confirmed incompatibility, plan load
+failure, and runtime failure remain distinct states; a superseded check cannot publish its result.
 
 `checkAvailability` is a strict optional boolean, default false. LeastPing without it is invalid; the editor enables it
 when choosing that strategy. Health-enabled Select follows configured priority; Random/round robin include every
@@ -729,8 +755,15 @@ retain these and host metadata through configuration recreation, without retaini
 Drafts are not durable across process death or closing the editor.
 
 The `AndroidView` holder is keyed by editor instance: unkeyed reuse sends a new section's edits to old listeners.
-Palette changes refresh native highlighting. A no-copy `SpanWatcher` also invalidates syntax-span changes because
-EditorKit's syntax span lacks `UpdateAppearance`; otherwise Android can keep drawing the previous theme's colors.
+The code viewport has no vertical view padding, including when the gutter changes width. Horizontal and font
+padding are retained; the viewport still clips code and gutter drawing at both dividers.
+Syntax tokens come from the pinned JSON lexer on an immutable document snapshot off Main. The editor keeps
+color spans around the visible lines and reuses overlapping spans as that window moves. Pixel-only or horizontal
+scrolling inside the buffered window does not rebuild syntax spans. Colors update without recreating the editor.
+The native editor keeps its editable buffer and selection. Its display text exposes the same spans and offsets
+through `GetChars` so Canvas takes only the requested shaping context. This avoids renderer paths that copy the
+entire gap buffer for each colored run. If the renderer requests a full string anyway, the editable reuses its
+snapshot until characters change. This does not disable hardware acceleration or replace native selection or IME.
 Code and gutter paints must share the same SP size. Set the initial font before attaching `LineNumbersPlugin`, and
 explicitly update its paints on later font changes. The two-argument TextView setter bypasses EditorKit, while
 EditorKit's own SP setter can skip plugin notifications after TextView invalidates its layout. Let the plugin measure
@@ -760,9 +793,13 @@ reaps its owned logcat process; Activity recreation retains the reader, filters,
 
 History retains at most 5,000 physical rows and 4 MiB of UTF-8 raw text, including newlines; oldest rows are evicted.
 An oversized physical row is visibly truncated around 16,384 UTF-16 characters without splitting a surrogate pair.
-Parsing and case-insensitive literal search run off Main. Level/source filters are exact, and unrecognized rows
-remain visible as unknown-level entries. Explicit native severity inside GoLog takes precedence over its Android
-priority. Pause freezes the displayed snapshot while bounded collection continues; resume shows current history.
+Parsing and case-insensitive literal search run off Main. Levels and sources are independent multiselects.
+An unset or empty selection displays no rows; otherwise a row must match both sets and the search query.
+Each menu's **All** action selects every option in that set. The two sets are restored from app preferences
+before the viewer displays rows; search, pause and viewer history are not persisted.
+Level labels stay English in each locale. Unrecognized rows use `Unknown`; explicit native severity inside
+GoLog takes precedence over Android priority. Pause freezes the displayed snapshot while bounded collection
+continues, including when filters hide every row; resume shows current history.
 Scrolling into history disables follow, while “To latest” restores it. Clearing affects only local viewer history,
 never global logcat buffers or runtime files. No access-log journal, native verbosity change or persistent log store.
 
@@ -772,8 +809,9 @@ through Android's system picker and retains the selected snapshot while the pick
 review them before sharing. Clipboard previews are marked sensitive on Android 13+.
 
 `RuntimeLogReaderTest`, `LogHistoryTest` and `LogsViewModelTest` cover blocked-read cancellation/reaping, bounded
-framing, UTF-8, file lifecycle, parser precedence, pause/clear/search and export snapshots. API 36 x86_64 smoke
-exercised actual own-UID logs from four source classes, combined filters, pause/copy, system document export,
+framing, UTF-8, file lifecycle, parser precedence, filter persistence and intersection, pause/clear/search and
+export snapshots. API 36 x86_64 smoke exercised actual own-UID logs from four source classes, combined filters,
+pause/copy, system document export,
 1,000-row scroll/recreation, a 6,200-row bounded stream, clipboard overflow rejection and local-only clearing.
 The exported file contained exactly the captured filtered row; screen close left no owned logcat process.
 Actual Android temporary-file following passed without enabling root mode. Disposable smoke code is not retained.
@@ -788,6 +826,10 @@ disabling the native behavior. Source dragging temporarily collapses the expande
 Profile summaries/server labels are parsed off the UI thread only when the database profile snapshot changes,
 not on each ping result. Index normalization reads the current global order and writes changed indices in one
 transaction; collectors await it instead of launching overlapping per-row update jobs.
+
+The source and profile overflow buttons use the theme's primary fill and on-primary icon while pressed.
+The original click still opens the menu on release; cancelling the gesture clears the fill without opening it
+or changing the source expansion or profile selection.
 
 Ping uses five non-exported worker processes because Xray has process-global dialer/logger state. Each process
 runs one core. A Main-thread scheduler in `MainViewModel` admits work before launching a coroutine: at most five
@@ -805,6 +847,7 @@ Deleted active profiles keep their reservation until completion but cannot reapp
 The helper's shared worker pool also bounds direct callers. Pings never switch the selected profile or reload
 the VPN; request IDs reject duplicate/stale completions. No native source change is needed for this scheduler;
 rebuild the AAR only after native source changes. See [native contracts](NATIVE.md#ping-worker).
+The profile overflow menu submits the row's ID to the same single-check queue, independently of the active selection.
 
 `MainPingTrackerTest` covers floods, promotion, shared measurements, independent progress, replacement,
 deletion and stale completions. An API 36 x86_64/4096-byte-page runtime smoke exercised the actual Activity,

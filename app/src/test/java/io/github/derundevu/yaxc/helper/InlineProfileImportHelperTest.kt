@@ -29,13 +29,14 @@ class InlineProfileImportHelperTest : RoomTestSupport() {
         val skipped = listOf(SubscriptionRefreshHelper.SkippedProfile("Unsupported", "anytls"))
         val parsed = SubscriptionRefreshHelper.ParsedLinkSource(
             Link.Type.Subscription,
-            listOf(Profile(name = "Second", config = "{\"second\":true}"), Profile(name = "First", config = "{\"first\":true}")),
+            listOf(Profile(name = "First", config = "{\"first\":true}"), Profile(name = "Second", config = "{\"second\":true}")),
             skippedProfiles = skipped,
         )
         val result = InlineProfileImportHelper.append(app, settings, parsed, subscription.id)
         assertEquals(listOf("Remote saved"), database.profileDao().linkProfiles(subscription.id).map { it.name })
         assertEquals(setOf("Manual saved", "First", "Second"), database.profileDao().linkProfiles(manual.id).map { it.name }.toSet())
         assertEquals(listOf("First", "Second", "Manual saved", "Remote saved"), database.profileDao().all().first().map { it.name })
+        assertEquals(listOf("First", "Second"), result.changes.single().added)
         assertEquals(remoteProfile.id, settings.selectedProfile)
         assertEquals(skipped, result.warnings.single().skippedProfiles)
         assertEquals(manual.id, result.warnings.single().sourceId)
