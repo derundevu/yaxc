@@ -19,6 +19,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
+import io.github.derundevu.yaxc.presentation.profile.ProfileEditorMode
 import io.github.derundevu.yaxc.presentation.profile.ProfileScreen
 import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import io.github.derundevu.yaxc.viewmodel.ProfileEditorViewModel
@@ -93,16 +94,20 @@ class ProfileActivity : AppCompatActivity() {
                 } else {
                 ProfileScreen(
                     title = getString(if (id == 0L) R.string.newProfile else R.string.editProfile),
+                    editorMode = draft.editorMode,
                     name = draft.name,
                     selectedSourceId = draft.selectedSourceId,
                     availableSources = draft.sources,
                     isLoading = draft.isLoading,
-                    isSaving = draft.isSaving,
+                    isSaving = draft.isSaving || draft.isSwitchingMode,
                     editorState = draft.document,
+                    visualConfig = draft.visualConfig,
                     onBack = ::finish,
                     onSave = ::save,
+                    onEditorModeChange = ::switchEditorMode,
                     onNameChange = { draft.name = it },
                     onSourceChange = { draft.selectedSourceId = it },
+                    onVisualConfigChange = draft::updateVisualConfig,
                 )
                 invalidProfileMessage?.let { message ->
                     YaxcMessageDialog(
@@ -128,8 +133,17 @@ class ProfileActivity : AppCompatActivity() {
     }
 
 
+    private fun switchEditorMode(mode: ProfileEditorMode) {
+        if (draft.isLoading || draft.isSaving || draft.isSwitchingMode) return
+        lifecycleScope.launch {
+            if (!draft.switchMode(mode)) {
+                feedback.show(getString(R.string.invalidConfig), FeedbackKind.Error)
+            }
+        }
+    }
+
     private fun save(check: Boolean = true) {
-        if (draft.isLoading || draft.isSaving) return
+        if (draft.isLoading || draft.isSaving || draft.isSwitchingMode) return
         lifecycleScope.launch {
             when (val result = draft.save(check)) {
                 ProfileSaveResult.Saved -> finish()

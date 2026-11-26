@@ -2,40 +2,39 @@ package io.github.derundevu.yaxc.presentation.profile
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
-import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcJsonEditor
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTabOption
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTabRow
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
 
@@ -48,16 +47,20 @@ data class ProfileSourceOption(
 @Composable
 fun ProfileScreen(
     title: String,
+    editorMode: ProfileEditorMode = ProfileEditorMode.Visual,
     name: String,
     selectedSourceId: Long?,
     availableSources: List<ProfileSourceOption>,
     isLoading: Boolean,
     isSaving: Boolean,
     editorState: JsonEditorState,
+    visualConfig: ProfileVisualConfig = ProfileVisualConfig(),
     onBack: () -> Unit,
     onSave: () -> Unit,
+    onEditorModeChange: (ProfileEditorMode) -> Unit = {},
     onNameChange: (String) -> Unit,
     onSourceChange: (Long?) -> Unit,
+    onVisualConfigChange: ((ProfileVisualConfig) -> ProfileVisualConfig) -> Unit = {},
 ) {
     val spacing = YaxcTheme.spacing
     var sourcePickerOpen by rememberSaveable { mutableStateOf(false) }
@@ -97,18 +100,56 @@ fun ProfileScreen(
             )
         },
     ) {
-        if (isLoading) {
-            Text(
-                text = textResource(R.string.loadingProfile),
-                style = MaterialTheme.typography.bodyMedium,
-                color = YaxcTheme.extendedColors.textMuted,
-                modifier = Modifier.padding(spacing.md),
-            )
-        } else {
-            YaxcJsonEditor(
-                state = editorState,
-                modifier = Modifier.fillMaxSize(),
-            )
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = spacing.md)
+                    .padding(top = spacing.sm, bottom = spacing.xs),
+            ) {
+                YaxcTabRow(
+                    options = ProfileEditorMode.entries.map { mode ->
+                        YaxcTabOption(
+                            value = mode,
+                            label = when (mode) {
+                                ProfileEditorMode.Visual -> textResource(R.string.routingModeVisual)
+                                ProfileEditorMode.Json -> textResource(R.string.routingModeJson)
+                            },
+                            testTag = "profile-editor:mode:${mode.name}",
+                        )
+                    },
+                    selected = editorMode,
+                    onSelect = onEditorModeChange,
+                    enabled = !isLoading && !isSaving,
+                )
+            }
+
+            if (isLoading) {
+                Text(
+                    text = textResource(R.string.loadingProfile),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.padding(spacing.md),
+                )
+            } else if (editorMode == ProfileEditorMode.Json) {
+                YaxcJsonEditor(
+                    state = editorState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+            } else {
+                ProfileVisualEditor(
+                    name = name,
+                    selectedSourceName = selectedSourceName,
+                    visualConfig = visualConfig,
+                    enabled = !isSaving,
+                    onNameChange = onNameChange,
+                    onOpenSourcePicker = { sourcePickerOpen = true },
+                    onVisualConfigChange = onVisualConfigChange,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 
@@ -153,7 +194,7 @@ fun ProfileScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     availableSources.forEach { source ->
-                        SourceOptionRow(
+                        ProfileDialogOption(
                             title = source.name,
                             selected = source.linkId == selectedSourceId,
                             onClick = {
@@ -221,32 +262,4 @@ private fun SourceField(
             )
         },
     )
-}
-
-@Composable
-private fun SourceOptionRow(
-    title: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
-            .background(
-                if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.76f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.18f)
-                }
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
 }

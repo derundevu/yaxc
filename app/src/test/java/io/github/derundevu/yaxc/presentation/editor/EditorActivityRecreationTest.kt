@@ -18,6 +18,7 @@ import io.github.derundevu.yaxc.database.Config as DatabaseConfig
 import io.github.derundevu.yaxc.database.Link
 import io.github.derundevu.yaxc.database.Profile
 import io.github.derundevu.yaxc.presentation.configs.ConfigSection
+import io.github.derundevu.yaxc.presentation.profile.ProfileEditorMode
 import io.github.derundevu.yaxc.testing.RegressionApplication
 import io.github.derundevu.yaxc.testing.RoomTestSupport
 import io.github.derundevu.yaxc.testing.waitForAsyncState
@@ -53,6 +54,9 @@ class EditorActivityRecreationTest : RoomTestSupport() {
         try {
             val draft = ViewModelProvider(controller.get())[ProfileEditorViewModel::class.java]
             compose.waitForAsyncState(10_000) { !draft.isLoading }
+            assertEquals(ProfileEditorMode.Visual, draft.editorMode)
+            compose.onNodeWithText(app.getString(R.string.routingModeJson)).performClick()
+            compose.waitForAsyncState(10_000) { draft.editorMode == ProfileEditorMode.Json }
             val oldEditor = requireNotNull(findEditor(controller.get().window.decorView))
             val edited = """{"unknown":"unsaved","number":1e+007}"""
             compose.runOnIdle {
@@ -68,6 +72,7 @@ class EditorActivityRecreationTest : RoomTestSupport() {
 
             val recreated = ViewModelProvider(controller.get())[ProfileEditorViewModel::class.java]
             assertSame(draft, recreated)
+            assertEquals(ProfileEditorMode.Json, recreated.editorMode)
             val restoredEditor = requireNotNull(findEditor(controller.get().window.decorView))
             assertNotSame(oldEditor, restoredEditor)
             compose.runOnIdle {

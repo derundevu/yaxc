@@ -19,7 +19,11 @@ import io.github.derundevu.yaxc.helper.XrayValidationHelper
 import io.github.derundevu.yaxc.helper.InlineProfileImportHelper
 import io.github.derundevu.yaxc.helper.SubscriptionRefreshHelper
 import io.github.derundevu.yaxc.presentation.editor.JsonEditorState
+import io.github.derundevu.yaxc.presentation.editor.JsonEditorTools
+import io.github.derundevu.yaxc.presentation.profile.ProfileEditorMode
 import io.github.derundevu.yaxc.presentation.profile.ProfileSourceOption
+import io.github.derundevu.yaxc.presentation.profile.ProfileVisualConfig
+import io.github.derundevu.yaxc.presentation.profile.ProfileVisualConfigHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -47,6 +51,12 @@ class ProfileEditorViewModel internal constructor(
     var selectedSourceId by mutableStateOf<Long?>(null)
     var sources by mutableStateOf<List<ProfileSourceOption>>(emptyList())
         private set
+    var editorMode by mutableStateOf(ProfileEditorMode.Visual)
+        private set
+    var visualConfig by mutableStateOf(ProfileVisualConfig())
+        private set
+    var isSwitchingMode by mutableStateOf(false)
+        private set
     var isLoading by mutableStateOf(true)
         private set
     var isSaving by mutableStateOf(false)
@@ -59,6 +69,7 @@ class ProfileEditorViewModel internal constructor(
         private set
     var importReportAcknowledged by mutableStateOf(false)
         private set
+    private var visualDirty = false
     private lateinit var profile: Profile
     private lateinit var config: Config
 
@@ -138,6 +149,7 @@ class ProfileEditorViewModel internal constructor(
                         ProfileSourceOption(it.id, it.name.ifBlank { app.getString(R.string.defaultManualGroupName) })
                     },
                     sourceId = source,
+                    visualConfig = ProfileVisualConfigHelper.parse(profile.config),
                 )
             }
             profile = loaded.profile
@@ -146,9 +158,53 @@ class ProfileEditorViewModel internal constructor(
             selectedSourceId = loaded.sourceId
             sources = loaded.sources
             document.replaceText(profile.config)
+            if (loaded.visualConfig != null) {
+                visualConfig = loaded.visualConfig
+                editorMode = ProfileEditorMode.Visual
+            } else {
+                visualConfig = ProfileVisualConfig()
+                editorMode = ProfileEditorMode.Json
+            }
+            visualDirty = false
             isLoading = false
         }
     }
+
+    suspend fun switchMode(mode: ProfileEditorMode): Boolean {
+        if (isLoading || isSaving || isSwitchingMode || editorMode == mode) return true
+        isSwitchingMode = true
+        try {
+            if (mode == ProfileEditorMode.Json) {
+                if (visualDirty) {
+                    val snapshot = visualConfig
+                    val json = withContext(Dispatchers.Default) {
+                        ProfileVisualConfigHelper.buildJson(snapshot)
+                    }
+                    document.replaceText(json)
+                    visualDirty = false
+                }
+            } else {
+                val raw = document.text
+                val parsed = withContext(Dispatchers.Default) {
+                    ProfileVisualConfigHelper.parse(raw)
+                } ?: return false
+                if (document.text != raw) return false
+                visualConfig = parsed
+                visualDirty = false
+            }
+            editorMode = mode
+            return true
+        } finally {
+            isSwitchingMode = false
+        }
+    }
+
+    fun updateVisualConfig(transform: (ProfileVisualConfig) -> ProfileVisualConfig) {
+        if (isLoading || isSaving || isSwitchingMode) return
+        visualConfig = transform(visualConfig)
+        visualDirty = true
+    }
+
     suspend fun acknowledgeImportReport() = withContext(NonCancellable) {
         val report = importReport ?: return@withContext
         withContext(Dispatchers.IO) {
@@ -160,11 +216,26 @@ class ProfileEditorViewModel internal constructor(
 
     /** A save is successful only after the captured draft has been persisted. */
     suspend fun save(check: Boolean): ProfileSaveResult {
-        if (isLoading || isSaving) return ProfileSaveResult.NotReady
+        if (isLoading || isSaving || isSwitchingMode) return ProfileSaveResult.NotReady
         isSaving = true
-        val snapshot = profile.copy(name = name, linkId = selectedSourceId, config = document.text)
+        val mode = editorMode
+        val dirty = visualDirty
+        val visualSnapshot = visualConfig
+        val rawText = document.text
+        val capturedName = name
+        val capturedSourceId = selectedSourceId
         try {
-            return withContext(Dispatchers.IO) {
+            val (savedConfig, result) = withContext(Dispatchers.IO) {
+                val effectiveConfig = if (mode == ProfileEditorMode.Visual && dirty) {
+                    ProfileVisualConfigHelper.buildJson(visualSnapshot)
+                } else {
+                    rawText
+                }
+                val snapshot = profile.copy(
+                    name = capturedName,
+                    linkId = capturedSourceId,
+                    config = effectiveConfig,
+                )
                 val error = if (check) {
                     try {
                         val merged = ConfigHelper(settings, config, snapshot.config).toString()
@@ -178,20 +249,28 @@ class ProfileEditorViewModel internal constructor(
                     ""
                 }
                 if (check && error.isNotEmpty()) {
-                    ProfileSaveResult.Invalid(error)
+                    null to ProfileSaveResult.Invalid(error)
                 } else {
                     if (snapshot.id == 0L) {
                         snapshot.id = app.profileRepository.create(snapshot)
                         profile = snapshot
                     } else {
                         if (app.profileRepository.update(snapshot) == 0) {
-                            return@withContext ProfileSaveResult.Invalid(app.getString(R.string.invalidProfile))
+                            return@withContext null to ProfileSaveResult.Invalid(app.getString(R.string.invalidProfile))
                         }
                         profile = snapshot
                     }
-                    ProfileSaveResult.Saved
+                    effectiveConfig to ProfileSaveResult.Saved
                 }
             }
+            if (result is ProfileSaveResult.Saved && savedConfig != null &&
+                mode == ProfileEditorMode.Visual && dirty &&
+                visualConfig == visualSnapshot && document.text == rawText
+            ) {
+                document.replaceText(savedConfig)
+                visualDirty = false
+            }
+            return result
         } finally {
             isSaving = false
         }
@@ -206,5 +285,6 @@ class ProfileEditorViewModel internal constructor(
         val config: Config,
         val sources: List<ProfileSourceOption>,
         val sourceId: Long?,
+        val visualConfig: ProfileVisualConfig?,
     )
 }
