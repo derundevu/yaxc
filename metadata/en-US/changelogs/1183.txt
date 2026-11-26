@@ -1,0 +1,14 @@
+## What's new in 1.6.4
+
+### Connection info and analytics
+
+- **Connection details** now uses a glass overview panel, grouped cards, selectable multi-line addresses and URLs, a hidden-by-default SOCKS password with a visibility toggle, and explicit checking and error states when resolving the server and exit IP.
+- **Connection analytics** uses glass panels and grouped cards across summaries, flow rows, filter choices, the history dialog, and the connection details sheet.
+
+### Routing, links and settings
+
+- **Core Routing** and **Preferences** now use one rounded tab bar style across all Core Routing selectors and the Basic/Advanced switcher.
+- **Links** group cards now use glass panels with compact padding and grouped edit/delete buttons, tap-to-edit cards, and source details (refresh interval, last update time, and subscription host).
+- **Preferences → Advanced → DNS** adds a **DNS Provider** preset picker (Cloudflare, Cloudflare Security, Google, Quad9, AdGuard, AdGuard Family, DNS.SB, OpenDNS, Yandex) that fills IPv4, IPv6, and encrypted DNS while keeping manual editing available.
+- Press and tap highlights on Settings cards, switches, dialog options, navigation cards, and Links cards now fill the entire row or card to its borders and rounded corners.
+- The **Settings** versions card now includes a **Source code on GitHub** button above open-source licenses.

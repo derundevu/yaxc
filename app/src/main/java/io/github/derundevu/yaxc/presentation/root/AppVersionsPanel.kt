@@ -1,5 +1,10 @@
 package io.github.derundevu.yaxc.presentation.root
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import androidx.core.net.toUri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -11,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -44,10 +51,15 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.helper.InstalledChangelog
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
+import io.github.derundevu.yaxc.presentation.designsystem.components.LocalYaxcFeedback
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+internal const val APP_REPOSITORY_URL = "https://github.com/derundevu/yaxc"
 
 @Composable
 internal fun AppVersionsPanel(
@@ -60,6 +72,8 @@ internal fun AppVersionsPanel(
     onInstallUpdate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val feedback = LocalYaxcFeedback.current
     var showChangelog by rememberSaveable { mutableStateOf(false) }
     var showLicenses by rememberSaveable { mutableStateOf(false) }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -103,9 +117,21 @@ internal fun AppVersionsPanel(
             ComponentVersionRow(stringResource(R.string.xrayLabel), xrayVersion)
             Spacer(Modifier.height(12.dp))
             ComponentVersionRow(stringResource(R.string.tun2socksLabel), tun2socksVersion)
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = { openRepositoryUrl(context, feedback) },
+                modifier = Modifier.fillMaxWidth().testTag("settings:source-code"),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_github),
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 8.dp).size(18.dp),
+                )
+                Text(stringResource(R.string.appSourceCode), textAlign = TextAlign.Center)
+            }
             TextButton(
                 onClick = { showLicenses = true },
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("settings:licenses"),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp).testTag("settings:licenses"),
             ) {
                 Text(stringResource(R.string.appOpenSourceLicenses))
             }
@@ -123,6 +149,17 @@ internal fun AppVersionsPanel(
     }
     if (showLicenses) {
         OpenSourceLicensesDialog(onDismiss = { showLicenses = false })
+    }
+}
+
+private fun openRepositoryUrl(context: Context, feedback: YaxcFeedbackState) {
+    val intent = Intent(Intent.ACTION_VIEW, APP_REPOSITORY_URL.toUri()).apply {
+        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        feedback.show(context.getString(R.string.appSourceCodeUnavailable), FeedbackKind.Warning)
     }
 }
 

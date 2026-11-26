@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,10 +34,12 @@ fun YaxcSettingsRow(
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     subtitleMaxLines: Int = 4,
+    shape: Shape = MaterialTheme.shapes.medium,
+    contentPadding: PaddingValues = PaddingValues(vertical = YaxcTheme.spacing.xs),
     trailing: @Composable (() -> Unit)? = null,
 ) {
     val clickableModifier = if (enabled && onClick != null) {
-        modifier.yaxcClickable(shape = MaterialTheme.shapes.medium, onClick = onClick)
+        modifier.yaxcClickable(shape = shape, onClick = onClick)
     } else {
         modifier
     }
@@ -43,7 +47,7 @@ fun YaxcSettingsRow(
     Row(
         modifier = clickableModifier
             .fillMaxWidth()
-            .padding(vertical = YaxcTheme.spacing.xs)
+            .padding(contentPadding)
             .heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -120,6 +124,8 @@ fun YaxcSwitchRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     enabled: Boolean = true,
+    shape: Shape = MaterialTheme.shapes.medium,
+    contentPadding: PaddingValues = PaddingValues(vertical = YaxcTheme.spacing.xs),
 ) {
     YaxcSettingsRow(
         title = title,
@@ -128,6 +134,8 @@ fun YaxcSwitchRow(
         modifier = modifier,
         enabled = enabled,
         onClick = { onCheckedChange(!checked) },
+        shape = shape,
+        contentPadding = contentPadding,
         trailing = {
             Switch(
                 checked = checked,

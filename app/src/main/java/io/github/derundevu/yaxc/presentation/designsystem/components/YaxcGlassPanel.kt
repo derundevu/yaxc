@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.presentation.designsystem.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -13,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -40,6 +42,8 @@ fun YaxcGlassPanel(
     accentAlpha: Float = 0.10f,
     borderColor: Color = Color.Unspecified,
     shadowElevation: Dp = 12.dp,
+    onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val resolvedShape = shape ?: YaxcTheme.shapes.extraLarge
@@ -138,6 +142,15 @@ fun YaxcGlassPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(
+                        if (onClick != null) {
+                            Modifier
+                                .clip(resolvedShape)
+                                .clickable(enabled = enabled, onClick = onClick)
+                        } else {
+                            Modifier
+                        },
+                    )
                     .padding(resolvedContentPadding),
                 content = content,
             )

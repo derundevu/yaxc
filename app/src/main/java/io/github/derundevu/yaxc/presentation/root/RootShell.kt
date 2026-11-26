@@ -32,7 +32,6 @@ import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
-import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
@@ -101,7 +100,8 @@ internal fun RootSectionCard(
     val rowInset = YaxcTheme.spacing.xs
     val layoutDirection = LocalLayoutDirection.current
     YaxcCard(
-        modifier = modifier.yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onClick),
+        modifier = modifier,
+        onClick = onClick,
         contentPadding = PaddingValues(
             // The row already contributes its own vertical inset.
             start = padding.calculateStartPadding(layoutDirection),
@@ -140,7 +140,8 @@ private fun RootBottomTabItem(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.yaxcClickable(shape = YaxcTheme.shapes.pill, onClick = onClick),
+        onClick = onClick,
+        modifier = modifier,
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f)
         } else {

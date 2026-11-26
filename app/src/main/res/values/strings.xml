@@ -49,6 +49,8 @@
     <string name="appChangelogUnavailable">Could not read the release notes.</string>
     <string name="appOpenSourceLicenses">Open-source licenses</string>
     <string name="appLicensesUnavailable">Could not read the bundled license notices.</string>
+    <string name="appSourceCode">Source code on GitHub</string>
+    <string name="appSourceCodeUnavailable">Could not open the repository link.</string>
     <string name="appFullName">derundevu/yaxc</string>
     <string name="xrayLabel">derundevu/proxide (Xray fork)</string>
     <string name="tun2socksLabel">heiher/hev-socks5-tunnel</string>
@@ -92,6 +94,8 @@
     <string name="linksScreenLead">Manage JSON and subscription sources for imported profiles.</string>
     <string name="noLinksYet">No links yet</string>
     <string name="noLinksYetHint">Create a new source or refresh existing subscriptions from here.</string>
+    <string name="linksRefreshMinutes">Every %1$d min</string>
+    <string name="linksRefreshHours">Every %1$d h</string>
     <string name="logs">Logs</string>
     <string name="logsScreenLead">Live runtime output for Xray, VPN and helper processes.</string>
     <string name="preferences">Preferences</string>
@@ -651,6 +655,28 @@
     <string name="refreshLinksOnOpen">Auto-refresh subscriptions</string>
 
     <!-- Advanced Settings -->
+    <string name="settingsDnsPresetTitle">DNS Provider</string>
+    <string name="settingsDnsPresetLead">Fill IPv4, IPv6 and encrypted DNS from a preset, or edit manually below.</string>
+    <string name="settingsDnsPresetCustom">Custom</string>
+    <string name="settingsDnsPresetPlainOnly">Plain DNS (no IP DoH)</string>
+    <string name="dnsPresetCloudflare">Cloudflare</string>
+    <string name="dnsPresetCloudflareLead">Fast privacy-first DNS with IP DoH</string>
+    <string name="dnsPresetCloudflareSecurity">Cloudflare Security</string>
+    <string name="dnsPresetCloudflareSecurityLead">Malware and phishing protection with IP DoH</string>
+    <string name="dnsPresetGoogle">Google Public DNS</string>
+    <string name="dnsPresetGoogleLead">Fast unfiltered DNS with IP DoH</string>
+    <string name="dnsPresetQuad9">Quad9</string>
+    <string name="dnsPresetQuad9Lead">Threat and phishing blocking with IP DoH</string>
+    <string name="dnsPresetAdGuard">AdGuard DNS</string>
+    <string name="dnsPresetAdGuardLead">Ad and tracker blocking with IP DoH</string>
+    <string name="dnsPresetAdGuardFamily">AdGuard Family</string>
+    <string name="dnsPresetAdGuardFamilyLead">Blocks ads, trackers and adult content</string>
+    <string name="dnsPresetDnsSb">DNS.SB</string>
+    <string name="dnsPresetDnsSbLead">Unfiltered no-logs DNS with IP DoH</string>
+    <string name="dnsPresetOpenDns">OpenDNS</string>
+    <string name="dnsPresetOpenDnsLead">Cisco public DNS (plain IPv4/IPv6, clears DoH)</string>
+    <string name="dnsPresetYandex">Yandex DNS</string>
+    <string name="dnsPresetYandexLead">Standard unfiltered DNS (plain IPv4/IPv6, clears DoH)</string>
     <string name="primaryDns">Primary DNS (v4)</string>
     <string name="secondaryDns">Secondary DNS (v4)</string>
     <string name="primaryDnsV6">Primary DNS (v6)</string>

@@ -1,18 +1,26 @@
 package io.github.derundevu.yaxc.presentation.root
 
+import android.content.Intent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.testing.RegressionApplication
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -51,6 +59,33 @@ class AppVersionsPanelTest {
         compose.runOnIdle { state.value = state.value.copy(totalBytes = 10_000L) }
         assertEquals(0.5f, progress().current, 0f)
         compose.onNodeWithTag("updates:percent").assertExists()
+    }
+
+    @Test
+    fun sourceCodeButtonOpensGitHubRepositoryUrl() {
+        val app = RuntimeEnvironment.getApplication()
+        compose.setContent {
+            YaxcTheme {
+                AppVersionsPanel(
+                    appVersion = "1.6.3",
+                    xrayVersion = "26.11.9.6",
+                    tun2socksVersion = "2.19.3",
+                    updateState = AppUpdateUiState(),
+                    onCheckUpdate = {},
+                    onDownloadUpdate = {},
+                    onInstallUpdate = {},
+                )
+            }
+        }
+
+        compose.onNodeWithTag("settings:source-code").assertIsDisplayed()
+        compose.onNodeWithText(app.getString(R.string.appSourceCode)).assertIsDisplayed()
+        compose.onNodeWithTag("settings:source-code").performClick()
+
+        val started = shadowOf(app).nextStartedActivity
+        assertNotNull(started)
+        assertEquals(Intent.ACTION_VIEW, started.action)
+        assertEquals(APP_REPOSITORY_URL, started.dataString)
     }
 
     private fun progress(): ProgressBarRangeInfo = compose.onNodeWithTag("updates:progress")
