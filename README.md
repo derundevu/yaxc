@@ -19,6 +19,8 @@
 
 ---
 
+> **Note:** **yaxc** is built primarily for personal use and my own needs. If you found it useful, ran into a bug, or have a suggestion for an improvement, please [open an issue](https://github.com/derundevu/yaxc/issues).
+
 **yaxc is a client, not a VPN service.** Bring a subscription or a compatible server configuration from a provider you trust.
 The standard Android VPN mode does **not** require root.
 
@@ -56,15 +58,14 @@ The standard Android VPN mode does **not** require root.
   resumes it. Clearing the bounded viewer history does not erase runtime logs. Review logs for sensitive data
   before sharing.
 - English and Russian interfaces, system-following appearance and four theme presets, including Mint Graphite and Light Slate.
-- On wide tablets and Android TV, **Connect** keeps the VPN controls in the middle and the profile list to the right.
-  On TV, use the remote's arrows and OK to move the highlighted focus and run actions.
+- On wide tablets, **Connect** keeps the VPN controls beside the profile list. On Android TV, a top tab bar switches between **Connect**, **Routing** and **Settings**, with remote D-pad focus and explicit reorder controls.
 - In-app release checks and APK updates.
 - A Quick Settings tile for connection control, plus optional start on boot.
 - Optional root/transparent-proxy settings for advanced hotspot and tethering setups.
 
 ## Screenshots
 
-Captured from the **1.5.3 development build** on an isolated Android emulator. All profile names, endpoints and subscription
+Captured from the **1.6.3 development build** on isolated Android emulators. All profile names, endpoints and subscription
 usage are fictional demo data. These are real app screens, not mockups; the VPN is not connected.
 
 <table>
@@ -156,6 +157,28 @@ Choose **Settings → Preferences → Basic → App Theme**, then save. Each pre
   </table>
 </details>
 
+### Android TV
+
+Dedicated 10-foot layout with top tab navigation, D-pad focus highlights, explicit reorder controls and side-by-side **Routing** / **Settings** panels.
+
+<table>
+  <tr>
+    <th>Connect</th>
+    <th>Routing</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/tv/connect.png"><img src="docs/screenshots/tv/connect.png" width="380" alt="Android TV Connect screen in Mint Graphite with top pill tabs, START button, 2x2 quick actions and demo profiles"></a></td>
+    <td><a href="docs/screenshots/tv/routing.png"><img src="docs/screenshots/tv/routing.png" width="380" alt="Android TV two-pane Routing screen with Live Routing, Apps Routing and Core Routing"></a></td>
+  </tr>
+  <tr>
+    <th>Settings</th>
+    <th>Device transfer</th>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/tv/settings.png"><img src="docs/screenshots/tv/settings.png" width="380" alt="Android TV two-pane Settings screen with Device transfer selected"></a></td>
+    <td><a href="docs/screenshots/tv/device-transfer.png"><img src="docs/screenshots/tv/device-transfer.png" width="380" alt="Android TV Device transfer screen styled with glass panels and remote focus ring"></a></td>
+  </tr>
+</table>
 
 ## Download
 
