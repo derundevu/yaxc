@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.Flow
 
 data class ProfilePosition(val id: Long, val index: Int)
 
+data class TransferProfileCount(val linkId: Long?, val count: Int)
+
 @Dao
 interface ProfileDao {
     @Query(
@@ -21,6 +23,12 @@ interface ProfileDao {
         "  ORDER BY `profiles`.`index` ASC, `profiles`.`id` ASC"
     )
     fun all(): Flow<List<ProfileList>>
+
+    @Query("SELECT link_id AS linkId, COUNT(*) AS count FROM profiles GROUP BY link_id")
+    suspend fun transferCounts(): List<TransferProfileCount>
+
+    @Query("SELECT * FROM profiles ORDER BY `index` ASC, id ASC")
+    suspend fun transferProfiles(): List<Profile>
 
     @Query("SELECT * FROM profiles WHERE link_id = :linkId ORDER BY `index` DESC, `id` DESC")
     suspend fun linkProfiles(linkId: Long): List<Profile>

@@ -68,6 +68,9 @@
             android:name=".activity.ScannerActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity
+            android:name=".activity.DeviceTransferActivity"
+            android:exported="false" />
+        <activity
             android:name=".activity.RoutingActivity"
             android:parentActivityName=".activity.MainActivity" />
         <activity

@@ -13,7 +13,8 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcThemeStyle
 import java.io.File
 import java.security.SecureRandom
 
-class Settings(private val context: Context) {
+class Settings private constructor(private val context: Context, private val initialize: Boolean) {
+    constructor(context: Context) : this(context, initialize = true)
 
     enum class PingType(val value: String) {
         Head("head"),
@@ -106,14 +107,24 @@ class Settings(private val context: Context) {
         val USERNAME_ALPHABET: CharArray = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
         val PASSWORD_ALPHABET: CharArray =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray()
+
+        internal fun forDeviceTransfer(context: Context): Settings = Settings(context, initialize = false)
     }
 
     private val sharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val random = SecureRandom()
 
     init {
-        initializeSocksCredentialsIfNeeded()
-        initializeXHwidIfNeeded()
+        if (initialize) {
+            initializeSocksCredentialsIfNeeded()
+            initializeXHwidIfNeeded()
+        }
+    }
+
+    internal fun editDeviceTransfer(changes: SharedPreferences.Editor.() -> Unit) {
+        val editor = sharedPreferences.edit()
+        editor.changes()
+        check(editor.commit()) { "Transferred preferences could not be saved." }
     }
 
     /** Active Link ID */
@@ -224,7 +235,7 @@ class Settings(private val context: Context) {
         get() {
             val stored = sharedPreferences.getString("geoIpAddress", DEFAULT_GEO_IP_ADDRESS)!!
             return if (stored.trim().removeSuffix("/") == PREVIOUS_DEFAULT_GEO_IP_ADDRESS) {
-                sharedPreferences.edit { putString("geoIpAddress", DEFAULT_GEO_IP_ADDRESS) }
+                if (initialize) sharedPreferences.edit { putString("geoIpAddress", DEFAULT_GEO_IP_ADDRESS) }
                 DEFAULT_GEO_IP_ADDRESS
             } else stored
         }
@@ -236,7 +247,7 @@ class Settings(private val context: Context) {
         get() {
             val stored = sharedPreferences.getString("geoSiteAddress", DEFAULT_GEO_SITE_ADDRESS)!!
             return if (stored.trim().removeSuffix("/") == PREVIOUS_DEFAULT_GEO_SITE_ADDRESS) {
-                sharedPreferences.edit { putString("geoSiteAddress", DEFAULT_GEO_SITE_ADDRESS) }
+                if (initialize) sharedPreferences.edit { putString("geoSiteAddress", DEFAULT_GEO_SITE_ADDRESS) }
                 DEFAULT_GEO_SITE_ADDRESS
             } else stored
         }
@@ -278,7 +289,7 @@ class Settings(private val context: Context) {
             return when {
                 storedValue.isNullOrEmpty() -> DEFAULT_PING_ADDRESS
                 normalizedValue == PREVIOUS_DEFAULT_PING_ADDRESS -> {
-                    sharedPreferences.edit { putString("pingAddress", DEFAULT_PING_ADDRESS) }
+                    if (initialize) sharedPreferences.edit { putString("pingAddress", DEFAULT_PING_ADDRESS) }
                     DEFAULT_PING_ADDRESS
                 }
                 else -> storedValue
@@ -296,7 +307,7 @@ class Settings(private val context: Context) {
             return when {
                 storedValue.isNullOrEmpty() -> DEFAULT_USER_AGENT
                 storedValue == LEGACY_DEFAULT_USER_AGENT -> {
-                    sharedPreferences.edit { putString("userAgent", DEFAULT_USER_AGENT) }
+                    if (initialize) sharedPreferences.edit { putString("userAgent", DEFAULT_USER_AGENT) }
                     DEFAULT_USER_AGENT
                 }
 

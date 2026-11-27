@@ -414,6 +414,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             MainAction.OpenLiveRoutingClicked -> _effects.tryEmit(MainEffect.OpenLiveRouting)
             MainAction.OpenConfigsClicked -> _effects.tryEmit(MainEffect.OpenConfigs)
             MainAction.OpenSettingsClicked -> _effects.tryEmit(MainEffect.OpenSettings)
+            MainAction.OpenDeviceTransferClicked -> _effects.tryEmit(MainEffect.OpenDeviceTransfer)
         }
     }
 

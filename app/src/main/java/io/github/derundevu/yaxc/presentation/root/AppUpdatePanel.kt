@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.AppUpdateUiState
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 import java.text.NumberFormat
 
 @Composable
@@ -65,11 +67,11 @@ fun AppUpdatePanel(
         when {
             state.isReadyToInstall -> FilledTonalButton(
                 onClick = onInstall,
-                modifier = Modifier.fillMaxWidth().testTag("updates:install"),
+                modifier = Modifier.fillMaxWidth().yaxcTvFocus(CircleShape).testTag("updates:install"),
             ) { Text(stringResource(R.string.appUpdateInstall)) }
             state.availableRelease != null && !state.isDownloading -> FilledTonalButton(
                 onClick = onDownload,
-                modifier = Modifier.fillMaxWidth().testTag("updates:download"),
+                modifier = Modifier.fillMaxWidth().yaxcTvFocus(CircleShape).testTag("updates:download"),
             ) { Text(stringResource(R.string.appUpdateDownload)) }
         }
     }
@@ -134,7 +136,11 @@ internal fun AppUpdateCheckButton(
                 modifier = Modifier.size(20.dp),
             )
         } else {
-            IconButton(onClick = onClick, enabled = !state.isDownloading) {
+            IconButton(
+                onClick = onClick,
+                enabled = !state.isDownloading,
+                modifier = Modifier.yaxcTvFocus(CircleShape),
+            ) {
                 Icon(
                     imageVector = Icons.Outlined.Refresh,
                     contentDescription = stringResource(R.string.appUpdateCheck),

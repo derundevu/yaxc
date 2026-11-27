@@ -25,3 +25,8 @@
 
 - Screens share one back header, menus, dividers and navigation cards.
 - **Preferences** uses consistent spacing and no longer lets fields slide under the keyboard or navigation bar. Settings and Routing cards are more compact near the top.
+- Tablets and Android TV put the connection controls in the middle and the profiles on the right when there is room. TV has visible remote focus, explicit menus and reorder controls.
+
+### Device transfer
+
+- Show a temporary QR on the receiving device. Scan it on the sender and choose which groups, app settings or routing to copy over the local network. Both devices show the result.

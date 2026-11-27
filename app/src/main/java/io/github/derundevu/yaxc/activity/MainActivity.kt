@@ -52,6 +52,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessage
 import io.github.derundevu.yaxc.presentation.main.MainScreen
 import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import io.github.derundevu.yaxc.service.TProxyService
+import io.github.derundevu.yaxc.transfer.DeviceTransferTransport
 import io.github.derundevu.yaxc.viewmodel.MainViewModel
 import io.github.derundevu.yaxc.viewmodel.ConnectionAnalyticsViewModel
 import kotlinx.coroutines.CancellationException
@@ -105,7 +106,12 @@ class MainActivity : AppCompatActivity() {
     }
     private var scannerLauncher = registerForActivityResult(StartActivityForResult()) {
         if (it.resultCode != RESULT_OK) return@registerForActivityResult
-        processLink(it.data?.getStringExtra("link").orEmpty())
+        val code = it.data?.getStringExtra("link").orEmpty()
+        if (DeviceTransferTransport.isTransferCode(code)) {
+            startActivity(DeviceTransferActivity.intent(this, code))
+        } else {
+            processLink(code)
+        }
     }
     private val vpnLauncher = registerForActivityResult(StartActivityForResult()) {
         if (it.resultCode != RESULT_OK) {
@@ -382,6 +388,9 @@ class MainActivity : AppCompatActivity() {
             }
             MainEffect.OpenSettings -> {
                 startActivity(Intent(applicationContext, SettingsActivity::class.java))
+            }
+            MainEffect.OpenDeviceTransfer -> {
+                startActivity(DeviceTransferActivity.intent(this))
             }
             MainEffect.ReloadCurrentConfig -> TProxyService.newConfig(applicationContext)
             is MainEffect.OpenProfileEditor -> {

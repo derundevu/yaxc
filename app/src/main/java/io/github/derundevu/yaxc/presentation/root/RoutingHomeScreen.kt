@@ -41,6 +41,7 @@ fun RoutingHomeScreen(
 
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         contentWindowInsets = WindowInsets.safeDrawing.only(
             WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
         ),

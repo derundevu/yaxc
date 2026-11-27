@@ -1116,6 +1116,11 @@ internal fun ProfileDialogOption(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val optionContentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = if (selected) {
@@ -1123,13 +1128,14 @@ internal fun ProfileDialogOption(
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
         },
+        contentColor = optionContentColor,
         shape = MaterialTheme.shapes.large,
         onClick = onClick,
     ) {
         Text(
             text = title,
             style = MaterialTheme.typography.bodyLarge,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            color = optionContentColor,
             modifier = Modifier.padding(YaxcTheme.paddings.section),
         )
     }

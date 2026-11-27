@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,11 +33,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ArrowDownward
-import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -97,6 +97,8 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcScaffold
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
+import io.github.derundevu.yaxc.presentation.designsystem.components.isYaxcTv
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingAppOption
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingProfileOption
 import io.github.derundevu.yaxc.viewmodel.LiveRoutingViewModel
@@ -117,6 +119,7 @@ fun LiveRoutingScreen(
     val savedGroups = remember(draft.savedPlan) { draft.savedPlan?.groups?.associateBy { it.id }.orEmpty() }
     val runtimeGroups = remember(draft.runtimeStatus.groups) { draft.runtimeStatus.groups.associateBy { it.id } }
     val listState = rememberLazyListState()
+    val tvListState = if (isYaxcTv()) listState else null
     val density = LocalDensity.current
     val dragHysteresisPx = with(density) { 16.dp.toPx() }
     val scope = rememberCoroutineScope()
@@ -159,10 +162,17 @@ fun LiveRoutingScreen(
                 onBack = requestBack,
                 backEnabled = !draft.isBusy,
                 actions = {
-                    IconButton(onClick = { showHelp = true }, modifier = Modifier.testTag("live-routing:help")) {
+                    IconButton(
+                        onClick = { showHelp = true },
+                        modifier = Modifier.testTag("live-routing:help").yaxcTvFocus(CircleShape),
+                    ) {
                         Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(R.string.liveRoutingHelp))
                     }
-                    TextButton(onClick = draft::save, enabled = editable && !draft.rootMode && !draft.appSavePending) {
+                    TextButton(
+                        onClick = draft::save,
+                        enabled = editable && !draft.rootMode && !draft.appSavePending,
+                        modifier = Modifier.yaxcTvFocus(),
+                    ) {
                         Text(stringResource(R.string.save))
                     }
                 },
@@ -254,7 +264,9 @@ fun LiveRoutingScreen(
                     interactionSource = interactionSource,
                     dragModifier = reorder.headerModifier("group:${group.id}", groupKeys, editable, interactionSource, draft::moveGroup),
                     onToggleExpanded = { expandedGroupId = if (expandedGroupId == group.id) null else group.id },
-                    onMove = { draft.moveGroup(index, it) },
+                    onMove = { to ->
+                        moveRoutingItem(tvListState, "group:${group.id}", to - index) { draft.moveGroup(index, to) }
+                    },
                     onChange = draft::updateGroup,
                     onStrategyChange = { draft.selectGroupStrategy(group.id, it) },
                     onProfiles = { profilePicker = group.id },
@@ -294,7 +306,9 @@ fun LiveRoutingScreen(
                     onApps = { appPicker = rule.id },
                     onClearApps = { draft.selectPackages(rule.id, emptyList()) },
                     onTarget = { targetPicker = rule.id },
-                    onMove = { draft.moveRule(index, it) },
+                    onMove = { to ->
+                        moveRoutingItem(tvListState, "rule:${rule.id}", to - index) { draft.moveRule(index, to) }
+                    },
                     onDelete = { draft.deleteRule(rule.id) },
                 )
             }
@@ -400,7 +414,9 @@ private fun SectionHeading(title: Int, add: Int, enabled: Boolean, onAdd: () -> 
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onAdd, enabled = enabled) { Icon(Icons.Outlined.Add, stringResource(add)) }
+        IconButton(onClick = onAdd, enabled = enabled, modifier = Modifier.yaxcTvFocus(CircleShape)) {
+            Icon(Icons.Outlined.Add, stringResource(add))
+        }
     }
 }
 
@@ -426,6 +442,7 @@ private fun RoutingCardHeader(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.weight(1f).then(dragModifier)
+                .yaxcTvFocus()
                 .clickable(interactionSource = interactionSource, indication = null, onClickLabel = expansionLabel, onClick = onToggleExpanded)
                 .semantics {
                     stateDescription = expansionLabel
@@ -450,6 +467,7 @@ private fun RoutingCardHeader(
             }
             Icon(Icons.Outlined.ExpandMore, null, Modifier.graphicsLayer { rotationZ = rotation })
         }
+        if (isYaxcTv()) RoutingMoveButtons(index, total, enabled, moveUp, moveDown, onMove)
         trailing()
     }
 }
@@ -509,7 +527,7 @@ private fun GroupCard(
             name = group.name.ifBlank { stringResource(R.string.liveRoutingGroupName) },
             summary = stringResource(R.string.liveRoutingGroupSummary, group.profileIds.size, stringResource(group.strategy.titleResource())),
             expanded = expanded && !dragging,
-            enabled = enabled,
+            enabled = enabled && !reorderActive,
             index = index,
             total = total,
             tag = "live-routing:group-header:${group.id}",
@@ -533,7 +551,7 @@ private fun GroupCard(
             ProxyGroupStrategy.entries.forEach { strategy ->
                 val label = stringResource(strategy.titleResource())
                 Row(
-                    Modifier.fillMaxWidth().selectable(
+                    Modifier.fillMaxWidth().yaxcTvFocus().clip(MaterialTheme.shapes.medium).selectable(
                         selected = group.strategy == strategy,
                         enabled = enabled,
                         role = Role.RadioButton,
@@ -546,7 +564,7 @@ private fun GroupCard(
                 }
             }
             Row(
-                Modifier.fillMaxWidth().toggleable(
+                Modifier.fillMaxWidth().yaxcTvFocus().clip(MaterialTheme.shapes.medium).toggleable(
                     value = group.checkAvailability,
                     enabled = enabled && group.strategy != ProxyGroupStrategy.LeastPing,
                     role = Role.Checkbox,
@@ -603,12 +621,14 @@ private fun GroupCard(
                     Icon(Icons.Outlined.DeleteOutline, null)
                     Text(stringResource(R.string.liveRoutingDeleteGroup))
                 }
-                IconButton(onClick = { onMove(index - 1) }, enabled = enabled && index > 0) {
-                    Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.liveRoutingMoveUp, group.name))
-                }
-                IconButton(onClick = { onMove(index + 1) }, enabled = enabled && index < total - 1) {
-                    Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.liveRoutingMoveDown, group.name))
-                }
+                if (!isYaxcTv()) RoutingMoveButtons(
+                    index,
+                    total,
+                    enabled && !reorderActive,
+                    stringResource(R.string.liveRoutingMoveUp, group.name),
+                    stringResource(R.string.liveRoutingMoveDown, group.name),
+                    onMove,
+                )
             }
         }
     }
@@ -758,7 +778,7 @@ private fun RuleCard(
             name = rule.name.ifBlank { stringResource(R.string.routingRuleName) },
             summary = stringResource(R.string.liveRoutingRuleSummary, rule.packages.size, rule.domains.size, targetName),
             expanded = expanded && !dragging,
-            enabled = enabled,
+            enabled = enabled && !reorderActive,
             index = index,
             total = total,
             tag = "live-routing:rule-header:${rule.id}",
@@ -778,12 +798,14 @@ private fun RuleCard(
         EditorExpansion(expanded, suppressed = dragging, restoreImmediately = reorderActive) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.liveRoutingRulePosition, index + 1, total), modifier = Modifier.weight(1f))
-                IconButton(onClick = { onMove(index - 1) }, enabled = enabled && index > 0) {
-                    Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.liveRoutingMoveUp, rule.name))
-                }
-                IconButton(onClick = { onMove(index + 1) }, enabled = enabled && index < total - 1) {
-                    Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.liveRoutingMoveDown, rule.name))
-                }
+                if (!isYaxcTv()) RoutingMoveButtons(
+                    index,
+                    total,
+                    enabled && !reorderActive,
+                    stringResource(R.string.liveRoutingMoveUp, rule.name),
+                    stringResource(R.string.liveRoutingMoveDown, rule.name),
+                    onMove,
+                )
             }
             OutlinedTextField(
                 value = name,
@@ -911,7 +933,7 @@ private fun ProfilePicker(
                                 selected = selected == option.id && included,
                                 onClick = { selected = option.id },
                                 enabled = included,
-                                modifier = Modifier.semantics { contentDescription = description },
+                                modifier = Modifier.yaxcTvFocus(CircleShape).semantics { contentDescription = description },
                             )
                         }
                     },
@@ -955,6 +977,8 @@ private fun PriorityPicker(
     val matched = rememberMatchingRuntime(group, profiles, saved && unchanged, runtime)
     val members = remember(matched) { matched?.members?.associateBy { it.profileId }.orEmpty() }
     val eligible = remember(matched) { matched?.eligibleProfileIds?.toHashSet().orEmpty() }
+    val listState = rememberLazyListState()
+    val tvListState = if (isYaxcTv()) listState else null
     PickerDialog(
         title = stringResource(R.string.liveRoutingPriorityTitle),
         onDismiss = onDismiss,
@@ -964,7 +988,7 @@ private fun PriorityPicker(
         },
         confirmEnabled = order.isNotEmpty(),
     ) {
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "priority-help") {
                 Column(Modifier.padding(16.dp)) {
                     Text(stringResource(if (group.strategy == ProxyGroupStrategy.LeastPing)
@@ -980,8 +1004,12 @@ private fun PriorityPicker(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         if (group.strategy == ProxyGroupStrategy.Select) RadioButton(
                             selected = index == 0,
-                            onClick = { if (index > 0) order = listOf(id) + order.filterNot { it == id } },
-                            modifier = Modifier.semantics { contentDescription = primaryDescription },
+                            onClick = {
+                                if (index > 0) moveRoutingItem(tvListState, "priority:$id", -index) {
+                                    order = listOf(id) + order.filterNot { it == id }
+                                }
+                            },
+                            modifier = Modifier.yaxcTvFocus(CircleShape).semantics { contentDescription = primaryDescription },
                         )
                         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                             Text(
@@ -1006,18 +1034,18 @@ private fun PriorityPicker(
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        IconButton(
-                            onClick = { order = order.toMutableList().apply { add(index - 1, removeAt(index)) } },
-                            enabled = index > 0,
-                        ) {
-                            Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.liveRoutingMoveUp, name))
-                        }
-                        IconButton(
-                            onClick = { order = order.toMutableList().apply { add(index + 1, removeAt(index)) } },
-                            enabled = index < order.lastIndex,
-                        ) {
-                            Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.liveRoutingMoveDown, name))
-                        }
+                        RoutingMoveButtons(
+                            index,
+                            order.size,
+                            enabled = true,
+                            moveUpLabel = stringResource(R.string.liveRoutingMoveUp, name),
+                            moveDownLabel = stringResource(R.string.liveRoutingMoveDown, name),
+                            onMove = { to ->
+                                moveRoutingItem(tvListState, "priority:$id", to - index) {
+                                    order = order.toMutableList().apply { add(to, removeAt(index)) }
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -1050,11 +1078,14 @@ private fun AppPicker(
     onDismiss: () -> Unit,
     onConfirm: (List<String>) -> Unit,
 ) {
+    val television = isYaxcTv()
     var query by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(packages) }
     val missingLabel = stringResource(R.string.liveRoutingMissingAppLabel)
-    val request = remember(apps, packages, selected, query, missingLabel) {
-        AppPickerRequest(apps, packages, selected, query, missingLabel)
+    // Keep a TV row in place and enabled while its checkbox is being toggled.
+    val sortSelection = if (television) packages else selected
+    val request = remember(apps, packages, sortSelection, query, missingLabel) {
+        AppPickerRequest(apps, packages, sortSelection, query, missingLabel)
     }
     val options by produceState<AppPickerOptions?>(null, request) {
         value = withContext(Dispatchers.Default) {
@@ -1085,6 +1116,10 @@ private fun AppPicker(
     val current = options
     val pending = current?.request !== request
     val selectionEnabled = enabled && !isLoading && !pending
+    val checkedPackages = if (television) remember(selected) { selected.toHashSet() } else current?.selected.orEmpty()
+    val selectedVisibleCount = if (television && current != null) {
+        selected.count { it in current.visiblePackages }
+    } else current?.selectedVisibleCount ?: 0
     PickerDialog(
         title = stringResource(R.string.liveRoutingAppsTitle),
         onDismiss = onDismiss,
@@ -1095,12 +1130,12 @@ private fun AppPicker(
         VisibleAppsSelection(
             selectedCount = selected.size,
             visibleCount = current?.apps?.size ?: 0,
-            selectedVisibleCount = current?.selectedVisibleCount ?: 0,
+            selectedVisibleCount = selectedVisibleCount,
             enabled = selectionEnabled,
             onCheckedChange = { checked ->
                 if (selectionEnabled) {
                     selected = if (checked) {
-                        selected + current.visiblePackages.filterNot { it in current.selected }
+                        selected + current.visiblePackages.filterNot { it in checkedPackages }
                     } else {
                         selected.filterNot { it in current.visiblePackages }
                     }
@@ -1117,7 +1152,7 @@ private fun AppPicker(
                 Text(stringResource(R.string.noAppsFound), Modifier.padding(16.dp))
             }
             items(current?.apps.orEmpty(), key = { it.packageName }) { option ->
-                val checked = option.packageName in current?.selected.orEmpty()
+                val checked = option.packageName in checkedPackages
                 PickerCheckboxRow(
                     checked = checked,
                     modifier = Modifier.testTag("live-routing:app:${option.packageName}"),
@@ -1185,6 +1220,7 @@ private fun DefaultGroupPicker(
 @Composable
 private fun LiveRoutingHelp(onDismiss: () -> Unit) {
     val spacing = YaxcTheme.spacing
+    val television = isYaxcTv()
     val sections = remember {
         listOf(
             R.string.liveRoutingHelpSubscriptionsTitle to R.string.liveRoutingHelpSubscriptions,
@@ -1210,7 +1246,7 @@ private fun LiveRoutingHelp(onDismiss: () -> Unit) {
         ) {
             items(sections, key = { it.first }) { (title, body) ->
                 val warning = title == R.string.liveRoutingHelpSubscriptionsTitle
-                YaxcCard {
+                YaxcCard(modifier = if (television) Modifier.yaxcTvFocus(MaterialTheme.shapes.large).focusable() else Modifier) {
                     Text(
                         stringResource(title),
                         Modifier.semantics { heading() },
@@ -1238,17 +1274,25 @@ private fun PickerCheckboxRow(
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // The optional profile radio must sit beside, not inside, the D-pad checkbox target.
+    val splitTrailing = trailing != null && isYaxcTv()
+    val checkboxModifier = modifier.yaxcTvFocus().clip(MaterialTheme.shapes.medium).toggleable(
+        value = checked,
+        enabled = enabled,
+        role = Role.Checkbox,
+        onValueChange = onCheckedChange,
+    ).padding(horizontal = 8.dp, vertical = 4.dp)
     Row(
-        modifier = Modifier.fillMaxWidth().then(modifier).toggleable(
-            value = checked,
-            enabled = enabled,
-            role = Role.Checkbox,
-            onValueChange = onCheckedChange,
-        ).padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().then(if (splitTrailing) Modifier else checkboxModifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
-        Column(Modifier.weight(1f).padding(horizontal = 8.dp), content = content)
+        Row(
+            modifier = Modifier.weight(1f).then(if (splitTrailing) checkboxModifier else Modifier),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
+            Column(Modifier.weight(1f).padding(horizontal = 8.dp), content = content)
+        }
         trailing?.invoke()
     }
 }
@@ -1256,7 +1300,7 @@ private fun PickerCheckboxRow(
 @Composable
 private fun PickerRadioRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().selectable(
+        Modifier.fillMaxWidth().yaxcTvFocus().clip(MaterialTheme.shapes.medium).selectable(
             selected = selected,
             role = Role.RadioButton,
             onClick = onClick,
@@ -1291,7 +1335,11 @@ private fun PickerDialog(
                         titleMaxLines = 1,
                         onBack = onDismiss,
                         backLabel = stringResource(R.string.cancel),
-                        actions = { TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(stringResource(R.string.ok)) } },
+                        actions = {
+                            TextButton(onClick = onConfirm, enabled = confirmEnabled, modifier = Modifier.yaxcTvFocus()) {
+                                Text(stringResource(R.string.ok))
+                            }
+                        },
                     )
                 },
             ) { padding ->

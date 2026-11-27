@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.activity
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.os.Bundle
@@ -44,16 +45,20 @@ class ScannerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         cameraError = savedInstanceState?.getString(STATE_CAMERA_ERROR)
+        val transferring = intent.getBooleanExtra(EXTRA_DEVICE_TRANSFER, false)
+        val title = if (transferring) R.string.deviceTransferScan else R.string.scanQrCode
 
         setContent {
             YaxcAppTheme(feedback = feedback) {
                 ScannerScreen(
+                    title = title,
+                    lead = if (transferring) R.string.deviceTransferScanHelp else R.string.scannerScreenLead,
                     onBack = ::finish,
                     onScannerViewReady = ::setupScanner,
                 )
                 cameraError?.let { message ->
                     YaxcMessageDialog(
-                        title = getString(R.string.scanQrCode),
+                        title = getString(title),
                         message = message,
                         confirmLabel = getString(R.string.close),
                         onConfirm = ::finish,
@@ -150,5 +155,9 @@ class ScannerActivity : AppCompatActivity() {
 
     companion object {
         private const val STATE_CAMERA_ERROR = "camera_error"
+        private const val EXTRA_DEVICE_TRANSFER = "device_transfer"
+
+        internal fun deviceTransferIntent(context: Context): Intent =
+            Intent(context, ScannerActivity::class.java).putExtra(EXTRA_DEVICE_TRANSFER, true)
     }
 }

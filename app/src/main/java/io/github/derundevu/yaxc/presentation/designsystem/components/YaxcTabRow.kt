@@ -55,6 +55,7 @@ fun <T> YaxcTabRow(
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = containerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         shape = shape,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
@@ -71,7 +72,7 @@ fun <T> YaxcTabRow(
                     selected = isSelected,
                     onClick = { onSelect(option.value) },
                     enabled = enabled,
-                    modifier = option.testTag?.let { Modifier.testTag(it) } ?: Modifier,
+                    modifier = (option.testTag?.let { Modifier.testTag(it) } ?: Modifier).yaxcTvFocus(),
                     selectedContentColor = MaterialTheme.colorScheme.primary,
                     unselectedContentColor = YaxcTheme.extendedColors.textMuted,
                 ) {

@@ -13,6 +13,9 @@ interface LinkDao {
     @Query("SELECT * FROM links ORDER BY position ASC, id ASC")
     fun all(): Flow<List<Link>>
 
+    @Query("SELECT * FROM links ORDER BY position ASC, id ASC")
+    suspend fun orderedLinks(): List<Link>
+
     @Query("SELECT * FROM links WHERE is_active = 1 ORDER BY position ASC, id ASC")
     fun tabs(): Flow<List<Link>>
 

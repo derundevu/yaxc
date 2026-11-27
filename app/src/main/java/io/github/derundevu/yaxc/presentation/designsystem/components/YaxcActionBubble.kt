@@ -41,7 +41,7 @@ fun YaxcActionBubble(
     val clickable = if (interactions == null) {
         Modifier.yaxcClickable(shape = shape, onClick = onClick)
     } else {
-        Modifier.clip(shape).clickable(
+        Modifier.yaxcTvFocus(shape).clip(shape).clickable(
             interactionSource = interactions,
             indication = LocalIndication.current,
             onClick = onClick,
@@ -50,6 +50,7 @@ fun YaxcActionBubble(
     Surface(
         modifier = modifier.then(clickable),
         color = if (pressed) colors.primary else yaxcSoftFill(darkAlpha = 0.08f, lightAlpha = 0.84f),
+        contentColor = colors.onSurface,
         shape = shape,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,

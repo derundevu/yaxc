@@ -868,6 +868,11 @@ private fun SettingsDialogOption(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val optionContentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = if (selected) {
@@ -875,13 +880,14 @@ private fun SettingsDialogOption(
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
         },
+        contentColor = optionContentColor,
         shape = MaterialTheme.shapes.large,
         onClick = onClick,
     ) {
         Text(
             text = title,
             style = MaterialTheme.typography.bodyLarge,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            color = optionContentColor,
             modifier = Modifier.padding(YaxcTheme.paddings.section),
         )
     }
@@ -896,6 +902,11 @@ private fun DnsPresetOption(
     val encryptedLabel = preset.encryptedDns.ifBlank {
         textResource(R.string.settingsDnsPresetPlainOnly)
     }
+    val optionContentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -906,6 +917,7 @@ private fun DnsPresetOption(
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
         },
+        contentColor = optionContentColor,
         shape = MaterialTheme.shapes.large,
         onClick = onClick,
     ) {

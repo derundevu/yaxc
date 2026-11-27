@@ -4,6 +4,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
@@ -255,6 +256,7 @@ fun YaxcTheme(
         typography = yaxcTypography(),
     ) {
         androidx.compose.runtime.CompositionLocalProvider(
+            LocalContentColor provides colorScheme.onBackground,
             LocalYaxcExtendedColors provides extendedColors,
             LocalYaxcSpacing provides spacing,
             LocalYaxcShapes provides DefaultYaxcShapes,
@@ -266,6 +268,39 @@ fun YaxcTheme(
         }
     }
 }
+
+@Composable
+internal fun YaxcTvTypographyScope(
+    enabled: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (!enabled) {
+        content()
+        return
+    }
+    val baseTypography = MaterialTheme.typography
+    val tvTypography = remember(baseTypography) { yaxcTvTypography(baseTypography) }
+    MaterialTheme(
+        colorScheme = MaterialTheme.colorScheme,
+        shapes = MaterialTheme.shapes,
+        typography = tvTypography,
+        content = content,
+    )
+}
+
+internal fun yaxcTvTypography(base: Typography): Typography = base.copy(
+    headlineMedium = base.headlineMedium.copy(fontSize = 30.sp),
+    headlineSmall = base.headlineSmall.copy(fontSize = 26.sp),
+    titleLarge = base.titleLarge.copy(fontSize = 22.sp),
+    titleMedium = base.titleMedium.copy(fontSize = 18.sp),
+    titleSmall = base.titleSmall.copy(fontSize = 15.sp),
+    bodyLarge = base.bodyLarge.copy(fontSize = 17.sp, lineHeight = 24.sp),
+    bodyMedium = base.bodyMedium.copy(fontSize = 15.sp, lineHeight = 21.sp),
+    bodySmall = base.bodySmall.copy(fontSize = 14.sp, lineHeight = 19.sp),
+    labelLarge = base.labelLarge.copy(fontSize = 15.sp),
+    labelMedium = base.labelMedium.copy(fontSize = 13.sp),
+    labelSmall = base.labelSmall.copy(fontSize = 13.sp),
+)
 
 @Composable
 fun YaxcAppTheme(

@@ -87,6 +87,7 @@ fun YaxcGlassPanel(
         modifier = modifier.fillMaxWidth(),
         shape = resolvedShape,
         color = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
         border = if (vectorBorder) null else BorderStroke(1.dp, resolvedBorderColor),
@@ -100,7 +101,7 @@ fun YaxcGlassPanel(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .matchParentSize()
                     .background(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -114,7 +115,7 @@ fun YaxcGlassPanel(
             )
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .matchParentSize()
                     .background(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -128,7 +129,7 @@ fun YaxcGlassPanel(
             )
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .matchParentSize()
                     .background(
                         brush = Brush.verticalGradient(
                             listOf(
@@ -145,6 +146,7 @@ fun YaxcGlassPanel(
                     .then(
                         if (onClick != null) {
                             Modifier
+                                .yaxcTvFocus(resolvedShape)
                                 .clip(resolvedShape)
                                 .clickable(enabled = enabled, onClick = onClick)
                         } else {

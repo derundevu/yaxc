@@ -1,6 +1,7 @@
 package io.github.derundevu.yaxc.presentation.scanner
 
 import android.graphics.drawable.GradientDrawable
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +43,8 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppB
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ScannerScreen(
+    @StringRes title: Int,
+    @StringRes lead: Int,
     onBack: () -> Unit,
     onScannerViewReady: (CodeScannerView) -> Unit,
 ) {
@@ -50,7 +53,7 @@ fun ScannerScreen(
     YaxcScaffold(
         topBar = {
             YaxcTopAppBar(
-                title = stringResource(R.string.scanQrCode),
+                title = stringResource(title),
                 onBack = onBack,
             )
         },
@@ -92,7 +95,7 @@ fun ScannerScreen(
                     verticalArrangement = Arrangement.spacedBy(spacing.sm),
                 ) {
                     Text(
-                        text = stringResource(R.string.scannerScreenLead),
+                        text = stringResource(lead),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         textAlign = textAlign,

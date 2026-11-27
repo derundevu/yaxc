@@ -1,6 +1,6 @@
 package io.github.derundevu.yaxc.presentation.routing
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,13 +23,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.helper.CoreRoutingImportPreview
 import io.github.derundevu.yaxc.helper.CoreRoutingImportProfile
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcDivider
+import io.github.derundevu.yaxc.presentation.designsystem.components.isYaxcTv
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 
 @Composable
 fun CoreRoutingImportDialog(
@@ -42,6 +46,7 @@ fun CoreRoutingImportDialog(
     onProfile: (Long) -> Unit,
     onConfirm: (Set<Int>, Map<String, String>, Map<String, String>, Boolean, Boolean) -> Unit,
 ) {
+    val television = isYaxcTv()
     var selected by remember(preview) { mutableStateOf(emptySet<Int>()) }
     var outbounds by remember(preview) { mutableStateOf(emptyMap<String, String>()) }
     var inbounds by remember(preview, runtimeInboundTag) { mutableStateOf(emptyMap<String, String>()) }
@@ -61,7 +66,7 @@ fun CoreRoutingImportDialog(
                 if (preview == null) {
                     if (profiles.isEmpty() && !busy) Text(stringResource(R.string.coreImportNoProfiles))
                     profiles.forEach { profile ->
-                        TextButton(onClick = { onProfile(profile.id) }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("core-import:profile:${profile.id}")) {
+                        TextButton(onClick = { onProfile(profile.id) }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("core-import:profile:${profile.id}").yaxcTvFocus()) {
                             Text(profile.name.ifBlank { "#${profile.id}" })
                         }
                     }
@@ -87,7 +92,8 @@ fun CoreRoutingImportDialog(
                             )
                             Text(stringResource(R.string.coreImportRuleNumber, rule.index + 1))
                         }
-                        SelectionContainer { Text(rule.json, style = MaterialTheme.typography.bodySmall) }
+                        if (television) Text(rule.json, style = MaterialTheme.typography.bodySmall)
+                        else SelectionContainer { Text(rule.json, style = MaterialTheme.typography.bodySmall) }
                         rule.problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     }
                     val references = selectedRules.mapNotNull { it.outbound }.distinctBy { it.tag }
@@ -128,22 +134,28 @@ fun CoreRoutingImportDialog(
         },
         confirmButton = {
             TextButton(
-                modifier = Modifier.testTag("core-import:confirm"),
+                modifier = Modifier.testTag("core-import:confirm").yaxcTvFocus(),
                 enabled = !busy && preview != null && !missingMappings && (selected.isNotEmpty() || strategy),
                 onClick = { onConfirm(selected, outbounds, inbounds, replace, strategy) },
             ) { Text(stringResource(R.string.coreImportIntoDraft)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.coreImportCancel)) } },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.yaxcTvFocus()) {
+                Text(stringResource(R.string.coreImportCancel))
+            }
+        },
     )
 }
 
 @Composable
 private fun ImportChoice(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().yaxcTvFocus().clip(MaterialTheme.shapes.medium)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, enabled = enabled, onClick = onClick)
+        RadioButton(selected = selected, enabled = enabled, onClick = null)
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }

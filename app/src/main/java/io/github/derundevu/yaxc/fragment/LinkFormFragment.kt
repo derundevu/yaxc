@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -38,8 +40,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +69,8 @@ import io.github.derundevu.yaxc.helper.HttpHelper
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcAppTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcProgressDialog
+import io.github.derundevu.yaxc.presentation.designsystem.components.isYaxcTv
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 import io.github.derundevu.yaxc.presentation.links.SubscriptionRefreshDialog
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
@@ -165,6 +177,18 @@ class LinkFormFragment : DialogFragment() {
     ) {
         val context = requireContext()
         val settings = remember { Settings(context.applicationContext) }
+        val fieldNavigation = if (isYaxcTv()) {
+            val focus = LocalFocusManager.current
+            Modifier.onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // TextField consumes the vertical D-pad keys even when its TV keyboard is closed.
+                when (event.key) {
+                    Key.DirectionUp -> focus.moveFocus(FocusDirection.Previous)
+                    Key.DirectionDown -> focus.moveFocus(FocusDirection.Next)
+                    else -> false
+                }
+            }
+        } else Modifier
         val defaultLinkName = textResource(R.string.newSource)
         val subscriptionAddressRequiredText = textResource(R.string.subscriptionAddressRequired)
         val invalidLinkText = textResource(R.string.invalidLink)
@@ -244,11 +268,13 @@ class LinkFormFragment : DialogFragment() {
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .imePadding()
                 .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
                 shape = MaterialTheme.shapes.extraLarge,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.985f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 tonalElevation = 0.dp,
                 shadowElevation = 18.dp,
                 border = BorderStroke(
@@ -292,6 +318,7 @@ class LinkFormFragment : DialogFragment() {
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             SourceMode.entries.forEachIndexed { index, mode ->
+                                val shape = SegmentedButtonDefaults.itemShape(index, SourceMode.entries.size)
                                 SegmentedButton(
                                     selected = sourceMode == mode,
                                     onClick = {
@@ -300,10 +327,8 @@ class LinkFormFragment : DialogFragment() {
                                         refreshIntervalError = null
                                     },
                                     enabled = !busy,
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = SourceMode.entries.size,
-                                    ),
+                                    shape = shape,
+                                    modifier = Modifier.yaxcTvFocus(shape),
                                     label = {
                                         Text(
                                             text = when (mode) {
@@ -337,7 +362,7 @@ class LinkFormFragment : DialogFragment() {
                         value = name,
                         onValueChange = { name = it },
                         enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().then(fieldNavigation),
                         label = { Text(text = textResource(R.string.linkName)) },
                         singleLine = true,
                     )
@@ -351,7 +376,7 @@ class LinkFormFragment : DialogFragment() {
                             },
                             enabled = !busy,
                             isError = addressError != null,
-                            modifier = Modifier.fillMaxWidth().testTag("source:address"),
+                            modifier = Modifier.fillMaxWidth().testTag("source:address").then(fieldNavigation),
                             label = { Text(text = textResource(R.string.linkAddress)) },
                             supportingText = {
                                 Text(text = addressError ?: textResource(R.string.sourceAddressRemoteLead))
@@ -369,7 +394,8 @@ class LinkFormFragment : DialogFragment() {
                             isError = refreshIntervalError != null,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("source:refresh-interval"),
+                                .testTag("source:refresh-interval")
+                                .then(fieldNavigation),
                             label = { Text(text = refreshIntervalLabel) },
                             supportingText = {
                                 Text(
@@ -389,7 +415,7 @@ class LinkFormFragment : DialogFragment() {
                             value = userAgent,
                             onValueChange = { userAgent = it },
                             enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().then(fieldNavigation),
                             label = { Text(text = textResource(R.string.linkUserAgent)) },
                             supportingText = {
                                 Text(text = textResource(R.string.sourceUserAgentLead))
@@ -400,7 +426,7 @@ class LinkFormFragment : DialogFragment() {
                         OutlinedTextField(
                             value = xHwid,
                             onValueChange = { xHwid = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().then(fieldNavigation),
                             enabled = !busy,
                             label = { Text(text = textResource(R.string.linkXHwid)) },
                             supportingText = {
@@ -413,7 +439,7 @@ class LinkFormFragment : DialogFragment() {
                             value = customHeaders,
                             onValueChange = { customHeaders = it },
                             enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().then(fieldNavigation),
                             label = { Text(text = textResource(R.string.linkCustomHeaders)) },
                             supportingText = {
                                 Text(text = textResource(R.string.sourceHeadersLead))
@@ -435,11 +461,12 @@ class LinkFormFragment : DialogFragment() {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        TextButton(onClick = onDismiss, enabled = !busy) {
+                        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.yaxcTvFocus(CircleShape)) {
                             Text(text = textResource(R.string.close))
                         }
                         Button(
                             enabled = !busy,
+                            modifier = Modifier.yaxcTvFocus(CircleShape),
                             onClick = {
                                 val trimmedAddress = address.trim()
                                 val modeAddress = if (sourceMode == SourceMode.Subscription) {

@@ -34,6 +34,7 @@ The standard Android VPN mode does **not** require root.
 - Open a profile's menu and tap **Check latency**, even while another profile or Live Routing is connected.
   The check does not switch the active connection. To compare a group, use batch checks. Choose HTTP GET, HTTP HEAD or TCP.
 - Single-profile checks do not cancel a running batch. Checks share five workers; duplicate requests are combined and the single-check queue is capped at ten profiles.
+- Copy selected profile groups, portable app settings or routing to another yaxc device with [Device transfer](#device-transfer).
 
 ### Routing you control
 
@@ -55,6 +56,8 @@ The standard Android VPN mode does **not** require root.
   resumes it. Clearing the bounded viewer history does not erase runtime logs. Review logs for sensitive data
   before sharing.
 - English and Russian interfaces, system-following appearance and four theme presets, including Mint Graphite and Light Slate.
+- On wide tablets and Android TV, **Connect** keeps the VPN controls in the middle and the profile list to the right.
+  On TV, use the remote's arrows and OK to move the highlighted focus and run actions.
 - In-app release checks and APK updates.
 - A Quick Settings tile for connection control, plus optional start on boot.
 - Optional root/transparent-proxy settings for advanced hotspot and tethering setups.
@@ -184,6 +187,24 @@ If Android reports a signing conflict, do not uninstall just to bypass it: unins
 For split tunneling, open **Routing → Apps Routing**, choose **Off**, **Exclude** or **Include**, select apps and save.
 Selected apps stay at the top. **Select all visible apps** checks every app matching the current search and system-app
 filter; tap it again to clear those matches. Selections hidden by the filters are left unchanged.
+
+### Device transfer
+
+1. Connect both devices to the same local Wi-Fi or Ethernet network.
+2. On the receiving device, open **Settings → Device transfer → Receive on this device**. On a wide screen,
+   **Connect → Add → Device transfer** is a shortcut.
+3. On the sending device, open **Device transfer → Scan to send**, scan the receiver's QR code,
+   check the profile groups, app settings or routing you want to copy, then select **Send selected items**.
+4. Check the receipt on either device for added and updated groups and profiles, and applied settings.
+
+The QR code expires after two minutes and is for one transfer. It pairs the devices for an encrypted local
+connection; it does not contain the profiles. Share it only with the intended sender. There is no account,
+cloud relay or background synchronization.
+
+Groups are merged without deleting local profiles or changing the selected profile. New HTTP
+subscriptions are paused. Portable settings and routing replace the corresponding choices on the receiver
+only when selected; installation identifiers, local proxy credentials and history are not copied. If Live
+Routing uses profiles that the receiver doesn't have, include their groups or the transfer is rejected.
 
 ### Kill switch
 

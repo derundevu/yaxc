@@ -28,6 +28,7 @@ import androidx.compose.foundation.overscroll
 import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.withoutVisualEffect
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -64,14 +66,18 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.AltRoute
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ToggleOn
@@ -103,14 +109,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -136,10 +147,12 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
@@ -163,6 +176,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.yaxcIsLightTheme
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftFill
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftOnSurface
 import io.github.derundevu.yaxc.presentation.designsystem.yaxcSoftStroke
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcActionBubble
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcVectorBorderShape
 import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKind
@@ -171,6 +185,10 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbac
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenu
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcLiquidDropdownMenuItem
 import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcClickable
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
+import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSettingsRow
+import io.github.derundevu.yaxc.presentation.designsystem.components.isYaxcTv
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 import io.github.derundevu.yaxc.presentation.root.AppVersionsPanel
 import io.github.derundevu.yaxc.presentation.root.routingHomeEntries
 import io.github.derundevu.yaxc.presentation.root.settingsHomeEntries
@@ -192,12 +210,6 @@ import java.time.format.DateTimeFormatter
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
-
-private enum class MainRootTab {
-    Connect,
-    Routing,
-    Settings,
-}
 
 private const val MAIN_FLOATING_BAR_WIDTH_FRACTION = 0.94f
 private val MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET = 82.dp
@@ -270,196 +282,380 @@ fun MainScreen(
             reportAnalyticsVisibility.value(false)
         }
     }
-    val backdropBaseColor = MaterialTheme.colorScheme.background
-    val backdrop = rememberLayerBackdrop {
-        drawRect(backdropBaseColor)
-        drawContent()
-    }
-    val pagerState = rememberPagerState(
-        initialPage = MainRootTab.Connect.ordinal,
-        pageCount = { MainRootTab.entries.size },
-    )
-    val rootTab = MainRootTab.entries[pagerState.currentPage]
-    val coroutineScope = rememberCoroutineScope()
-    val shouldCollapseControls by remember(connectListState, density) {
-        derivedStateOf {
-            val collapseTriggerPx = with(density) { 124.dp.roundToPx() }
-            connectListState.firstVisibleItemIndex > 0 ||
-                connectListState.firstVisibleItemScrollOffset >= collapseTriggerPx
+    var rootTab by rememberSaveable { mutableStateOf(MainRootTab.Connect) }
+    val adaptiveState = rememberSaveableStateHolder()
+    val isTv = isYaxcTv()
+
+    val renderTab: @Composable (MainRootTab, Dp, Dp, Boolean, Float, MainTvFocus?) -> Unit =
+        { tab, topPadding, bottomPadding, showConnectionCard, collapseProgress, focus ->
+            when (tab) {
+                MainRootTab.Connect -> ConnectContent(
+                    tabs = tabs,
+                    selectedTabId = selectedTabId,
+                    liveRoutingAvailable = liveRoutingAvailable,
+                    liveRoutingDefaultGroupName = liveRoutingDefaultGroupName,
+                    isRunning = isRunning,
+                    isBlocked = isBlocked,
+                    selectedSourceName = selectedSourceName,
+                    selectedSourceMetadata = selectedSourceMetadata,
+                    selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
+                    selectedProfileName = selectedProfileName,
+                    pingState = pingState,
+                    profiles = profiles,
+                    selectedProfileId = selectedProfileId,
+                    activeBatchPingSourceId = activeBatchPingSourceId,
+                    batchPingCompleted = batchPingCompleted,
+                    batchPingTotal = batchPingTotal,
+                    listState = connectListState,
+                    collapseProgress = collapseProgress,
+                    onOpenConnectionAnalytics = { analyticsVisible = true },
+                    onAction = onAction,
+                    topPadding = topPadding,
+                    bottomPadding = bottomPadding,
+                    showConnectionCard = showConnectionCard,
+                    tvFocus = focus,
+                )
+
+                MainRootTab.Routing -> RoutingContent(
+                    topPadding = topPadding,
+                    bottomPadding = bottomPadding,
+                    onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
+                    onOpenCoreRouting = { onAction(MainAction.OpenCoreRoutingClicked) },
+                    onOpenLiveRouting = { onAction(MainAction.OpenLiveRoutingClicked) },
+                )
+
+                MainRootTab.Settings -> SettingsContent(
+                    appVersion = appVersion,
+                    xrayVersion = xrayVersion,
+                    tun2socksVersion = tun2socksVersion,
+                    appUpdateState = appUpdateState,
+                    onCheckAppUpdate = onCheckAppUpdate,
+                    onDownloadAppUpdate = onDownloadAppUpdate,
+                    onInstallAppUpdate = onInstallAppUpdate,
+                    topPadding = topPadding,
+                    bottomPadding = bottomPadding,
+                    onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
+                    onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
+                    onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
+                    onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
+                    onOpenDeviceTransfer = { onAction(MainAction.OpenDeviceTransferClicked) },
+                )
+            }
+        }
+
+    val analyticsContent: @Composable () -> Unit = {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            analyticsSavedState.SaveableStateProvider("analytics") {
+                ConnectionAnalyticsScreen(
+                    state = connectionAnalytics,
+                    onBack = { analyticsVisible = false },
+                    onQuery = onConnectionQuery,
+                    onCaptureEnabled = onConnectionCaptureEnabled,
+                    onPersistence = onConnectionPersistence,
+                    onClearHistory = onClearConnectionHistory,
+                )
+            }
         }
     }
-    val collapseProgress by animateFloatAsState(
-        targetValue = if (shouldCollapseControls) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 520f),
-        label = "main_control_bar_collapse",
-    )
 
-    Box(Modifier.fillMaxSize()) {
-    Scaffold(
-        modifier = if (analyticsVisible) Modifier.clearAndSetSemantics {} else Modifier,
-        contentWindowInsets = WindowInsets.safeDrawing.only(
-            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-        ),
-        containerColor = Color.Transparent,
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(YaxcTheme.backgroundBrush),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(YaxcTheme.backgroundBrush)
-                        .layerBackdrop(backdrop = backdrop),
-                ) {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clipToBounds(),
-                        beyondViewportPageCount = 1,
-                    ) { page ->
-                        when (MainRootTab.entries[page]) {
-                            MainRootTab.Connect -> {
-                                ConnectContent(
-                                    tabs = tabs,
-                                    selectedTabId = selectedTabId,
-                                    selectedSourceId = selectedSourceId,
-                                    liveRoutingAvailable = liveRoutingAvailable,
-                                    liveRoutingDefaultGroupName = liveRoutingDefaultGroupName,
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (isTv && analyticsVisible) {
+            analyticsContent()
+        } else if (isTv) {
+            @OptIn(ExperimentalComposeUiApi::class)
+            TvMainShell(
+                tab = rootTab,
+                onSelectTab = { rootTab = it },
+                onAction = onAction,
+            ) { focus ->
+                adaptiveState.SaveableStateProvider(rootTab) {
+                    when (rootTab) {
+                        MainRootTab.Connect -> Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        ) {
+                            TvConnectControlPane(
+                                isRunning = isRunning,
+                                isBlocked = isBlocked,
+                                selectedSourceName = selectedSourceName,
+                                selectedSourceMetadata = selectedSourceMetadata,
+                                selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
+                                selectedProfileName = selectedProfileName,
+                                pingState = pingState,
+                                focus = focus,
+                                onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
+                                onPingCurrent = {
+                                    onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                                },
+                                onOpenConnectionAnalytics = { analyticsVisible = true },
+                                onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
+                                onRefresh = {
+                                    onAction(
+                                        if (selectedSourceId != 0L) MainAction.RefreshSourceClicked(selectedSourceId)
+                                        else MainAction.RefreshLinksClicked,
+                                    )
+                                },
+                                onReconnect = { onAction(MainAction.ReconnectVpnClicked) },
+                                modifier = Modifier.weight(0.46f),
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .weight(0.54f)
+                                    .fillMaxHeight()
+                                    .focusGroup()
+                                    .focusRestorer()
+                                    .focusRequester(focus.profiles),
+                            ) {
+                                renderTab(MainRootTab.Connect, 16.dp, 40.dp, false, 0f, focus)
+                            }
+                        }
+
+                        MainRootTab.Routing -> TvRoutingPane(
+                            focus = focus,
+                            onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
+                            onOpenCoreRouting = { onAction(MainAction.OpenCoreRoutingClicked) },
+                            onOpenLiveRouting = { onAction(MainAction.OpenLiveRoutingClicked) },
+                        )
+
+                        MainRootTab.Settings -> TvSettingsPane(
+                            focus = focus,
+                            appVersion = appVersion,
+                            xrayVersion = xrayVersion,
+                            tun2socksVersion = tun2socksVersion,
+                            appUpdateState = appUpdateState,
+                            onCheckAppUpdate = onCheckAppUpdate,
+                            onDownloadAppUpdate = onDownloadAppUpdate,
+                            onInstallAppUpdate = onInstallAppUpdate,
+                            onOpenDeviceTransfer = { onAction(MainAction.OpenDeviceTransferClicked) },
+                            onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
+                            onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
+                            onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
+                            onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
+                        )
+                    }
+                }
+            }
+        } else if (maxWidth >= 600.dp) {
+            val twoPanes = maxWidth >= 840.dp && maxHeight >= 480.dp
+            AdaptiveMain(
+                tab = rootTab,
+                onSelectTab = { rootTab = it },
+                isTv = false,
+                modifier = if (analyticsVisible) Modifier.clearAndSetSemantics {} else Modifier,
+            ) { focus ->
+                adaptiveState.SaveableStateProvider(rootTab) {
+                    if (rootTab == MainRootTab.Connect) {
+                        val quickActions: @Composable () -> List<MainMenuAction> = {
+                            listOf(
+                                mainMenuAction(R.string.connectionAnalyticsOpen) { analyticsVisible = true },
+                                mainMenuAction(R.string.mainConnectionInfo) { onAction(MainAction.OpenConnectionInfoClicked) },
+                                mainMenuAction(R.string.mainQuickActionPing) {
+                                    onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                                },
+                                mainMenuAction(R.string.mainBatchPingAction) { onAction(MainAction.PingAllProfilesClicked) },
+                                mainMenuAction(R.string.refreshLinks) {
+                                    onAction(if (selectedSourceId != 0L) MainAction.RefreshSourceClicked(selectedSourceId)
+                                        else MainAction.RefreshLinksClicked)
+                                },
+                            )
+                        }
+                        if (twoPanes) {
+                            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(spacing.lg)) {
+                                AdaptiveConnectionControls(
+                                    isRunning = isRunning,
+                                    isBlocked = isBlocked,
+                                    selectedProfileName = selectedProfileName,
+                                    isTv = isTv,
+                                    focus = focus,
+                                    actions = quickActions,
+                                    onAction = onAction,
+                                    modifier = Modifier.weight(1f).fillMaxSize(),
+                                    connectionCard = {
+                                        ConnectionTopCard(
+                                            isRunning = isRunning,
+                                            isBlocked = isBlocked,
+                                            selectedSourceName = selectedSourceName,
+                                            selectedSourceMetadata = selectedSourceMetadata,
+                                            selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
+                                            selectedProfileName = selectedProfileName,
+                                            pingState = pingState,
+                                            collapseProgress = 0f,
+                                            onOpenConnectionAnalytics = { analyticsVisible = true },
+                                            onPingCurrent = {
+                                                onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                                            },
+                                            onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
+                                            onReconnect = { onAction(MainAction.ReconnectVpnClicked) },
+                                            onResizingChanged = {},
+                                        )
+                                    },
+                                )
+                                Column(Modifier.widthIn(max = 640.dp).weight(1.15f, fill = false).fillMaxSize().focusGroup()) {
+                                    AdaptiveProfileHeading(isTv, focus, onAction)
+                                    renderTab(rootTab, 16.dp, 28.dp, false, 0f, focus)
+                                }
+                            }
+                        } else {
+                            Box(Modifier.fillMaxSize()) {
+                                Column(
+                                    modifier = Modifier
+                                        .widthIn(max = 640.dp)
+                                        .fillMaxSize()
+                                        .align(Alignment.TopCenter),
+                                ) {
+                                    AdaptiveProfileHeading(isTv = false, focus = null, onAction = onAction)
+                                    renderTab(rootTab, 16.dp, 108.dp, true, 0f, null)
+                                }
+                                MainBottomConnectRow(
+                                    visible = true,
                                     isRunning = isRunning,
                                     isBlocked = isBlocked,
                                     selectedSourceName = selectedSourceName,
-                                    selectedSourceMetadata = selectedSourceMetadata,
-                                    selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
                                     selectedProfileName = selectedProfileName,
-                                    selectedServerLabel = selectedServerLabel,
-                                    socksAddress = socksAddress,
-                                    socksPort = socksPort,
-                                    socksUsername = socksUsername,
-                                    socksPassword = socksPassword,
-                                    pingAddress = pingAddress,
                                     pingState = pingState,
-                                    profiles = profiles,
-                                    selectedProfileId = selectedProfileId,
-                                    activeBatchPingSourceId = activeBatchPingSourceId,
-                                    batchPingCompleted = batchPingCompleted,
-                                    batchPingTotal = batchPingTotal,
-                                    listState = connectListState,
-                                    collapseProgress = collapseProgress,
-                                    onOpenConnectionAnalytics = { analyticsVisible = true },
-                                    onAction = onAction,
-                                    topPadding = topContentPadding,
-                                    bottomPadding = connectBottomPadding,
+                                    onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
+                                    onPingCurrent = {
+                                        onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                                    },
+                                    onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
+                                    onRefreshSource = {
+                                        if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
+                                        else onAction(MainAction.RefreshLinksClicked)
+                                    },
+                                    connectButtonModifier = Modifier.testTag("main:adaptive:connect"),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .zIndex(3f)
+                                        .widthIn(max = 580.dp)
+                                        .padding(horizontal = spacing.md, vertical = spacing.sm),
                                 )
                             }
-
-                            MainRootTab.Routing -> {
-                                RoutingContent(
-                                    topPadding = topContentPadding,
-                                    bottomPadding = tabBottomPadding,
-                                    onOpenAppsRouting = { onAction(MainAction.OpenAppsRoutingClicked) },
-                                    onOpenCoreRouting = { onAction(MainAction.OpenCoreRoutingClicked) },
-                                    onOpenLiveRouting = { onAction(MainAction.OpenLiveRoutingClicked) },
+                        }
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                            Column(Modifier.widthIn(max = 680.dp).fillMaxSize()) {
+                                Text(
+                                    textResource(if (rootTab == MainRootTab.Routing) R.string.rootTabRouting else R.string.rootTabSettings),
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    modifier = Modifier.padding(horizontal = spacing.md)
+                                        .padding(top = spacing.xs)
+                                        .semantics { heading() },
                                 )
-                            }
-
-                            MainRootTab.Settings -> {
-                                SettingsContent(
-                                    appVersion = appVersion,
-                                    xrayVersion = xrayVersion,
-                                    tun2socksVersion = tun2socksVersion,
-                                    appUpdateState = appUpdateState,
-                                    onCheckAppUpdate = onCheckAppUpdate,
-                                    onDownloadAppUpdate = onDownloadAppUpdate,
-                                    onInstallAppUpdate = onInstallAppUpdate,
-                                    topPadding = topContentPadding,
-                                    bottomPadding = tabBottomPadding,
-                                    onOpenAssets = { onAction(MainAction.OpenAssetsClicked) },
-                                    onOpenLinks = { onAction(MainAction.OpenLinksClicked) },
-                                    onOpenLogs = { onAction(MainAction.OpenLogsClicked) },
-                                    onOpenSettings = { onAction(MainAction.OpenSettingsClicked) },
+                                Text(
+                                    textResource(
+                                        if (rootTab == MainRootTab.Routing) R.string.routingScreenLead
+                                        else R.string.settingsScreenLead,
+                                    ),
+                                    color = YaxcTheme.extendedColors.textMuted,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.padding(horizontal = spacing.md, vertical = spacing.xs),
                                 )
+                                renderTab(rootTab, 12.dp, 24.dp, false, 0f, focus)
                             }
                         }
                     }
                 }
-
-                MainTopChrome(
-                    showAddActions = rootTab == MainRootTab.Connect,
-                    onNewProfile = { onAction(MainAction.NewProfileClicked) },
-                    onNewSource = { onAction(MainAction.NewSourceClicked) },
-                    onScanQr = { onAction(MainAction.ScanQrCodeClicked) },
-                    onImportClipboard = { onAction(MainAction.ImportFromClipboardClicked) },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(3f)
-                        .padding(horizontal = spacing.md, vertical = spacing.md),
-                )
-
-                MainBottomConnectRow(
-                    visible = rootTab == MainRootTab.Connect,
-                    isRunning = isRunning,
-                    isBlocked = isBlocked,
-                    selectedSourceName = selectedSourceName,
-                    selectedProfileName = selectedProfileName,
-                    pingState = pingState,
-                    onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
-                    onPingCurrent = {
-                        onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
-                    },
-                    onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
-                    onRefreshSource = {
-                        if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
-                        else onAction(MainAction.RefreshLinksClicked)
-                    },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .zIndex(3f)
-                        .padding(horizontal = spacing.lg)
-                        .padding(bottom = spacing.lg + reservedBottomInset + MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET),
-                )
-
-                MainLiquidTabBar(
-                    selectedTab = rootTab,
-                    onSelectTab = { tab ->
-                        if (pagerState.currentPage == tab.ordinal) return@MainLiquidTabBar
-                        coroutineScope.launch {
-                            pagerState.animateScrollToPage(tab.ordinal)
-                        }
-                    },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .zIndex(2f)
-                        .padding(horizontal = spacing.lg)
-                        .padding(bottom = spacing.lg + reservedBottomInset),
-                )
             }
-        }
-    }
-        AnimatedVisibility(
-            visible = analyticsVisible,
-            enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220)),
-            exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180)),
-        ) {
-            Surface(modifier = Modifier.fillMaxSize()) {
-                analyticsSavedState.SaveableStateProvider("analytics") {
-                    ConnectionAnalyticsScreen(
-                        state = connectionAnalytics,
-                        onBack = { analyticsVisible = false },
-                        onQuery = onConnectionQuery,
-                        onCaptureEnabled = onConnectionCaptureEnabled,
-                        onPersistence = onConnectionPersistence,
-                        onClearHistory = onClearConnectionHistory,
+        } else {
+            val shouldCollapseControls by remember(connectListState, density) {
+                derivedStateOf {
+                    val collapseTriggerPx = with(density) { 124.dp.roundToPx() }
+                    connectListState.firstVisibleItemIndex > 0 ||
+                        connectListState.firstVisibleItemScrollOffset >= collapseTriggerPx
+                }
+            }
+            val collapseProgress by animateFloatAsState(
+                targetValue = if (shouldCollapseControls) 1f else 0f,
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 520f),
+                label = "main_control_bar_collapse",
+            )
+            val backdropBaseColor = MaterialTheme.colorScheme.background
+            val backdrop = rememberLayerBackdrop {
+                drawRect(backdropBaseColor)
+                drawContent()
+            }
+            val pagerState = rememberPagerState(initialPage = rootTab.ordinal, pageCount = { MainRootTab.entries.size })
+            val compactTab = MainRootTab.entries[pagerState.currentPage]
+            val coroutineScope = rememberCoroutineScope()
+            LaunchedEffect(pagerState) {
+                snapshotFlow { pagerState.currentPage }.collect { rootTab = MainRootTab.entries[it] }
+            }
+            Scaffold(
+                modifier = if (analyticsVisible) Modifier.clearAndSetSemantics {} else Modifier,
+                contentWindowInsets = WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                ),
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier.fillMaxSize().background(YaxcTheme.backgroundBrush).padding(innerPadding),
+                ) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize().clipToBounds().layerBackdrop(backdrop = backdrop),
+                        beyondViewportPageCount = 1,
+                    ) { page ->
+                        val tab = MainRootTab.entries[page]
+                        renderTab(
+                            tab,
+                            topContentPadding,
+                            if (tab == MainRootTab.Connect) connectBottomPadding else tabBottomPadding,
+                            true,
+                            if (tab == MainRootTab.Connect) collapseProgress else 0f,
+                            null,
+                        )
+                    }
+                    MainTopChrome(
+                        showAddActions = compactTab == MainRootTab.Connect,
+                        onNewProfile = { onAction(MainAction.NewProfileClicked) },
+                        onNewSource = { onAction(MainAction.NewSourceClicked) },
+                        onScanQr = { onAction(MainAction.ScanQrCodeClicked) },
+                        onImportClipboard = { onAction(MainAction.ImportFromClipboardClicked) },
+                        modifier = Modifier.align(Alignment.TopCenter).zIndex(3f)
+                            .padding(horizontal = spacing.md, vertical = spacing.md),
+                    )
+                    MainBottomConnectRow(
+                        visible = compactTab == MainRootTab.Connect,
+                        isRunning = isRunning,
+                        isBlocked = isBlocked,
+                        selectedSourceName = selectedSourceName,
+                        selectedProfileName = selectedProfileName,
+                        pingState = pingState,
+                        onToggleVpn = { onAction(MainAction.ToggleVpnClicked) },
+                        onPingCurrent = {
+                            onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                        },
+                        onPingAll = { onAction(MainAction.PingAllProfilesClicked) },
+                        onRefreshSource = {
+                            if (selectedSourceId != 0L) onAction(MainAction.RefreshSourceClicked(selectedSourceId))
+                            else onAction(MainAction.RefreshLinksClicked)
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter).zIndex(3f)
+                            .padding(horizontal = spacing.lg)
+                            .padding(bottom = spacing.lg + reservedBottomInset + MAIN_BOTTOM_CONNECT_ROW_BOTTOM_OFFSET),
+                    )
+                    MainLiquidTabBar(
+                        selectedTab = compactTab,
+                        onSelectTab = { tab ->
+                            if (pagerState.currentPage != tab.ordinal) {
+                                coroutineScope.launch { pagerState.animateScrollToPage(tab.ordinal) }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f)
+                            .padding(horizontal = spacing.lg)
+                            .padding(bottom = spacing.lg + reservedBottomInset),
                     )
                 }
             }
+        }
+        if (!isTv) {
+            AnimatedVisibility(
+                visible = analyticsVisible,
+                enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220)),
+                exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180)),
+            ) { analyticsContent() }
         }
     }
 
@@ -475,6 +671,7 @@ private fun ConnectionFailureDialog(
     failure: ConnectionFailure,
     onAction: (MainAction) -> Unit,
 ) {
+    val isTv = isYaxcTv()
     val geodata = failure.geodata?.takeIf {
         it.filename == "geoip.dat" || it.filename == "geosite.dat"
     }
@@ -504,7 +701,7 @@ private fun ConnectionFailureDialog(
     }
 
     AlertDialog(
-        onDismissRequest = {},
+        onDismissRequest = { if (isTv) onAction(MainAction.DismissConnectionFailure(failure)) },
         icon = {
             Icon(
                 imageVector = Icons.Outlined.ErrorOutline,
@@ -533,11 +730,14 @@ private fun ConnectionFailureDialog(
                     )
                     FilledTonalButton(
                         onClick = { onAction(MainAction.OpenConnectionResources(failure)) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().yaxcTvFocus(CircleShape),
                     ) {
                         Text(text = stringResource(R.string.connectionResources))
                     }
-                    TextButton(onClick = { showDiagnostic = !showDiagnostic }) {
+                    TextButton(
+                        onClick = { showDiagnostic = !showDiagnostic },
+                        modifier = Modifier.yaxcTvFocus(CircleShape),
+                    ) {
                         Text(text = stringResource(R.string.connectionDiagnostic))
                     }
                 }
@@ -552,17 +752,23 @@ private fun ConnectionFailureDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onAction(MainAction.RetryConnectionFailure(failure)) }) {
+            Button(
+                onClick = { onAction(MainAction.RetryConnectionFailure(failure)) },
+                modifier = Modifier.yaxcTvFocus(CircleShape).padding(if (isTv) 4.dp else 0.dp),
+            ) {
                 Text(text = stringResource(R.string.connectionRetry))
             }
         },
         dismissButton = {
-            TextButton(onClick = { onAction(MainAction.DismissConnectionFailure(failure)) }) {
+            TextButton(
+                onClick = { onAction(MainAction.DismissConnectionFailure(failure)) },
+                modifier = Modifier.yaxcTvFocus(CircleShape),
+            ) {
                 Text(text = stringResource(R.string.connectionDismiss))
             }
         },
         properties = DialogProperties(
-            dismissOnBackPress = false,
+            dismissOnBackPress = isTv,
             dismissOnClickOutside = false,
         ),
     )
@@ -573,10 +779,11 @@ private fun reorderedSourceIds(
     draggedSourceId: Long,
     targetIndex: Int,
 ): List<Long> {
-    if (startOrder.size < 2 || draggedSourceId !in startOrder) return startOrder
-    val remainingIds = startOrder.filter { it != draggedSourceId }
-    return remainingIds.toMutableList().apply {
-        add(targetIndex.coerceIn(0, remainingIds.size), draggedSourceId)
+    val sourceIndex = startOrder.indexOf(draggedSourceId)
+    if (startOrder.size < 2 || sourceIndex < 0 || sourceIndex == targetIndex) return startOrder
+    return startOrder.toMutableList().apply {
+        val source = removeAt(sourceIndex)
+        add(targetIndex.coerceIn(0, size), source)
     }
 }
 
@@ -727,6 +934,14 @@ private fun expandedSourceGeometry(
     )
 }
 
+// Clip vertically to the scrolling viewport while allowing card elevation shadows to bleed horizontally.
+private val VerticalViewportClipShape: Shape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val horizontalBleed = with(density) { 48.dp.toPx() }
+        return Outline.Rectangle(Rect(-horizontalBleed, 0f, size.width + horizontalBleed, size.height))
+    }
+}
+
 private data class SourceViewportShape(
     val shape: Shape,
     val top: Float,
@@ -766,7 +981,6 @@ private data class SourceViewportShape(
 private fun ConnectContent(
     tabs: List<Link>,
     selectedTabId: Long,
-    selectedSourceId: Long,
     isRunning: Boolean,
     isBlocked: Boolean,
     liveRoutingAvailable: Boolean,
@@ -775,12 +989,6 @@ private fun ConnectContent(
     selectedSourceMetadata: SubscriptionMetadata?,
     selectedSourceLastRefreshedAt: Long?,
     selectedProfileName: String,
-    selectedServerLabel: String,
-    socksAddress: String,
-    socksPort: String,
-    socksUsername: String,
-    socksPassword: String,
-    pingAddress: String,
     pingState: MainPingState,
     profiles: List<MainProfileItem>,
     selectedProfileId: Long,
@@ -793,10 +1001,14 @@ private fun ConnectContent(
     onAction: (MainAction) -> Unit,
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
+    showConnectionCard: Boolean,
+    tvFocus: MainTvFocus?,
 ) {
     val spacing = YaxcTheme.spacing
     val liveRoutingSelected = selectedProfileId == LiveRoutingHelper.CONNECTION_PROFILE_ID
-    val sourceHeaderOffset = if (liveRoutingAvailable) 2 else 1
+    val isTv = tvFocus != null
+    val liveRoutingBeforeSources = liveRoutingAvailable && !isTv
+    val sourceHeaderOffset = (if (showConnectionCard) 1 else 0) + (if (liveRoutingBeforeSources) 1 else 0)
     val density = LocalDensity.current
     val panelPadding = YaxcTheme.paddings.regular
     val layoutDirection = LocalLayoutDirection.current
@@ -806,7 +1018,7 @@ private fun ConnectContent(
     val panelBottomPadding = panelPadding.calculateBottomPadding()
     val sourceSpacingPx = with(density) { spacing.md.toPx() }
     val dragHysteresisPx = with(density) { 16.dp.toPx() }
-    val overscrollEffect = rememberOverscrollEffect()
+    val overscrollEffect = if (isTv) null else rememberOverscrollEffect()
     val scrollOnlyEffect = remember(overscrollEffect) { overscrollEffect?.withoutVisualEffect() }
     var headerContentHeightPx by remember(density) { mutableIntStateOf(0) }
     var profileStridePx by remember(density) { mutableIntStateOf(0) }
@@ -872,6 +1084,24 @@ private fun ConnectContent(
         dragStartCenters = emptyMap()
     }
 
+    fun moveSource(sourceId: Long, delta: Int) {
+        val order = currentOrderedTabIds.value
+        val sourceIndex = order.indexOf(sourceId)
+        val targetIndex = sourceIndex + delta
+        if (sourceIndex < 0 || targetIndex !in order.indices) return
+        val reordered = reorderedSourceIds(order, sourceId, targetIndex)
+        val selectedIndex = reordered.indexOf(selectedTabId)
+        val headerIndex = sourceHeaderOffset + targetIndex + if (selectedIndex in 0 until targetIndex) {
+            profiles.size.coerceAtLeast(1) + 1
+        } else 0
+        val currentOffset = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == sourceHeaderKey(sourceId) }?.offset
+        if (currentOffset != null) {
+            listState.requestScrollToItem(headerIndex, -currentOffset)
+        }
+        localSourceOrder = reordered
+        onAction(MainAction.CommitSourceOrder(reordered))
+    }
+
     LaunchedEffect(tabIds) {
         val knownIds = tabIds.toSet()
         if (draggingSourceId != null && draggingSourceId !in knownIds) {
@@ -894,8 +1124,21 @@ private fun ConnectContent(
         }
     }
 
+    val liveRoutingEntry: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+        item(key = "live-routing", contentType = "live_routing") {
+            LiveRoutingConnectionCard(
+                isSelected = liveRoutingSelected,
+                defaultGroupName = liveRoutingDefaultGroupName,
+                onSelect = { onAction(MainAction.SelectProfile(LiveRoutingHelper.CONNECTION_PROFILE_ID)) },
+                onConfigure = { onAction(MainAction.OpenLiveRoutingClicked) },
+                tvFocus = tvFocus,
+            )
+            Spacer(Modifier.height(spacing.md))
+        }
+    }
+
     // Stretch the glass and the lazy content together; only the list handles scroll events.
-    Box(modifier = Modifier.fillMaxSize().clipToBounds().overscroll(overscrollEffect)) {
+    Box(modifier = Modifier.fillMaxSize().clip(VerticalViewportClipShape).overscroll(overscrollEffect)) {
         val expandedSourceIndex = orderedTabIds.indexOf(selectedTabId)
         if (expandedSourceIndex >= 0 && draggingSourceId == null) {
             ExpandedSourceBackground(
@@ -921,40 +1164,32 @@ private fun ConnectContent(
                 bottom = bottomPadding,
             ),
         ) {
-            item(key = "connection", contentType = "connection") {
-                ConnectionTopCard(
-                    isRunning = isRunning,
-                    isBlocked = isBlocked,
-                    selectedSourceName = selectedSourceName,
-                    selectedSourceMetadata = selectedSourceMetadata,
-                    selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
-                    selectedProfileName = selectedProfileName,
-                    pingState = pingState,
-                    collapseProgress = collapseProgress,
-                    onOpenConnectionAnalytics = onOpenConnectionAnalytics,
-                    onPingCurrent = {
-                        onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
-                    },
-                    onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
-                    onReconnect = { onAction(MainAction.ReconnectVpnClicked) },
-                    onResizingChanged = { connectionCardResizing = it },
-                )
-                Spacer(Modifier.height(spacing.md))
-            }
-
-            if (liveRoutingAvailable) {
-                item(key = "live-routing", contentType = "live_routing") {
-                    LiveRoutingConnectionCard(
-                        isSelected = liveRoutingSelected,
-                        defaultGroupName = liveRoutingDefaultGroupName,
-                        onSelect = { onAction(MainAction.SelectProfile(LiveRoutingHelper.CONNECTION_PROFILE_ID)) },
-                        onConfigure = { onAction(MainAction.OpenLiveRoutingClicked) },
+            if (showConnectionCard) {
+                item(key = "connection", contentType = "connection") {
+                    ConnectionTopCard(
+                        isRunning = isRunning,
+                        isBlocked = isBlocked,
+                        selectedSourceName = selectedSourceName,
+                        selectedSourceMetadata = selectedSourceMetadata,
+                        selectedSourceLastRefreshedAt = selectedSourceLastRefreshedAt,
+                        selectedProfileName = selectedProfileName,
+                        pingState = pingState,
+                        collapseProgress = collapseProgress,
+                        onOpenConnectionAnalytics = onOpenConnectionAnalytics,
+                        onPingCurrent = {
+                            onAction(if (liveRoutingSelected) MainAction.OpenLiveRoutingClicked else MainAction.PingClicked)
+                        },
+                        onOpenConnectionInfo = { onAction(MainAction.OpenConnectionInfoClicked) },
+                        onReconnect = { onAction(MainAction.ReconnectVpnClicked) },
+                        onResizingChanged = { connectionCardResizing = it },
                     )
                     Spacer(Modifier.height(spacing.md))
                 }
             }
 
-            orderedTabs.forEach { source ->
+            if (liveRoutingBeforeSources) liveRoutingEntry()
+
+            orderedTabs.forEachIndexed { sourceIndex, source ->
                 val isExpanded = source.id == selectedTabId && draggingSourceId == null
                 item(key = sourceHeaderKey(source.id), contentType = "source_header") {
                     val isDragging = draggingSourceId == source.id
@@ -964,7 +1199,7 @@ private fun ConnectContent(
                         // The card already moves the list through intermediate layouts.
                         placementSpec = if (connectionCardResizing) null else spring(dampingRatio = 0.86f, stiffness = 520f),
                     )
-                    val dragModifier = Modifier.pointerInput(source.id) {
+                    val dragModifier = if (isTv) Modifier else Modifier.pointerInput(source.id) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = {
                                 val sourceOrder = currentOrderedTabIds.value
@@ -1041,6 +1276,10 @@ private fun ConnectContent(
                         }
                         SourceGroupHeader(
                             source = source,
+                            isExpanded = isExpanded,
+                            tvFocus = tvFocus,
+                            onMoveUp = if (isTv && sourceIndex > 0) ({ moveSource(source.id, -1) }) else null,
+                            onMoveDown = if (isTv && sourceIndex < orderedTabs.lastIndex) ({ moveSource(source.id, 1) }) else null,
                             batchPingCompleted = batchPingCompleted,
                             batchPingTotal = batchPingTotal,
                             isBatchPingRunning = activeBatchPingSourceId == source.id,
@@ -1074,6 +1313,7 @@ private fun ConnectContent(
                         ) {
                             ProfileCard(
                                 profile = profile,
+                                tvFocus = tvFocus,
                                 isSelected = profile.profile.id == selectedProfileId,
                                 onSelect = { onAction(MainAction.SelectProfile(profile.profile.id)) },
                                 onPing = { onAction(MainAction.PingProfileClicked(profile.profile.id)) },
@@ -1099,12 +1339,13 @@ private fun ConnectContent(
                     }
                 }
             }
-            if (tabs.isEmpty() && !liveRoutingAvailable) {
+            if (tabs.isEmpty() && (!liveRoutingAvailable || isTv)) {
                 item(key = "empty_sources") {
-                    EmptySourcesCard()
+                    EmptySourcesCard(tvFocus = tvFocus, onAddSource = { onAction(MainAction.NewSourceClicked) })
                     Spacer(Modifier.height(spacing.md))
                 }
             }
+            if (liveRoutingAvailable && !liveRoutingBeforeSources) liveRoutingEntry()
         }
     }
 }
@@ -1115,12 +1356,14 @@ private fun LiveRoutingConnectionCard(
     defaultGroupName: String,
     onSelect: () -> Unit,
     onConfigure: () -> Unit,
+    tvFocus: MainTvFocus?,
 ) {
     val accent = if (isSelected) YaxcTheme.extendedColors.success else MaterialTheme.colorScheme.primary
+    val shape = MaterialTheme.shapes.large
+    val selectModifier = Modifier.testTag("main:live-routing")
+        .selectable(selected = isSelected, role = Role.RadioButton, onClick = onSelect)
     YaxcGlassPanel(
-        modifier = Modifier
-            .testTag("main:live-routing")
-            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onSelect),
+        modifier = if (tvFocus == null) selectModifier else Modifier,
         contentPadding = YaxcTheme.paddings.regular,
         accentColor = accent,
         accentAlpha = if (isSelected) 0.22f else 0.08f,
@@ -1133,7 +1376,17 @@ private fun LiveRoutingConnectionCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(Icons.AutoMirrored.Outlined.AltRoute, contentDescription = null, tint = accent)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(
+                modifier = Modifier.weight(1f).then(
+                    if (tvFocus == null) Modifier else Modifier
+                        .focusProperties { start = tvFocus.connect }
+                        .yaxcTvFocus(shape)
+                        .clip(shape)
+                        .then(selectModifier)
+                        .padding(6.dp),
+                ),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 Text(
                     text = stringResource(R.string.liveRouting),
                     style = MaterialTheme.typography.titleMedium,
@@ -1153,7 +1406,10 @@ private fun LiveRoutingConnectionCard(
                         else MaterialTheme.colorScheme.error,
                 )
             }
-            IconButton(onClick = onConfigure, modifier = Modifier.testTag("main:live-routing:settings")) {
+            IconButton(
+                onClick = onConfigure,
+                modifier = Modifier.testTag("main:live-routing:settings").yaxcTvFocus(CircleShape),
+            ) {
                 Icon(
                     Icons.Outlined.Settings,
                     contentDescription = stringResource(R.string.liveRouting),
@@ -1202,6 +1458,7 @@ private fun SettingsContent(
     onOpenLinks: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDeviceTransfer: () -> Unit,
 ) {
     val spacing = YaxcTheme.spacing
     LazyColumn(
@@ -1214,6 +1471,14 @@ private fun SettingsContent(
         ),
         verticalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
+        item(key = "device-transfer") {
+            YaxcCard(onClick = onOpenDeviceTransfer) {
+                YaxcSettingsRow(
+                    title = textResource(R.string.deviceTransferTitle),
+                    icon = Icons.Outlined.QrCodeScanner,
+                )
+            }
+        }
         settingsHomeEntries(onOpenAssets, onOpenLinks, onOpenLogs, onOpenSettings, showChevron = true)
         item {
             AppVersionsPanel(
@@ -1230,7 +1495,7 @@ private fun SettingsContent(
 }
 
 @Composable
-private fun ConnectionTopCard(
+internal fun ConnectionTopCard(
     isRunning: Boolean,
     isBlocked: Boolean,
     selectedSourceName: String,
@@ -1331,7 +1596,7 @@ private fun ConnectionTopCard(
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.testTag("main:kill-switch-blocked"),
                         )
-                        TextButton(onClick = onReconnect) {
+                        TextButton(onClick = onReconnect, modifier = Modifier.yaxcTvFocus(CircleShape)) {
                             Text(textResource(R.string.connectionRetry))
                         }
                     }
@@ -1356,13 +1621,13 @@ private fun ConnectionTopCard(
                     }
                 }
 
-                ActionBubble(
+                YaxcActionBubble(
                     icon = Icons.Outlined.Speed,
                     onClick = onPingCurrent,
                     contentDescription = textResource(R.string.mainQuickActionPing),
                     modifier = Modifier.testTag("main:connection-ping"),
                 )
-                ActionBubble(
+                YaxcActionBubble(
                     icon = Icons.Outlined.Info,
                     onClick = onOpenConnectionInfo,
                     contentDescription = textResource(R.string.mainConnectionInfo),
@@ -1386,7 +1651,7 @@ private fun ConnectionTopCard(
 }
 
 @Composable
-private fun SubscriptionTraffic(metadata: SubscriptionMetadata) {
+internal fun SubscriptionTraffic(metadata: SubscriptionMetadata) {
     val usedBytes = metadata.usedBytes
     val totalBytes = metadata.totalBytes
     if (usedBytes == null && totalBytes == null) return
@@ -1433,7 +1698,7 @@ private fun formatTrafficGigabytes(bytes: Long): String {
 }
 
 @Composable
-private fun subscriptionCardSummary(
+internal fun subscriptionCardSummary(
     metadata: SubscriptionMetadata?,
     lastRefreshedAt: Long?,
 ): String? {
@@ -1488,11 +1753,13 @@ private fun formatLastRefreshShort(lastRefreshedAt: Long?): String {
 
 
 @Composable
-private fun FloatingConnectButton(
+internal fun FloatingConnectButton(
     isRunning: Boolean,
     isBlocked: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    size: Dp = 64.dp,
+    iconSize: Dp = 26.dp,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -1544,7 +1811,8 @@ private fun FloatingConnectButton(
     ) {
         MainFloatingSurface(
             modifier = Modifier
-                .size(64.dp)
+                .size(size)
+                .yaxcTvFocus(CircleShape)
                 .clickable(
                     interactionSource = interactionSource,
                     indication = null,
@@ -1564,7 +1832,7 @@ private fun FloatingConnectButton(
                     imageVector = Icons.Outlined.PowerSettingsNew,
                     contentDescription = if (isRunning) textResource(R.string.vpnStop) else textResource(R.string.vpnStart),
                     tint = iconTint,
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(iconSize),
                 )
             }
         }
@@ -1666,69 +1934,95 @@ private fun MainTopChrome(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        if (showAddActions) Box {
-            var actionsExpanded by remember { mutableStateOf(false) }
+        if (showAddActions) {
+            MainAddActionButton(
+                isTv = false,
+                showDeviceTransfer = false,
+                onAction = { action ->
+                    when (action) {
+                        MainAction.NewProfileClicked -> onNewProfile()
+                        MainAction.NewSourceClicked -> onNewSource()
+                        MainAction.ScanQrCodeClicked -> onScanQr()
+                        MainAction.ImportFromClipboardClicked -> onImportClipboard()
+                        else -> Unit
+                    }
+                },
+            )
+        }
+    }
+}
 
-            MainFloatingSurface(
-                modifier = Modifier.yaxcClickable(
-                    shape = YaxcTheme.shapes.pill,
-                    onClick = { actionsExpanded = true },
-                ),
+@Composable
+internal fun MainAddActionButton(
+    isTv: Boolean,
+    showDeviceTransfer: Boolean,
+    onAction: (MainAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val label = textResource(R.string.mainAddActions)
+    Box {
+        var actionsExpanded by remember { mutableStateOf(false) }
+
+        MainFloatingSurface(
+            modifier = modifier.yaxcClickable(
                 shape = YaxcTheme.shapes.pill,
-                contentPadding = YaxcTheme.paddings.none,
-            ) {
+                onClick = { actionsExpanded = true },
+            ),
+            shape = YaxcTheme.shapes.pill,
+            contentPadding = YaxcTheme.paddings.none,
+        ) {
+            if (isTv) {
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = 46.dp)
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                }
+            } else {
                 Box(
                     modifier = Modifier.size(MAIN_TOP_CONTROL_HEIGHT),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Add,
-                        contentDescription = textResource(R.string.newProfile),
+                        contentDescription = label,
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp),
                     )
                 }
             }
+        }
 
-            YaxcLiquidDropdownMenu(
-                expanded = actionsExpanded,
-                onDismissRequest = { actionsExpanded = false },
-            ) {
-                YaxcLiquidDropdownMenuItem(
-                    text = textResource(R.string.newProfile),
-                    onClick = {
-                        actionsExpanded = false
-                        onNewProfile()
-                    },
-                )
-                YaxcLiquidDropdownMenuItem(
-                    text = textResource(R.string.newSource),
-                    onClick = {
-                        actionsExpanded = false
-                        onNewSource()
-                    },
-                )
-                YaxcLiquidDropdownMenuItem(
-                    text = textResource(R.string.scanQrCode),
-                    onClick = {
-                        actionsExpanded = false
-                        onScanQr()
-                    },
-                )
-                YaxcLiquidDropdownMenuItem(
-                    text = textResource(R.string.fromClipboard),
-                    onClick = {
-                        actionsExpanded = false
-                        onImportClipboard()
-                    },
-                )
+        MainActionMenu(label, isTv, actionsExpanded, onDismiss = { actionsExpanded = false }) {
+            buildList {
+                if (showDeviceTransfer) {
+                    add(mainMenuAction(R.string.deviceTransferTitle) { onAction(MainAction.OpenDeviceTransferClicked) })
+                }
+                add(mainMenuAction(R.string.newProfile) { onAction(MainAction.NewProfileClicked) })
+                add(mainMenuAction(R.string.newSource) { onAction(MainAction.NewSourceClicked) })
+                if (!isTv) add(mainMenuAction(R.string.scanQrCode) { onAction(MainAction.ScanQrCodeClicked) })
+                add(mainMenuAction(R.string.fromClipboard) { onAction(MainAction.ImportFromClipboardClicked) })
             }
         }
     }
 }
 
 @Composable
-private fun MainBrandPill(modifier: Modifier = Modifier) {
+internal fun MainBrandPill(modifier: Modifier = Modifier) {
     MainFloatingSurface(
         modifier = modifier,
         shape = YaxcTheme.shapes.pill,
@@ -1775,6 +2069,7 @@ private fun MainBottomConnectRow(
     onPingAll: () -> Unit,
     onRefreshSource: () -> Unit,
     modifier: Modifier = Modifier,
+    connectButtonModifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -1805,6 +2100,7 @@ private fun MainBottomConnectRow(
                 isRunning = isRunning,
                 isBlocked = isBlocked,
                 onClick = onToggleVpn,
+                modifier = connectButtonModifier,
             )
         }
     }
@@ -1981,7 +2277,7 @@ private fun MainBottomTabItem(
 }
 
 @Composable
-private fun MainFloatingSurface(
+internal fun MainFloatingSurface(
     modifier: Modifier = Modifier,
     shape: Shape? = null,
     contentPadding: PaddingValues? = null,
@@ -1996,6 +2292,7 @@ private fun MainFloatingSurface(
         modifier = modifier,
         shape = resolvedShape,
         color = containerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
         border = BorderStroke(1.dp, borderColor),
@@ -2009,7 +2306,7 @@ private fun MainFloatingSurface(
 
 @Composable
 @ReadOnlyComposable
-private fun mainFloatingContainerColor(pressed: Boolean = false): Color {
+internal fun mainFloatingContainerColor(pressed: Boolean = false): Color {
     val scheme = MaterialTheme.colorScheme
     val isLight = yaxcIsLightTheme()
     val base = if (isLight) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh
@@ -2026,7 +2323,7 @@ private fun mainFloatingContainerColor(pressed: Boolean = false): Color {
 
 @Composable
 @ReadOnlyComposable
-private fun mainFloatingBorderColor(): Color {
+internal fun mainFloatingBorderColor(): Color {
     val scheme = MaterialTheme.colorScheme
     val base = YaxcTheme.extendedColors.cardBorder
     val accent = scheme.primary.copy(alpha = if (yaxcIsLightTheme()) 0.34f else 0.28f)
@@ -2037,6 +2334,10 @@ private fun mainFloatingBorderColor(): Color {
 @Composable
 private fun SourceGroupHeader(
     source: Link,
+    isExpanded: Boolean,
+    tvFocus: MainTvFocus?,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
     isBatchPingRunning: Boolean,
     batchPingCompleted: Int,
     batchPingTotal: Int,
@@ -2050,13 +2351,14 @@ private fun SourceGroupHeader(
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
+    val shape = MaterialTheme.shapes.large
+    val selection = Modifier.testTag("source:${source.id}").yaxcClickable(shape = shape, onClick = onToggleExpanded)
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("source:${source.id}")
+            .then(if (tvFocus == null) selection else Modifier)
             .onSizeChanged { onHeaderHeight(it.height) }
-            .yaxcClickable(shape = MaterialTheme.shapes.large, onClick = onToggleExpanded)
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2064,11 +2366,30 @@ private fun SourceGroupHeader(
         Row(
             modifier = Modifier
                 .weight(1f)
-                .then(dragModifier)
-                .testTag("source:${source.id}:drag"),
+                .then(if (tvFocus == null) {
+                    dragModifier.testTag("source:${source.id}:drag")
+                } else {
+                    Modifier.focusProperties { start = tvFocus.connect }
+                        .semantics { selected = isExpanded }
+                        .then(selection)
+                        .heightIn(min = 54.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                }),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (tvFocus != null) {
+                Icon(
+                    imageVector = if (isExpanded) {
+                        Icons.Outlined.ExpandMore
+                    } else {
+                        Icons.AutoMirrored.Outlined.KeyboardArrowRight
+                    },
+                    contentDescription = null,
+                    tint = if (isExpanded) MaterialTheme.colorScheme.primary else YaxcTheme.extendedColors.textMuted,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
             Text(
                 text = source.name,
                 style = MaterialTheme.typography.titleMedium,
@@ -2087,37 +2408,42 @@ private fun SourceGroupHeader(
                 maxLines = 1,
             )
         }
-        ActionBubble(
-            icon = Icons.Outlined.WifiTethering,
-            onClick = onPingAll,
-            loading = isBatchPingRunning,
-        )
-        ActionBubble(icon = Icons.Outlined.Refresh, onClick = onRefresh)
+        if (tvFocus == null) {
+            YaxcActionBubble(
+                icon = Icons.Outlined.WifiTethering,
+                onClick = onPingAll,
+                contentDescription = textResource(R.string.mainBatchPingAction),
+                loading = isBatchPingRunning,
+            )
+            YaxcActionBubble(
+                icon = Icons.Outlined.Refresh,
+                onClick = onRefresh,
+                contentDescription = textResource(R.string.refreshLinks),
+            )
+        }
         Box {
-            ActionBubble(
+            val menuTag = Modifier.testTag("source:${source.id}:menu")
+            val title = textResource(R.string.mainSourceActions)
+            YaxcActionBubble(
                 icon = Icons.Outlined.MoreVert,
                 onClick = { actionsExpanded = true },
+                contentDescription = title,
                 emphasizePress = true,
-                modifier = Modifier.testTag("source:${source.id}:menu"),
+                containerSize = if (tvFocus != null) 44.dp else 40.dp,
+                iconSize = if (tvFocus != null) 20.dp else 18.dp,
+                modifier = menuTag,
             )
-            YaxcLiquidDropdownMenu(
-                expanded = actionsExpanded,
-                onDismissRequest = { actionsExpanded = false },
-            ) {
-                YaxcLiquidDropdownMenuItem(
-                    text = textResource(R.string.renameSource),
-                    onClick = {
-                        actionsExpanded = false
-                        onRenameSource()
-                    },
-                )
-                YaxcLiquidDropdownMenuItem(
-                    text = textResource(R.string.deleteSource),
-                    onClick = {
-                        actionsExpanded = false
-                        onDeleteSource()
-                    },
-                )
+            MainActionMenu(title, tvFocus != null, actionsExpanded, onDismiss = { actionsExpanded = false }) {
+                buildList {
+                    if (tvFocus != null) {
+                        add(mainMenuAction(R.string.mainBatchPingAction, onPingAll))
+                        add(mainMenuAction(R.string.refreshLinks, onRefresh))
+                        if (onMoveUp != null) add(mainMenuAction(R.string.mainMoveSourceUp, onMoveUp))
+                        if (onMoveDown != null) add(mainMenuAction(R.string.mainMoveSourceDown, onMoveDown))
+                    }
+                    add(mainMenuAction(R.string.renameSource, onRenameSource))
+                    add(mainMenuAction(R.string.deleteSource, onDeleteSource))
+                }
             }
         }
     }
@@ -2126,6 +2452,7 @@ private fun SourceGroupHeader(
 @Composable
 private fun ProfileCard(
     profile: MainProfileItem,
+    tvFocus: MainTvFocus?,
     isSelected: Boolean,
     onSelect: () -> Unit,
     onPing: () -> Unit,
@@ -2171,16 +2498,17 @@ private fun ProfileCard(
         label = "profile_card_shadow",
     )
 
+    val shape = MaterialTheme.shapes.large
+    val selection = Modifier.testTag("profile:${profile.profile.id}")
+        .semantics { selected = isSelected }
+        .scale(pressScale)
+        .clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = onSelect,
+        )
     YaxcGlassPanel(
-        modifier = Modifier
-            .testTag("profile:${profile.profile.id}")
-            .semantics { selected = isSelected }
-            .scale(pressScale)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onSelect,
-        ),
+        modifier = if (tvFocus == null) selection else Modifier,
         shape = MaterialTheme.shapes.large,
         contentPadding = YaxcTheme.paddings.regular,
         accentColor = accentColor,
@@ -2193,26 +2521,45 @@ private fun ProfileCard(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            Row(
+                modifier = Modifier.weight(1f).then(
+                    if (tvFocus == null) Modifier else Modifier
+                        .focusProperties { start = tvFocus.connect }
+                        .yaxcTvFocus(shape).then(selection).heightIn(min = 56.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = profile.profile.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = profile.summary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = YaxcTheme.extendedColors.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (tvFocus != null) {
+                    Icon(
+                        imageVector = if (isSelected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                        contentDescription = null,
+                        tint = if (isSelected) YaxcTheme.extendedColors.success else YaxcTheme.extendedColors.textMuted,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = profile.profile.name,
+                        style = if (tvFocus != null) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = profile.summary,
+                        style = if (tvFocus != null) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+                        color = YaxcTheme.extendedColors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
             PingStateBadge(
@@ -2221,61 +2568,28 @@ private fun ProfileCard(
             )
 
             Box {
-                ActionBubble(
+                val menuTag = Modifier.testTag("profile:${profile.profile.id}:menu")
+                val title = textResource(R.string.mainProfileActions)
+                YaxcActionBubble(
                     icon = Icons.Outlined.MoreVert,
                     onClick = { actionsExpanded = true },
+                    contentDescription = title,
                     emphasizePress = true,
-                    containerSize = 34.dp,
-                    iconSize = 16.dp,
-                    modifier = Modifier.testTag("profile:${profile.profile.id}:menu"),
+                    containerSize = if (tvFocus != null) 44.dp else 34.dp,
+                    iconSize = if (tvFocus != null) 20.dp else 16.dp,
+                    modifier = menuTag,
                 )
-                YaxcLiquidDropdownMenu(
-                    expanded = actionsExpanded,
-                    onDismissRequest = { actionsExpanded = false },
-                ) {
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.mainPingProfileAction),
-                        onClick = {
-                            actionsExpanded = false
-                            onPing()
+                MainActionMenu(title, tvFocus != null, actionsExpanded, onDismiss = { actionsExpanded = false }) {
+                    listOf(
+                        mainMenuAction(R.string.mainPingProfileAction, onPing),
+                        mainMenuAction(R.string.editProfile, onEdit),
+                        mainMenuAction(R.string.copyProfileJson) {
+                            copyProfileJson(context, profile.profile.config, feedback)
                         },
-                    )
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.editProfile),
-                        onClick = {
-                            actionsExpanded = false
-                            onEdit()
+                        mainMenuAction(R.string.copyProfileDeepLink) {
+                            copyProfileDeepLink(context, scope, profile.profile.config, feedback)
                         },
-                    )
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.copyProfileJson),
-                        onClick = {
-                            actionsExpanded = false
-                            copyProfileJson(
-                                context = context,
-                                config = profile.profile.config,
-                                feedback = feedback,
-                            )
-                        },
-                    )
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.copyProfileDeepLink),
-                        onClick = {
-                            actionsExpanded = false
-                            copyProfileDeepLink(
-                                context = context,
-                                scope = scope,
-                                config = profile.profile.config,
-                                feedback = feedback,
-                            )
-                        },
-                    )
-                    YaxcLiquidDropdownMenuItem(
-                        text = textResource(R.string.deleteProfile),
-                        onClick = {
-                            actionsExpanded = false
-                            onDelete()
-                        },
+                        mainMenuAction(R.string.deleteProfile, onDelete),
                     )
                 }
             }
@@ -2284,7 +2598,7 @@ private fun ProfileCard(
 }
 
 @Composable
-private fun PingStateBadge(
+internal fun PingStateBadge(
     pingState: MainPingState,
     modifier: Modifier = Modifier,
 ) {
@@ -2330,7 +2644,7 @@ private fun PingStateBadge(
 }
 
 @Composable
-private fun EmptySourcesCard() {
+private fun EmptySourcesCard(tvFocus: MainTvFocus?, onAddSource: () -> Unit) {
     YaxcGlassPanel {
         Text(
             text = textResource(R.string.mainNoSources),
@@ -2343,63 +2657,14 @@ private fun EmptySourcesCard() {
             color = YaxcTheme.extendedColors.textMuted,
             modifier = Modifier.padding(top = 6.dp),
         )
-    }
-}
-
-@Composable
-private fun ActionBubble(
-    icon: ImageVector,
-    onClick: () -> Unit,
-    containerSize: androidx.compose.ui.unit.Dp = 40.dp,
-    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
-    loading: Boolean = false,
-    contentDescription: String? = null,
-    emphasizePress: Boolean = false,
-    modifier: Modifier = Modifier,
-) {
-    val shape = MaterialTheme.shapes.large
-    val colors = MaterialTheme.colorScheme
-    val interactions = if (emphasizePress) remember { MutableInteractionSource() } else null
-    val pressed = interactions?.collectIsPressedAsState()?.value ?: false
-    val clickable = if (interactions == null) {
-        Modifier.yaxcClickable(shape = shape, onClick = onClick)
-    } else {
-        Modifier.clip(shape).clickable(
-            interactionSource = interactions,
-            indication = LocalIndication.current,
-            onClick = onClick,
-        )
-    }
-    Surface(
-        modifier = modifier.then(clickable),
-        color = if (pressed) colors.primary else yaxcSoftFill(darkAlpha = 0.08f, lightAlpha = 0.84f),
-        shape = shape,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, if (pressed) colors.primary else yaxcSoftStroke(darkAlpha = 0.12f, lightAlpha = 0.92f)),
-    ) {
-        Box(
-            modifier = Modifier.size(containerSize),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(iconSize),
-                    strokeWidth = 2.dp,
-                    color = yaxcSoftOnSurface(darkAlpha = 0.82f, lightAlpha = 0.8f),
-                )
-            } else {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = contentDescription,
-                    tint = if (pressed) colors.onPrimary else yaxcSoftOnSurface(darkAlpha = 0.76f, lightAlpha = 0.74f),
-                    modifier = Modifier.size(iconSize),
-                )
-            }
+        if (tvFocus != null) {
+            TextButton(
+                onClick = onAddSource,
+                modifier = Modifier.focusProperties { start = tvFocus.connect }.yaxcTvFocus(CircleShape),
+            ) { Text(textResource(R.string.newSource)) }
         }
     }
 }
-
 
 private fun copyProfileJson(
     context: Context,

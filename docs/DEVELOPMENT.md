@@ -235,6 +235,18 @@ or `./tools/android-emulator.sh adb tv shell input keyevent KEYCODE_DPAD_DOWN`. 
 the content as proof of remote-only navigation. On the tablet, use the rotate controls to check both
 orientations. UI Automator hierarchy dumps and `exec-out screencap -p` work on both targets.
 
+For adaptive UI smoke, open Connect in both tablet orientations, narrow the window back to the compact
+layout, and verify that the selected profile survives. On TV, select a profile, start and stop the isolated VPN,
+and move a Core Routing rule past an expanded neighbor using the D-pad. The moved rule should stay in view
+and keep focus on a usable arrow.
+
+For device transfer smoke, show a pairing QR on the TV, feed its code to the tablet camera, select a synthetic
+group and one options category, and check the matching receipts and the receiver's profile list. If the
+emulator Ethernet and Wi-Fi networks are isolated, use a test-only emulator console TCP redirect and camera
+fixture for the endpoint. Remove the redirect after the run. Do not keep a scannable pairing code in screenshots.
+The `DeviceTransferTransportTest` instrumentation also exercises authentication and acknowledgement on each
+device's own LAN socket.
+
 Run the existing isolated native/import/Room/VPN instrumentation on the selected AVD:
 
 ```bash

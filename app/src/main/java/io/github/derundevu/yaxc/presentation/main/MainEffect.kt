@@ -22,6 +22,7 @@ sealed interface MainEffect {
     data object OpenLiveRouting : MainEffect
     data object OpenConfigs : MainEffect
     data object OpenSettings : MainEffect
+    data object OpenDeviceTransfer : MainEffect
     data object ReloadCurrentConfig : MainEffect
     data class OpenProfileEditor(val profileId: Long) : MainEffect
     data class ConfirmDeleteProfile(val profile: ProfileList) : MainEffect

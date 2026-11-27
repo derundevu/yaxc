@@ -2,6 +2,7 @@ package io.github.derundevu.yaxc.presentation.designsystem.components
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,7 +46,7 @@ fun YaxcTopAppBar(
         },
         modifier = modifier,
         navigationIcon = {
-            IconButton(onClick = onBack, enabled = backEnabled, modifier = backModifier) {
+            IconButton(onClick = onBack, enabled = backEnabled, modifier = backModifier.yaxcTvFocus(CircleShape)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = backLabel)
             }
         },

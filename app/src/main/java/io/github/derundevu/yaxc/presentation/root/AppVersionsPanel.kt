@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.outlined.NewReleases
@@ -55,6 +56,7 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.FeedbackKin
 import io.github.derundevu.yaxc.presentation.designsystem.components.LocalYaxcFeedback
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcFeedbackState
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcGlassPanel
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -96,7 +98,7 @@ internal fun AppVersionsPanel(
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = { showChangelog = true },
-                modifier = Modifier.fillMaxWidth().testTag("settings:whats-new"),
+                modifier = Modifier.fillMaxWidth().yaxcTvFocus(CircleShape).testTag("settings:whats-new"),
             ) {
                 Icon(Icons.Outlined.NewReleases, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
                 Text(stringResource(R.string.appWhatsNew, appVersion), textAlign = TextAlign.Center)
@@ -120,7 +122,7 @@ internal fun AppVersionsPanel(
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = { openRepositoryUrl(context, feedback) },
-                modifier = Modifier.fillMaxWidth().testTag("settings:source-code"),
+                modifier = Modifier.fillMaxWidth().yaxcTvFocus(CircleShape).testTag("settings:source-code"),
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_github),
@@ -131,7 +133,7 @@ internal fun AppVersionsPanel(
             }
             TextButton(
                 onClick = { showLicenses = true },
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp).testTag("settings:licenses"),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp).yaxcTvFocus(CircleShape).testTag("settings:licenses"),
             ) {
                 Text(stringResource(R.string.appOpenSourceLicenses))
             }

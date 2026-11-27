@@ -12,12 +12,14 @@ import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import io.github.derundevu.yaxc.R
 import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 
 @Composable
 internal fun VisibleAppsSelection(
@@ -37,6 +39,8 @@ internal fun VisibleAppsSelection(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
+            .yaxcTvFocus()
+            .clip(MaterialTheme.shapes.medium)
             .triStateToggleable(
                 state = state,
                 enabled = enabled && visibleCount > 0,

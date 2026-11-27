@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.HelpOutline
@@ -53,6 +54,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.semantics.Role
@@ -69,6 +71,8 @@ import io.github.derundevu.yaxc.presentation.designsystem.YaxcTheme
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcCard
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcMessageDialog
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
+import io.github.derundevu.yaxc.presentation.designsystem.components.isYaxcTv
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -91,11 +95,13 @@ fun AppsRoutingScreen(
     var showSystemApps by rememberSaveable { mutableStateOf(true) }
     var controlsHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
+    // Keep the row order stable when a remote toggles an app.
+    val sortSelection = if (isYaxcTv()) remember { selectedPackages } else selectedPackages
 
     val filteredAppsState = remember(apps, query, showSystemApps) {
         mutableStateOf<List<AppList>?>(null)
     }
-    LaunchedEffect(filteredAppsState, selectedPackages) {
+    LaunchedEffect(filteredAppsState, sortSelection) {
         filteredAppsState.value = withContext(Dispatchers.Default) {
             val keyword = query.trim()
             val selected = ArrayList<AppList>()
@@ -105,7 +111,7 @@ fun AppsRoutingScreen(
                     (keyword.isEmpty() || app.appName.contains(keyword, ignoreCase = true) ||
                         app.packageName.contains(keyword, ignoreCase = true))
                 ) {
-                    if (app.packageName in selectedPackages) selected.add(app) else unselected.add(app)
+                    if (app.packageName in sortSelection) selected.add(app) else unselected.add(app)
                 }
             }
             selected.addAll(unselected)
@@ -123,6 +129,7 @@ fun AppsRoutingScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         contentWindowInsets = WindowInsets.safeDrawing.only(
             WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
         ),
@@ -133,14 +140,14 @@ fun AppsRoutingScreen(
                 titleMaxLines = 1,
                 onBack = onBack,
                 actions = {
-                    IconButton(onClick = { routingModeHelpVisible = true }) {
+                    IconButton(onClick = { routingModeHelpVisible = true }, modifier = Modifier.yaxcTvFocus(CircleShape)) {
                         Icon(
                             imageVector = Icons.Outlined.HelpOutline,
                             contentDescription = textResource(R.string.appsRoutingModeHelp),
                             tint = YaxcTheme.extendedColors.textMuted,
                         )
                     }
-                    IconButton(onClick = onSave) {
+                    IconButton(onClick = onSave, modifier = Modifier.yaxcTvFocus(CircleShape)) {
                         Icon(
                             imageVector = Icons.Outlined.Done,
                             contentDescription = textResource(R.string.save),
@@ -194,6 +201,7 @@ fun AppsRoutingScreen(
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                        contentColor = MaterialTheme.colorScheme.onSurface,
                         shape = MaterialTheme.shapes.large,
                     ) {
                         TabRow(selectedTabIndex = appsRoutingMode.tabIndex()) {
@@ -201,6 +209,7 @@ fun AppsRoutingScreen(
                                 Tab(
                                     selected = appsRoutingMode == mode,
                                     onClick = { onModeChange(mode) },
+                                    modifier = Modifier.yaxcTvFocus(),
                                     text = { Text(text = textResource(mode.shortTitleRes())) },
                                 )
                             }
@@ -210,6 +219,8 @@ fun AppsRoutingScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .yaxcTvFocus()
+                            .clip(MaterialTheme.shapes.medium)
                             .toggleable(
                                 value = showSystemApps,
                                 role = Role.Checkbox,
@@ -312,8 +323,16 @@ private fun AppRoutingRow(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    val television = isYaxcTv()
+    val shape = MaterialTheme.shapes.large
     YaxcCard(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = if (television) {
+            Modifier.yaxcTvFocus(shape).clip(shape).toggleable(
+                value = isSelected,
+                role = Role.Checkbox,
+                onValueChange = { onClick() },
+            )
+        } else Modifier.clip(shape).clickable(onClick = onClick),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(
@@ -344,7 +363,7 @@ private fun AppRoutingRow(
 
             Checkbox(
                 checked = isSelected,
-                onCheckedChange = { onClick() },
+                onCheckedChange = if (television) null else { _ -> onClick() },
             )
         }
     }

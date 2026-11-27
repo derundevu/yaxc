@@ -48,6 +48,7 @@ fun YaxcLiquidDropdownMenuItem(
                 fontWeight = FontWeight.Medium,
             )
         },
+        modifier = Modifier.yaxcTvFocus(),
         onClick = onClick,
         enabled = enabled,
         colors = MenuDefaults.itemColors(

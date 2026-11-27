@@ -40,4 +40,5 @@ sealed interface MainAction {
     data object OpenLiveRoutingClicked : MainAction
     data object OpenConfigsClicked : MainAction
     data object OpenSettingsClicked : MainAction
+    data object OpenDeviceTransferClicked : MainAction
 }

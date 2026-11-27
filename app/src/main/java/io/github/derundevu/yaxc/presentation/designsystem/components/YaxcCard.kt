@@ -38,10 +38,11 @@ fun YaxcCard(
     if (onClick != null) {
         Surface(
             onClick = onClick,
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth().yaxcTvFocus(shape),
             enabled = enabled,
             shape = shape,
             color = cardColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             border = cardBorder,
@@ -52,6 +53,7 @@ fun YaxcCard(
             modifier = modifier.fillMaxWidth(),
             shape = shape,
             color = cardColor,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             border = cardBorder,

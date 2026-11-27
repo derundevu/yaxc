@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -54,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -83,6 +85,8 @@ import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcSwitchR
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTabOption
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTabRow
 import io.github.derundevu.yaxc.presentation.designsystem.components.YaxcTopAppBar
+import io.github.derundevu.yaxc.presentation.designsystem.components.isYaxcTv
+import io.github.derundevu.yaxc.presentation.designsystem.components.yaxcTvFocus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,6 +127,7 @@ fun CoreRoutingScreen(
     var actionsExpanded by remember { mutableStateOf(false) }
     var helpVisible by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val tvListState = if (isYaxcTv()) listState else null
     val scope = rememberCoroutineScope()
     val dragHysteresisPx = with(density) { 16.dp.toPx() }
     val itemSpacingPx = with(density) { spacing.md.toPx() }
@@ -153,7 +158,7 @@ fun CoreRoutingScreen(
                 title = textResource(R.string.coreRouting),
                 onBack = onBack,
                 actions = {
-                    IconButton(onClick = { helpVisible = true }) {
+                    IconButton(onClick = { helpVisible = true }, modifier = Modifier.yaxcTvFocus(CircleShape)) {
                         Icon(
                             imageVector = Icons.Outlined.HelpOutline,
                             contentDescription = textResource(R.string.coreRoutingHelp),
@@ -162,7 +167,7 @@ fun CoreRoutingScreen(
                     Box {
                         IconButton(
                             onClick = { actionsExpanded = true },
-                            modifier = Modifier.testTag("core-routing:actions"),
+                            modifier = Modifier.testTag("core-routing:actions").yaxcTvFocus(CircleShape),
                             enabled = !isLoading && !isBusy,
                         ) {
                             Icon(
@@ -324,7 +329,7 @@ fun CoreRoutingScreen(
                 FilledTonalButton(
                     onClick = onAddRule,
                     enabled = !isLoading && !isBusy,
-                    modifier = Modifier.widthIn(min = 160.dp),
+                    modifier = Modifier.widthIn(min = 160.dp).yaxcTvFocus(),
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Add,
@@ -369,7 +374,9 @@ fun CoreRoutingScreen(
                         enabled = !isLoading && !isBusy,
                         index = modelIndex,
                         total = rules.size,
-                        onMove = { onMoveRule(modelIndex, it) },
+                        onMove = { to ->
+                            moveRoutingItem(tvListState, rule.id, to - modelIndex) { onMoveRule(modelIndex, to) }
+                        },
                         dragModifier = reorder.headerModifier(rule.id, ruleKeys, !isLoading && !isBusy, onMove = onMoveRule),
                         modifier = routingReorderItemModifier(reorder, rule.id)
                             .fillMaxWidth()
@@ -438,9 +445,25 @@ private fun CoreRoutingRuleCard(
         animationSpec = tween(durationMillis = 240),
         label = "routing_rule_expand_rotation",
     )
+    val television = isYaxcTv()
     val ruleName = rule.name.ifBlank { textResource(R.string.routingRuleName) }
     val moveUp = textResource(R.string.liveRoutingMoveUp, ruleName)
     val moveDown = textResource(R.string.liveRoutingMoveDown, ruleName)
+    val headerTag = "core-routing:rule-header:${rule.id}"
+    val expansionLabel = if (television) {
+        textResource(if (isExpanded) R.string.liveRoutingCollapse else R.string.liveRoutingExpand)
+    } else null
+    val canReorder = enabled && !reorderActive
+    val expandHeader = Modifier
+        .yaxcTvFocus()
+        .clip(MaterialTheme.shapes.medium)
+        .clickable(onClickLabel = expansionLabel, onClick = onToggleExpanded)
+        .semantics {
+            customActions = if (canReorder) buildList {
+                if (index > 0) add(CustomAccessibilityAction(moveUp) { onMove(index - 1); true })
+                if (index in 0 until total - 1) add(CustomAccessibilityAction(moveDown) { onMove(index + 1); true })
+            } else emptyList()
+        }
 
     YaxcCard(
         modifier = modifier.then(
@@ -456,46 +479,59 @@ private fun CoreRoutingRuleCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("core-routing:rule-header:${rule.id}")
+                    .then(if (television) Modifier else Modifier.testTag(headerTag))
                     .then(dragModifier)
-                    .clickable(onClick = onToggleExpanded)
-                    .semantics {
-                        customActions = if (enabled) buildList {
-                            if (index > 0) add(CustomAccessibilityAction(moveUp) { onMove(index - 1); true })
-                            if (index < total - 1) add(CustomAccessibilityAction(moveDown) { onMove(index + 1); true })
-                        } else emptyList()
-                    },
+                    .then(if (television) Modifier else expandHeader),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
+                Row(
+                    modifier = Modifier.weight(1f)
+                        .then(if (television) Modifier.testTag(headerTag).then(expandHeader) else Modifier),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = rule.name.ifBlank { textResource(R.string.routingRuleName) },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = buildRuleSummary(rule),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = YaxcTheme.extendedColors.textMuted,
-                        maxLines = 1,
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = ruleName,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = buildRuleSummary(rule),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = YaxcTheme.extendedColors.textMuted,
+                            maxLines = 1,
+                        )
+                    }
+                    if (television) {
+                        Icon(
+                            Icons.Outlined.UnfoldMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.graphicsLayer { rotationZ = expandRotation },
+                        )
+                    }
+                }
+                if (television) {
+                    RoutingMoveButtons(index, total, canReorder, moveUp, moveDown, onMove)
                 }
                 Switch(
                     checked = rule.enabled,
                     onCheckedChange = onToggleEnabled,
+                    modifier = Modifier.yaxcTvFocus(CircleShape),
                 )
-                YaxcActionBubble(
-                    icon = Icons.Outlined.UnfoldMore,
-                    onClick = onToggleExpanded,
-                    modifier = Modifier.graphicsLayer { rotationZ = expandRotation },
-                )
+                if (!television) {
+                    YaxcActionBubble(
+                        icon = Icons.Outlined.UnfoldMore,
+                        onClick = onToggleExpanded,
+                        modifier = Modifier.graphicsLayer { rotationZ = expandRotation },
+                    )
+                }
                 YaxcActionBubble(
                     icon = Icons.Outlined.DeleteOutline,
                     onClick = onDelete,
+                    contentDescription = textResource(R.string.liveRoutingDeleteRule),
                 )
             }
 
